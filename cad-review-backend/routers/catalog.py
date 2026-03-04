@@ -126,25 +126,46 @@ def update_catalog(project_id: str, request: CatalogUpdateRequest, db: Session =
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
-    
+
     existing_items = db.query(Catalog).filter(Catalog.project_id == project_id).all()
-    for item in existing_items:
-        db.delete(item)
-    
+    existing_map = {str(item.id): item for item in existing_items}
+
+    has_locked_items = any(item.status == "locked" for item in existing_items)
+    default_status = "locked" if has_locked_items else "pending"
+
+    incoming_ids = set()
     for idx, item_data in enumerate(request.items):
-        catalog_item = Catalog(
-            project_id=project_id,
-            sheet_no=item_data.get("sheet_no", ""),
-            sheet_name=item_data.get("sheet_name", ""),
-            version=item_data.get("version", ""),
-            date=item_data.get("date", ""),
-            status="pending",
-            sort_order=idx
-        )
-        db.add(catalog_item)
-    
+        item_id = item_data.get("id")
+        item_id = str(item_id) if item_id is not None else None
+        if item_id and item_id in existing_map:
+            catalog_item = existing_map[item_id]
+            incoming_ids.add(item_id)
+            catalog_item.sheet_no = item_data.get("sheet_no", "")
+            catalog_item.sheet_name = item_data.get("sheet_name", "")
+            catalog_item.version = item_data.get("version", "")
+            catalog_item.date = item_data.get("date", "")
+            catalog_item.sort_order = idx
+        else:
+            catalog_item = Catalog(
+                project_id=project_id,
+                sheet_no=item_data.get("sheet_no", ""),
+                sheet_name=item_data.get("sheet_name", ""),
+                version=item_data.get("version", ""),
+                date=item_data.get("date", ""),
+                status=default_status,
+                sort_order=idx
+            )
+            db.add(catalog_item)
+
+    for item in existing_items:
+        if str(item.id) not in incoming_ids:
+            db.delete(item)
+
+    from services.cache_service import recalculate_project_status, increment_cache_version
+    recalculate_project_status(project_id, db)
     db.commit()
-    
+    increment_cache_version(project_id, db)
+
     items = db.query(Catalog).filter(Catalog.project_id == project_id).order_by(Catalog.sort_order).all()
     return items
 

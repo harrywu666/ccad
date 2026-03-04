@@ -13,7 +13,7 @@ import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +74,14 @@ def _default_layout_payload(dwg_name: str, layout_name: str, sheet_no: str, shee
         "data_version": 1,
         "scale": "1:100",
         "model_range": {"min": [0.0, 0.0], "max": [10000.0, 8000.0]},
+        "viewports": [],
         "dimensions": [],
+        "pseudo_texts": [],
         "indexes": [],
+        "title_blocks": [],
         "materials": [],
         "material_table": [],
+        "layers": [],
     }
 
 
@@ -97,10 +101,14 @@ def _normalize_layout_payload(data: Dict[str, Any], dwg_name: str) -> Dict[str, 
     payload["layout_name"] = layout_name or payload["layout_name"]
     payload["sheet_no"] = str(payload.get("sheet_no") or sheet_no)
     payload["sheet_name"] = str(payload.get("sheet_name") or sheet_name)
+    payload["viewports"] = payload.get("viewports") or []
     payload["dimensions"] = payload.get("dimensions") or []
+    payload["pseudo_texts"] = payload.get("pseudo_texts") or []
     payload["indexes"] = payload.get("indexes") or []
+    payload["title_blocks"] = payload.get("title_blocks") or []
     payload["materials"] = payload.get("materials") or []
     payload["material_table"] = payload.get("material_table") or []
+    payload["layers"] = payload.get("layers") or []
     return payload
 
 
@@ -127,10 +135,14 @@ def _parse_layout_json(json_path: Path, dwg_name: str) -> Dict[str, Any]:
         "sheet_no": payload.get("sheet_no", ""),
         "sheet_name": payload.get("sheet_name", ""),
         "json_path": str(json_path),
+        "viewports": payload.get("viewports", []),
         "dimensions": payload.get("dimensions", []),
+        "pseudo_texts": payload.get("pseudo_texts", []),
         "indexes": payload.get("indexes", []),
+        "title_blocks": payload.get("title_blocks", []),
         "materials": payload.get("materials", []),
         "material_table": payload.get("material_table", []),
+        "layers": payload.get("layers", []),
     }
 
 
@@ -270,7 +282,10 @@ def real_extract_dwg_data(dwg_path: str, output_dir: str) -> List[Dict[str, Any]
         if proc.stdout.strip():
             logger.info("CAD插件输出: %s", proc.stdout.strip()[:500])
     else:
-        logger.warning("未配置 CAD_PLUGIN_EXTRACTOR_CMD，尝试直接收集已有布局JSON")
+        from services.autocad_com_service import extract_multiple_dwgs_with_com
+
+        logger.info("未配置 CAD_PLUGIN_EXTRACTOR_CMD，改用内置AutoCAD COM自动化")
+        extract_multiple_dwgs_with_com([dwg_path], output_dir)
 
     results = _collect_layout_jsons(dwg_path, output_dir)
     logger.info("真实DWG提取收集完成: dwg=%s layouts=%s", Path(dwg_path).name, len(results))
@@ -289,3 +304,45 @@ def extract_dwg_data(dwg_path: str, output_dir: str) -> List[Dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("真实DWG提取失败，回退mock: %s", str(exc))
         return mock_extract_dwg_data(dwg_path, output_dir)
+
+
+def extract_dwg_batch_data(dwg_paths: Iterable[str], output_dir: str) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    批量提取DWG布局数据。
+    返回：{dwg_path: [layout_json_info, ...]}
+    """
+    resolved_paths = [str(Path(p).resolve()) for p in dwg_paths if str(p).strip()]
+    result_map: Dict[str, List[Dict[str, Any]]] = {p: [] for p in resolved_paths}
+    if not resolved_paths:
+        return result_map
+
+    if platform.system() != "Windows":
+        for p in resolved_paths:
+            result_map[p] = mock_extract_dwg_data(p, output_dir)
+        return result_map
+
+    cmd_template = os.getenv("CAD_PLUGIN_EXTRACTOR_CMD", "").strip()
+    if cmd_template:
+        for p in resolved_paths:
+            try:
+                result_map[p] = real_extract_dwg_data(p, output_dir)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("DWG提取失败(回退mock): %s (%s)", p, str(exc))
+                result_map[p] = mock_extract_dwg_data(p, output_dir)
+        return result_map
+
+    try:
+        from services.autocad_com_service import extract_multiple_dwgs_with_com
+
+        extract_multiple_dwgs_with_com(resolved_paths, output_dir)
+        for p in resolved_paths:
+            result_map[p] = _collect_layout_jsons(p, output_dir)
+            if not result_map[p]:
+                logger.warning("COM未产出布局JSON，回退mock: %s", p)
+                result_map[p] = mock_extract_dwg_data(p, output_dir)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("批量COM提取失败，全部回退mock: %s", str(exc))
+        for p in resolved_paths:
+            result_map[p] = mock_extract_dwg_data(p, output_dir)
+
+    return result_map

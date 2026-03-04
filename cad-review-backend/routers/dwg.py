@@ -225,8 +225,7 @@ async def upload_dwg(project_id: str, files: List[UploadFile] = File(...), db: S
     matched_layouts = 0
     unmatched_layouts = 0
 
-    from services.cad_service import extract_dwg_data
-
+    dwg_file_infos: List[Dict[str, str]] = []
     for file in files:
         file_name = file.filename or ""
         if not file_name.lower().endswith(".dwg"):
@@ -237,14 +236,23 @@ async def upload_dwg(project_id: str, files: List[UploadFile] = File(...), db: S
         with open(dwg_path, "wb") as f:
             content = await file.read()
             f.write(content)
+        dwg_file_infos.append({"file_name": file_name, "path": str(dwg_path)})
 
-        logger.info("开始提取DWG: %s", str(dwg_path))
-        try:
-            layout_jsons = extract_dwg_data(str(dwg_path), str(json_dir))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("DWG提取失败: %s (%s)", file_name, str(exc))
-            layout_jsons = []
+    from services.cad_service import extract_dwg_batch_data
 
+    logger.info("批量DWG提取开始: files=%s", len(dwg_file_infos))
+    extracted_by_file = extract_dwg_batch_data(
+        dwg_paths=[item["path"] for item in dwg_file_infos],
+        output_dir=str(json_dir),
+    )
+    logger.info("批量DWG提取完成: files=%s", len(dwg_file_infos))
+
+    for dwg_item in dwg_file_infos:
+        file_name = dwg_item["file_name"]
+        dwg_path = dwg_item["path"]
+
+        logger.info("处理DWG提取结果: %s", str(dwg_path))
+        layout_jsons = extracted_by_file.get(str(Path(dwg_path).resolve()), [])
         logger.info("DWG提取完成: file=%s layouts=%s", file_name, len(layout_jsons))
 
         for json_info in layout_jsons:
@@ -254,10 +262,14 @@ async def upload_dwg(project_id: str, files: List[UploadFile] = File(...), db: S
             sheet_no = str(json_info.get("sheet_no", "")).strip()
             sheet_name = str(json_info.get("sheet_name", "")).strip()
             json_path = str(json_info.get("json_path", "")).strip()
+            viewports = json_info.get("viewports", []) or []
             dimensions = json_info.get("dimensions", []) or []
+            pseudo_texts = json_info.get("pseudo_texts", []) or []
             indexes = json_info.get("indexes", []) or []
+            title_blocks = json_info.get("title_blocks", []) or []
             materials = json_info.get("materials", []) or []
             material_table = json_info.get("material_table", []) or []
+            layers = json_info.get("layers", []) or []
 
             match_result = _pick_catalog_item(
                 sheet_no=sheet_no,
@@ -312,7 +324,9 @@ async def upload_dwg(project_id: str, files: List[UploadFile] = File(...), db: S
 
             summary = (
                 f"DWG:{file_name} 布局:{layout_name} "
-                f"标注:{len(dimensions)} 索引:{len(indexes)} 材料:{len(materials)} 材料表:{len(material_table)}"
+                f"视口:{len(viewports)} 标注:{len(dimensions)} 伪标注:{len(pseudo_texts)} "
+                f"索引:{len(indexes)} 标题栏:{len(title_blocks)} 材料:{len(materials)} "
+                f"材料表:{len(material_table)} 图层:{len(layers)}"
             )
             new_json = JsonData(
                 project_id=project_id,

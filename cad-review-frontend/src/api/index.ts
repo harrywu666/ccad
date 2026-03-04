@@ -57,8 +57,12 @@ export const uploadDrawings = (projectId: string, file: File) => {
     `/api/projects/${projectId}/drawings/upload`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }
   ).then(res => res.data);
 };
-export const updateDrawing = (projectId: string, drawingId: string, catalogId: string) =>
-  api.put<{ success: boolean }>(`/api/projects/${projectId}/drawings/${drawingId}`, { catalog_id: catalogId })
+export const updateDrawing = (
+  projectId: string,
+  drawingId: string,
+  data: { catalog_id?: string; sheet_no?: string; sheet_name?: string }
+) =>
+  api.put<{ success: boolean }>(`/api/projects/${projectId}/drawings/${drawingId}`, data)
     .then(res => res.data);
 export const deleteDrawings = (projectId: string) =>
   api.delete(`/api/projects/${projectId}/drawings`);

@@ -4,7 +4,7 @@ import {
   ArrowLeft, Upload, FileText, Image, Database,
   CheckCircle, AlertCircle, Download, Play, RefreshCw,
   Check, X, FileSearch, ArrowRight, LayoutDashboard,
-  CloudUpload, FileCode2
+  CloudUpload, FileCode2, Pencil, Save, Plus, Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import * as api from '@/api';
 import type { Project, Category, CatalogItem, Drawing, JsonData, AuditResult, AuditStatus } from '@/types';
@@ -34,6 +35,12 @@ const statusMap: Record<string, { label: string; variant: 'default' | 'secondary
   done: { label: '审核完成', variant: 'success' },
 };
 
+type CatalogDraftItem = {
+  id?: string;
+  sheet_no: string;
+  sheet_name: string;
+};
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -47,6 +54,14 @@ export default function ProjectDetail() {
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [isCatalogEditing, setIsCatalogEditing] = useState(false);
+  const [catalogDraft, setCatalogDraft] = useState<CatalogDraftItem[]>([]);
+  const [catalogSaving, setCatalogSaving] = useState(false);
+  const [catalogEditError, setCatalogEditError] = useState('');
+  const [editingDrawingId, setEditingDrawingId] = useState<string | null>(null);
+  const [drawingDraft, setDrawingDraft] = useState({ catalog_id: '' });
+  const [drawingSaveLoading, setDrawingSaveLoading] = useState(false);
+  const [drawingEditError, setDrawingEditError] = useState('');
 
   useEffect(() => {
     if (id) loadData();
@@ -68,6 +83,18 @@ export default function ProjectDetail() {
       setProject(proj);
       setCategories(cats);
       setCatalog(cat);
+      setCatalogDraft(
+        cat.map(item => ({
+          id: item.id,
+          sheet_no: item.sheet_no || '',
+          sheet_name: item.sheet_name || '',
+        }))
+      );
+      setIsCatalogEditing(false);
+      setCatalogEditError('');
+      setEditingDrawingId(null);
+      setDrawingDraft({ catalog_id: '' });
+      setDrawingEditError('');
       setDrawings(drws);
       setJsonData(js);
       setAuditStatus(status);
@@ -109,6 +136,77 @@ export default function ProjectDetail() {
     }
   };
 
+  const startManualCatalogEdit = () => {
+    setCatalogEditError('');
+    if (catalog.length > 0) {
+      setCatalogDraft(
+        catalog.map(item => ({
+          id: item.id,
+          sheet_no: item.sheet_no || '',
+          sheet_name: item.sheet_name || '',
+        }))
+      );
+    } else {
+      setCatalogDraft([{ sheet_no: '', sheet_name: '' }]);
+    }
+    setIsCatalogEditing(true);
+  };
+
+  const cancelManualCatalogEdit = () => {
+    setCatalogDraft(
+      catalog.map(item => ({
+        id: item.id,
+        sheet_no: item.sheet_no || '',
+        sheet_name: item.sheet_name || '',
+      }))
+    );
+    setCatalogEditError('');
+    setIsCatalogEditing(false);
+  };
+
+  const updateCatalogDraftField = (index: number, field: 'sheet_no' | 'sheet_name', value: string) => {
+    setCatalogDraft(prev =>
+      prev.map((row, i) => (i === index ? { ...row, [field]: value } : row))
+    );
+  };
+
+  const addCatalogDraftRow = () => {
+    setCatalogDraft(prev => [...prev, { sheet_no: '', sheet_name: '' }]);
+  };
+
+  const removeCatalogDraftRow = (index: number) => {
+    setCatalogDraft(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const saveManualCatalogEdit = async () => {
+    if (!id) return;
+
+    const items = catalogDraft
+      .map(row => ({
+        id: row.id,
+        sheet_no: row.sheet_no.trim(),
+        sheet_name: row.sheet_name.trim(),
+      }))
+      .filter(row => row.sheet_no || row.sheet_name);
+
+    if (items.length === 0) {
+      setCatalogEditError('请至少保留一条目录数据。');
+      return;
+    }
+
+    setCatalogSaving(true);
+    setCatalogEditError('');
+    try {
+      await api.updateCatalog(id, items);
+      await loadData();
+    } catch (error) {
+      console.error('保存目录失败:', error);
+      setCatalogEditError('保存失败，请稍后重试。');
+    } finally {
+      setCatalogSaving(false);
+    }
+  };
+
   const handleUploadDrawings = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !id) return;
@@ -120,6 +218,44 @@ export default function ProjectDetail() {
       console.error('上传图纸失败:', error);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const startEditDrawing = (drawing: Drawing) => {
+    setEditingDrawingId(drawing.id);
+    setDrawingDraft({
+      catalog_id: drawing.catalog_id || '',
+    });
+    setDrawingEditError('');
+  };
+
+  const cancelEditDrawing = () => {
+    setEditingDrawingId(null);
+    setDrawingDraft({ catalog_id: '' });
+    setDrawingEditError('');
+  };
+
+  const saveEditDrawing = async (drawingId: string) => {
+    if (!id) return;
+
+    setDrawingSaveLoading(true);
+    setDrawingEditError('');
+    try {
+      if (!drawingDraft.catalog_id) {
+        setDrawingEditError('请选择要匹配的目录项。');
+        setDrawingSaveLoading(false);
+        return;
+      }
+
+      await api.updateDrawing(id, drawingId, {
+        catalog_id: drawingDraft.catalog_id,
+      });
+      await loadData();
+    } catch (error) {
+      console.error('手动修改图纸失败:', error);
+      setDrawingEditError('保存失败，请稍后重试。');
+    } finally {
+      setDrawingSaveLoading(false);
     }
   };
 
@@ -189,6 +325,9 @@ export default function ProjectDetail() {
 
   const category = categories.find(c => c.id === project?.category);
   const statusInfo = statusMap[project?.status || 'new'];
+  const isCatalogLocked = catalog.length > 0 && catalog[0]?.status === 'locked';
+  const currentCatalogRows = isCatalogEditing ? catalogDraft : catalog;
+  const unmatchedDrawings = drawings.filter(item => item.status !== 'matched');
 
   return (
     <div className="min-h-screen bg-gray-50/50 dark:bg-zinc-950 relative overflow-x-hidden pb-12">
@@ -232,17 +371,16 @@ export default function ProjectDetail() {
             {steps.map((step, index) => {
               const active = isStepActive(index);
               const complete = isStepComplete(index);
-              const disabled = index > currentStep;
+              const future = index > currentStep;
 
               return (
                 <div key={step.id} className="flex flex-col items-center relative gap-3 group px-4 z-10 w-1/5">
                   <button
-                    onClick={() => !disabled && setCurrentStep(index)}
-                    disabled={disabled}
+                    onClick={() => setCurrentStep(index)}
                     className={`
                       relative flex items-center justify-center w-12 h-12 rounded-full transition-all duration-500
-                      ${disabled ? 'cursor-not-allowed opacity-50 bg-gray-100 dark:bg-zinc-900 border-2 border-transparent' : ''}
-                      ${!disabled && !active && !complete ? 'bg-white dark:bg-zinc-800 border-2 border-gray-200 dark:border-zinc-700 shadow-sm hover-lift' : ''}
+                      ${future ? 'bg-gray-50 dark:bg-zinc-900 border-2 border-gray-200 dark:border-zinc-800 shadow-sm hover:border-primary/40' : ''}
+                      ${!future && !active && !complete ? 'bg-white dark:bg-zinc-800 border-2 border-gray-200 dark:border-zinc-700 shadow-sm hover-lift' : ''}
                       ${active ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/30 ring-4 ring-primary/20 scale-110' : ''}
                       ${complete && !active ? 'bg-success text-success-foreground shadow-lg shadow-success/20 hover:scale-105 transition-transform' : ''}
                     `}
@@ -250,7 +388,7 @@ export default function ProjectDetail() {
                     {complete && !active ? <Check className="h-6 w-6" /> : <step.icon className={`h-5 w-5 ${active ? 'animate-pulse' : ''}`} />}
                   </button>
                   <div className="text-center">
-                    <div className={`text-sm font-bold transition-colors ${active ? 'text-primary' : complete ? 'text-success' : disabled ? 'text-muted-foreground' : 'text-foreground'}`}>
+                    <div className={`text-sm font-bold transition-colors ${active ? 'text-primary' : complete ? 'text-success' : future ? 'text-muted-foreground' : 'text-foreground'}`}>
                       {step.name}
                     </div>
                     <div className="text-xs text-muted-foreground hidden lg:block mt-1 w-24 mx-auto leading-tight opacity-70">
@@ -261,6 +399,9 @@ export default function ProjectDetail() {
               );
             })}
           </div>
+          <p className="text-xs text-muted-foreground text-center mt-4">
+            步骤支持任意点击回看与回退；已上传图纸与数据不会因回退而删除。
+          </p>
         </div>
 
         {/* Content Area */}
@@ -279,45 +420,111 @@ export default function ProjectDetail() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6 pt-6 px-10">
-                {catalog.length === 0 ? (
+                {catalog.length === 0 && !isCatalogEditing ? (
                   <div className="group relative border-2 border-dashed border-primary/30 dark:border-primary/20 rounded-2xl p-16 text-center bg-primary/5 hover:bg-primary/10 transition-colors duration-300">
                     <CloudUpload className="h-16 w-16 mx-auto text-primary/60 mb-6 group-hover:scale-110 transition-transform duration-500" />
                     <h3 className="text-xl font-medium mb-2 text-foreground">拖拽目录图片到此处</h3>
                     <p className="text-muted-foreground mb-8">或点击下方按钮浏览本地文件 (仅支持 PNG/JPG)</p>
-                    <Label className="cursor-pointer">
-                      <Input type="file" accept="image/*" className="hidden" onChange={handleUploadCatalog} disabled={uploading} />
-                      <Button asChild size="lg" className="rounded-full shadow-lg shadow-primary/25 hover-lift px-8">
-                        <span>{uploading ? <><RefreshCw className="mr-2 h-5 w-5 animate-spin" /> 处理中...</> : '选择目录图片'}</span>
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                      <Label className="cursor-pointer">
+                        <Input type="file" accept="image/*" className="hidden" onChange={handleUploadCatalog} disabled={uploading} />
+                        <Button asChild size="lg" className="rounded-full shadow-lg shadow-primary/25 hover-lift px-8">
+                          <span>{uploading ? <><RefreshCw className="mr-2 h-5 w-5 animate-spin" /> 处理中...</> : '选择目录图片'}</span>
+                        </Button>
+                      </Label>
+                      <Button variant="outline" size="lg" className="rounded-full" onClick={startManualCatalogEdit}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        手动编辑目录
                       </Button>
-                    </Label>
+                    </div>
                   </div>
-                ) : catalog[0]?.status === 'locked' ? (
+                ) : isCatalogLocked ? (
                   <div className="space-y-6">
-                    <div className="flex items-center gap-3 bg-success/10 border border-success/20 p-4 rounded-xl">
-                      <CheckCircle className="h-6 w-6 text-success" />
-                      <div>
-                        <p className="text-success font-semibold text-lg">目录已成功确认并锁定</p>
-                        <p className="text-success-foreground/70 text-sm">共识别 {catalog.length} 条条目</p>
+                    <div className="flex items-center justify-between gap-3 bg-success/10 border border-success/20 p-4 rounded-xl">
+                      <div className="flex items-center gap-3">
+                        <CheckCircle className="h-6 w-6 text-success" />
+                        <div>
+                          <p className="text-success font-semibold text-lg">目录已成功确认并锁定</p>
+                          <p className="text-success-foreground/70 text-sm">共识别 {catalog.length} 条条目</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isCatalogEditing ? (
+                          <>
+                            <Button variant="outline" onClick={addCatalogDraftRow} disabled={catalogSaving}>
+                              <Plus className="h-4 w-4 mr-1.5" />
+                              新增行
+                            </Button>
+                            <Button variant="ghost" onClick={cancelManualCatalogEdit} disabled={catalogSaving}>
+                              取消
+                            </Button>
+                            <Button onClick={saveManualCatalogEdit} disabled={catalogSaving} className="bg-primary hover:bg-primary/90">
+                              {catalogSaving ? <RefreshCw className="h-4 w-4 mr-1.5 animate-spin" /> : <Save className="h-4 w-4 mr-1.5" />}
+                              保存修改
+                            </Button>
+                          </>
+                        ) : (
+                          <Button variant="outline" onClick={startManualCatalogEdit}>
+                            <Pencil className="h-4 w-4 mr-1.5" />
+                            二次修改目录
+                          </Button>
+                        )}
                       </div>
                     </div>
+                    {catalogEditError && (
+                      <p className="text-sm text-red-600 dark:text-red-400">{catalogEditError}</p>
+                    )}
                     <Card className="shadow-inner border-gray-100 dark:border-zinc-800">
                       <ScrollArea className="h-[400px]">
                         <table className="w-full text-sm text-left">
                           <thead className="bg-gray-50 dark:bg-zinc-900 sticky top-0 border-b">
                             <tr>
+                              <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300 w-20">序号</th>
                               <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300">图号</th>
                               <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300">图名</th>
-                              <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300">版本</th>
-                              <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300">日期</th>
+                              {isCatalogEditing && <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300 w-24 text-center">操作</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
-                            {catalog.map(item => (
-                              <tr key={item.id} className="hover:bg-gray-50/50 dark:hover:bg-zinc-900/50 transition-colors">
-                                <td className="px-6 py-3 font-medium text-primary">{item.sheet_no}</td>
-                                <td className="px-6 py-3">{item.sheet_name}</td>
-                                <td className="px-6 py-3 text-muted-foreground">{item.version}</td>
-                                <td className="px-6 py-3 text-muted-foreground">{item.date}</td>
+                            {currentCatalogRows.map((item, index) => (
+                              <tr key={item.id || `locked-draft-${index}`} className="hover:bg-gray-50/50 dark:hover:bg-zinc-900/50 transition-colors">
+                                <td className="px-6 py-3 font-mono text-muted-foreground">{index + 1}</td>
+                                <td className="px-6 py-3">
+                                  {isCatalogEditing ? (
+                                    <Input
+                                      value={item.sheet_no || ''}
+                                      onChange={e => updateCatalogDraftField(index, 'sheet_no', e.target.value)}
+                                      placeholder="输入图号"
+                                      className="h-9"
+                                    />
+                                  ) : (
+                                    <span className="font-medium text-primary">{item.sheet_no || '-'}</span>
+                                  )}
+                                </td>
+                                <td className="px-6 py-3">
+                                  {isCatalogEditing ? (
+                                    <Input
+                                      value={item.sheet_name || ''}
+                                      onChange={e => updateCatalogDraftField(index, 'sheet_name', e.target.value)}
+                                      placeholder="输入图名"
+                                      className="h-9"
+                                    />
+                                  ) : (
+                                    item.sheet_name || '-'
+                                  )}
+                                </td>
+                                {isCatalogEditing && (
+                                  <td className="px-6 py-3 text-center">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => removeCatalogDraftRow(index)}
+                                      className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </td>
+                                )}
                               </tr>
                             ))}
                           </tbody>
@@ -331,33 +538,97 @@ export default function ProjectDetail() {
                       <div>
                         <h3 className="text-lg font-semibold flex items-center">
                           <CheckCircle className="text-success mr-2 h-5 w-5" />
-                          识别成功
+                          {catalog.length > 0 ? '识别成功' : '手动编辑目录'}
                         </h3>
-                        <p className="text-muted-foreground text-sm mt-1">系统已提取 {catalog.length} 条数据，请确认无误后锁定。</p>
+                        <p className="text-muted-foreground text-sm mt-1">
+                          {catalog.length > 0
+                            ? `系统已提取 ${catalog.length} 条数据，请确认无误后锁定。`
+                            : '可手动新增或修改目录条目，保存后再锁定。'}
+                        </p>
                       </div>
-                      <Button onClick={handleLockCatalog} disabled={uploading} size="lg" className="rounded-full shadow-lg shadow-success/20 bg-success hover:bg-success/90 text-white">
-                        <Check className="h-5 w-5 mr-2" />
-                        锁定并前往下一步
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        {isCatalogEditing ? (
+                          <>
+                            <Button variant="outline" onClick={addCatalogDraftRow} disabled={catalogSaving}>
+                              <Plus className="h-4 w-4 mr-1.5" />
+                              新增行
+                            </Button>
+                            <Button variant="ghost" onClick={cancelManualCatalogEdit} disabled={catalogSaving}>
+                              取消
+                            </Button>
+                            <Button onClick={saveManualCatalogEdit} disabled={catalogSaving} className="bg-primary hover:bg-primary/90">
+                              {catalogSaving ? <RefreshCw className="h-4 w-4 mr-1.5 animate-spin" /> : <Save className="h-4 w-4 mr-1.5" />}
+                              保存编辑
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button variant="outline" onClick={startManualCatalogEdit}>
+                              <Pencil className="h-4 w-4 mr-1.5" />
+                              手动编辑目录
+                            </Button>
+                            <Button onClick={handleLockCatalog} disabled={uploading || catalog.length === 0} size="lg" className="rounded-full shadow-lg shadow-success/20 bg-success hover:bg-success/90 text-white">
+                              <Check className="h-5 w-5 mr-2" />
+                              锁定并前往下一步
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     </div>
+                    {catalogEditError && (
+                      <p className="text-sm text-red-600 dark:text-red-400">{catalogEditError}</p>
+                    )}
                     <Card className="shadow-inner border-gray-100 dark:border-zinc-800">
                       <ScrollArea className="h-[400px]">
                         <table className="w-full text-sm text-left">
                           <thead className="bg-gray-50 dark:bg-zinc-900 sticky top-0 border-b">
                             <tr>
+                              <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300 w-20">序号</th>
                               <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300">图号</th>
                               <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300">图名</th>
-                              <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300">版本</th>
-                              <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300">日期</th>
+                              {isCatalogEditing && <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300 w-24 text-center">操作</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
-                            {catalog.map(item => (
-                              <tr key={item.id} className="hover:bg-gray-50/50 dark:hover:bg-zinc-900/50 transition-colors">
-                                <td className="px-6 py-3 font-medium text-primary">{item.sheet_no}</td>
-                                <td className="px-6 py-3">{item.sheet_name}</td>
-                                <td className="px-6 py-3 text-muted-foreground">{item.version}</td>
-                                <td className="px-6 py-3 text-muted-foreground">{item.date}</td>
+                            {currentCatalogRows.map((item, index) => (
+                              <tr key={item.id || `draft-${index}`} className="hover:bg-gray-50/50 dark:hover:bg-zinc-900/50 transition-colors">
+                                <td className="px-6 py-3 font-mono text-muted-foreground">{index + 1}</td>
+                                <td className="px-6 py-3">
+                                  {isCatalogEditing ? (
+                                    <Input
+                                      value={item.sheet_no || ''}
+                                      onChange={e => updateCatalogDraftField(index, 'sheet_no', e.target.value)}
+                                      placeholder="输入图号"
+                                      className="h-9"
+                                    />
+                                  ) : (
+                                    <span className="font-medium text-primary">{item.sheet_no || '-'}</span>
+                                  )}
+                                </td>
+                                <td className="px-6 py-3">
+                                  {isCatalogEditing ? (
+                                    <Input
+                                      value={item.sheet_name || ''}
+                                      onChange={e => updateCatalogDraftField(index, 'sheet_name', e.target.value)}
+                                      placeholder="输入图名"
+                                      className="h-9"
+                                    />
+                                  ) : (
+                                    item.sheet_name || '-'
+                                  )}
+                                </td>
+                                {isCatalogEditing && (
+                                  <td className="px-6 py-3 text-center">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => removeCatalogDraftRow(index)}
+                                      className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </td>
+                                )}
                               </tr>
                             ))}
                           </tbody>
@@ -383,17 +654,32 @@ export default function ProjectDetail() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-8 pt-6 px-10">
-                <div className="group relative border-2 border-dashed border-gray-300 dark:border-zinc-700 rounded-2xl p-12 text-center bg-gray-50/50 dark:bg-zinc-900/50 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors duration-300">
-                  <FileText className="h-12 w-12 mx-auto text-gray-400 mb-4 group-hover:-translate-y-2 group-hover:text-primary transition-all duration-300" />
-                  <p className="text-lg font-medium mb-2">拖拽 PDF 图册至此</p>
-                  <p className="text-sm text-gray-500 mb-6">确保文件大小在合理范围内</p>
-                  <Label className="cursor-pointer">
-                    <Input type="file" accept="application/pdf" className="hidden" onChange={handleUploadDrawings} disabled={uploading} />
-                    <Button asChild className="rounded-full">
-                      <span>{uploading ? <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> 疯狂提取中...</> : '选择 PDF'}</span>
-                    </Button>
-                  </Label>
-                </div>
+                {drawings.length === 0 ? (
+                  <div className="group relative border-2 border-dashed border-gray-300 dark:border-zinc-700 rounded-2xl p-12 text-center bg-gray-50/50 dark:bg-zinc-900/50 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors duration-300">
+                    <FileText className="h-12 w-12 mx-auto text-gray-400 mb-4 group-hover:-translate-y-2 group-hover:text-primary transition-all duration-300" />
+                    <p className="text-lg font-medium mb-2">拖拽 PDF 图册至此</p>
+                    <p className="text-sm text-gray-500 mb-6">确保文件大小在合理范围内</p>
+                    <Label className="cursor-pointer">
+                      <Input type="file" accept="application/pdf" className="hidden" onChange={handleUploadDrawings} disabled={uploading} />
+                      <Button asChild className="rounded-full">
+                        <span>{uploading ? <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> 疯狂提取中...</> : '选择 PDF'}</span>
+                      </Button>
+                    </Label>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between rounded-xl border border-blue-200/50 bg-blue-50/40 dark:bg-blue-950/20 dark:border-blue-900/50 px-4 py-3">
+                    <div className="flex items-center gap-2 text-sm text-blue-800 dark:text-blue-300">
+                      <CheckCircle className="h-4 w-4" />
+                      已上传 PDF 并提取 {drawings.length} 张图纸
+                    </div>
+                    <Label className="cursor-pointer">
+                      <Input type="file" accept="application/pdf" className="hidden" onChange={handleUploadDrawings} disabled={uploading} />
+                      <Button asChild variant="outline" size="sm" className="rounded-full">
+                        <span>{uploading ? <><RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> 重新上传中...</> : '重新上传 PDF'}</span>
+                      </Button>
+                    </Label>
+                  </div>
+                )}
 
                 {drawings.length > 0 && (
                   <div className="space-y-4 animate-in fade-in">
@@ -402,7 +688,13 @@ export default function ProjectDetail() {
                         <CheckCircle className="text-blue-500 h-5 w-5" />
                         已提取 {drawings.length} 张图纸
                       </h3>
+                      <Badge variant={unmatchedDrawings.length > 0 ? 'warning' : 'success'}>
+                        {unmatchedDrawings.length > 0 ? `待匹配 ${unmatchedDrawings.length} 项` : '全部已匹配'}
+                      </Badge>
                     </div>
+                    {drawingEditError && (
+                      <p className="text-sm text-red-600 dark:text-red-400">{drawingEditError}</p>
+                    )}
                     <Card className="shadow-inner border-gray-100 dark:border-zinc-800 overflow-hidden">
                       <ScrollArea className="h-[300px]">
                         <table className="w-full text-sm text-left">
@@ -411,24 +703,71 @@ export default function ProjectDetail() {
                               <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300 w-16 text-center">页码</th>
                               <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300">图内容识别</th>
                               <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300 text-right">匹配状态</th>
+                              <th className="px-6 py-3 font-semibold text-gray-700 dark:text-gray-300 text-right w-[260px]">操作</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
-                            {drawings.map(item => (
+                            {drawings.map((item, index) => (
                               <tr key={item.id} className="hover:bg-white dark:hover:bg-zinc-800 transition-colors">
                                 <td className="px-6 py-3 text-center font-mono font-medium text-muted-foreground bg-gray-50 dark:bg-zinc-900/50">
-                                  {item.page_index! + 1}
+                                  {(item.page_index ?? index) + 1}
                                 </td>
                                 <td className="px-6 py-3">
-                                  <div className="flex flex-col">
-                                    <span className="font-semibold text-primary">{item.sheet_no || '未识别'}</span>
-                                    <span className="text-muted-foreground">{item.sheet_name || '-'}</span>
-                                  </div>
+                                  {editingDrawingId === item.id ? (
+                                    <div className="space-y-2">
+                                      <div className="flex flex-col">
+                                        <span className="font-semibold text-primary">{item.sheet_no || '未识别'}</span>
+                                        <span className="text-muted-foreground">{item.sheet_name || '-'}</span>
+                                      </div>
+                                      <Select
+                                        value={drawingDraft.catalog_id || undefined}
+                                        onValueChange={value => setDrawingDraft({ catalog_id: value })}
+                                      >
+                                        <SelectTrigger className="h-9 w-full">
+                                          <SelectValue placeholder="选择要匹配的目录项" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {catalog.map((cat, idx) => (
+                                            <SelectItem key={cat.id} value={cat.id}>
+                                              {`${idx + 1}. ${cat.sheet_no || '未编号'} - ${cat.sheet_name || '未命名'}`}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col">
+                                      <span className="font-semibold text-primary">{item.sheet_no || '未识别'}</span>
+                                      <span className="text-muted-foreground">{item.sheet_name || '-'}</span>
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="px-6 py-3 text-right">
                                   <Badge variant={item.status === 'matched' ? 'success' : 'warning'} className="shadow-sm">
                                     {item.status === 'matched' ? '已匹配' : '待匹配'}
                                   </Badge>
+                                </td>
+                                <td className="px-6 py-3 text-right">
+                                  {editingDrawingId === item.id ? (
+                                    <div className="flex items-center justify-end gap-2">
+                                      <Button variant="ghost" size="sm" onClick={cancelEditDrawing} disabled={drawingSaveLoading}>
+                                        取消
+                                      </Button>
+                                      <Button size="sm" onClick={() => saveEditDrawing(item.id)} disabled={drawingSaveLoading || !drawingDraft.catalog_id}>
+                                        {drawingSaveLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : '保存'}
+                                      </Button>
+                                    </div>
+                                  ) : item.status !== 'matched' ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => startEditDrawing(item)}
+                                    >
+                                      手动修改
+                                    </Button>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">-</span>
+                                  )}
                                 </td>
                               </tr>
                             ))}

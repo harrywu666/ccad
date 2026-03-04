@@ -142,6 +142,8 @@ class DrawingResponse(BaseModel):
 class DrawingUpdateRequest(BaseModel):
     """图纸匹配更新请求"""
     catalog_id: Optional[str] = None
+    sheet_no: Optional[str] = None
+    sheet_name: Optional[str] = None
 
 
 @router.get("/projects/{project_id}/drawings", response_model=List[DrawingResponse])
@@ -414,6 +416,12 @@ def update_drawing(
             drawing.sheet_no = catalog.sheet_no
             drawing.sheet_name = catalog.sheet_name
             drawing.status = "matched"
+    elif request:
+        if request.sheet_no is not None:
+            drawing.sheet_no = request.sheet_no.strip()
+        if request.sheet_name is not None:
+            drawing.sheet_name = request.sheet_name.strip()
+        drawing.status = "matched" if drawing.catalog_id else "unmatched"
 
     from services.cache_service import recalculate_project_status
     recalculate_project_status(project_id, db)
