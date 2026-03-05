@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 GRID_COLS = 24
 GRID_ROWS = 17
@@ -30,6 +30,98 @@ def cad_to_global_pct(cad_x: float, cad_y: float, model_range: Dict[str, List[fl
     pct_x = max(0.0, min(100.0, round(pct_x, 1)))
     pct_y = max(0.0, min(100.0, round(pct_y, 1)))
     return pct_x, pct_y
+
+
+def _collect_points(layout_json: Dict) -> List[Tuple[float, float]]:
+    points: List[Tuple[float, float]] = []
+
+    def _append_from(items: List[Dict], key: str) -> None:
+        for item in items or []:
+            pos = item.get(key)
+            if not isinstance(pos, (list, tuple)) or len(pos) < 2:
+                continue
+            try:
+                x = float(pos[0])
+                y = float(pos[1])
+            except (TypeError, ValueError):
+                continue
+            points.append((x, y))
+
+    _append_from(layout_json.get("dimensions", []) or [], "text_position")
+    _append_from(layout_json.get("indexes", []) or [], "position")
+    _append_from(layout_json.get("materials", []) or [], "position")
+    return points
+
+
+def _normalize_range(range_obj: Optional[Dict[str, List[float]]]) -> Optional[Dict[str, List[float]]]:
+    if not isinstance(range_obj, dict):
+        return None
+    mn = range_obj.get("min")
+    mx = range_obj.get("max")
+    if not isinstance(mn, (list, tuple)) or not isinstance(mx, (list, tuple)) or len(mn) < 2 or len(mx) < 2:
+        return None
+    try:
+        x_min = float(mn[0])
+        y_min = float(mn[1])
+        x_max = float(mx[0])
+        y_max = float(mx[1])
+    except (TypeError, ValueError):
+        return None
+    if x_max == x_min or y_max == y_min:
+        return None
+    return {"min": [x_min, y_min], "max": [x_max, y_max]}
+
+
+def _points_bbox(points: List[Tuple[float, float]]) -> Optional[Dict[str, List[float]]]:
+    if len(points) < 2:
+        return None
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    x_min = min(xs)
+    x_max = max(xs)
+    y_min = min(ys)
+    y_max = max(ys)
+    if x_max == x_min:
+        x_min -= 1.0
+        x_max += 1.0
+    if y_max == y_min:
+        y_min -= 1.0
+        y_max += 1.0
+    return {"min": [x_min, y_min], "max": [x_max, y_max]}
+
+
+def _count_in_range(points: List[Tuple[float, float]], range_obj: Dict[str, List[float]]) -> int:
+    x_min, y_min = range_obj["min"]
+    x_max, y_max = range_obj["max"]
+    in_count = 0
+    for x, y in points:
+        if x_min <= x <= x_max and y_min <= y <= y_max:
+            in_count += 1
+    return in_count
+
+
+def _resolve_mapping_range(layout_json: Dict) -> Optional[Dict[str, List[float]]]:
+    """
+    选择用于坐标映射的范围：
+    1) 优先使用 model_range；
+    2) 若大部分实体点不在 model_range 内，说明是布局坐标/模型坐标错位，改用实体点包围盒。
+    """
+    points = _collect_points(layout_json)
+    model_range = _normalize_range(layout_json.get("model_range"))
+    bbox_range = _points_bbox(points)
+
+    if model_range is None:
+        return bbox_range
+    if not points:
+        return model_range
+
+    in_count = _count_in_range(points, model_range)
+    in_ratio = in_count / max(1, len(points))
+
+    # 大多数点不在model_range内：使用实体点范围，避免统一落在边角(0/100)
+    if len(points) >= 4 and in_ratio < 0.35 and bbox_range is not None:
+        return bbox_range
+    return model_range
 
 
 def global_pct_to_grid(pct_x: float, pct_y: float) -> str:
@@ -98,7 +190,7 @@ def enrich_json_with_coordinates(layout_json: Dict) -> Dict:
     - grid
     - in_quadrants
     """
-    model_range = layout_json.get("model_range")
+    model_range = _resolve_mapping_range(layout_json)
     if not isinstance(model_range, dict):
         return layout_json
 

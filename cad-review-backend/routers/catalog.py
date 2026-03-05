@@ -5,18 +5,15 @@
 
 import os
 import shutil
-from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db
 from models import Project, Catalog
+from services.storage_path_service import resolve_project_dir
 
 router = APIRouter()
-
-BASE_DIR = Path.home() / "cad-review"
-
 
 class CatalogItemResponse(BaseModel):
     """目录条目响应模型"""
@@ -56,7 +53,7 @@ async def upload_catalog(project_id: str, file: UploadFile = File(...), db: Sess
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     
-    project_dir = BASE_DIR / "projects" / project_id / "catalog"
+    project_dir = resolve_project_dir(project, ensure=True) / "catalog"
     project_dir.mkdir(parents=True, exist_ok=True)
     
     old_catalog_items = db.query(Catalog).filter(Catalog.project_id == project_id).all()
@@ -203,7 +200,7 @@ def delete_catalog(project_id: str, db: Session = Depends(get_db)):
     for item in items:
         db.delete(item)
     
-    project_dir = BASE_DIR / "projects" / project_id / "catalog"
+    project_dir = resolve_project_dir(project, ensure=False) / "catalog"
     if project_dir.exists():
         shutil.rmtree(project_dir)
     

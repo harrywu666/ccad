@@ -17,6 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 from models import JsonData, AuditResult, Catalog, Drawing, Project
 from services.coordinate_service import cad_to_global_pct, enrich_json_with_coordinates
+from services.storage_path_service import resolve_project_dir
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +252,64 @@ def _norm_index_no(value: Optional[str]) -> str:
     return s
 
 
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_anchor(
+    *,
+    role: str,
+    sheet_no: Optional[str],
+    grid: Optional[str] = None,
+    global_pct: Optional[Dict[str, Any]] = None,
+    confidence: Optional[float] = None,
+    origin: str = "inferred",
+) -> Optional[Dict[str, Any]]:
+    anchor: Dict[str, Any] = {
+        "role": role,
+        "sheet_no": (sheet_no or "").strip(),
+        "grid": (grid or "").strip(),
+        "origin": origin,
+    }
+
+    if global_pct and isinstance(global_pct, dict):
+        x = _safe_float(global_pct.get("x"))
+        y = _safe_float(global_pct.get("y"))
+        if x is not None and y is not None:
+            anchor["global_pct"] = {
+                "x": round(max(0.0, min(100.0, x)), 1),
+                "y": round(max(0.0, min(100.0, y)), 1),
+            }
+
+    if confidence is not None:
+        c = _safe_float(confidence)
+        if c is not None:
+            anchor["confidence"] = round(max(0.0, min(1.0, c)), 3)
+
+    if not anchor["sheet_no"]:
+        return None
+    if "global_pct" not in anchor and not anchor["grid"]:
+        return None
+    return anchor
+
+
+def _to_evidence_json(
+    anchors: List[Dict[str, Any]],
+    *,
+    pair_id: Optional[str] = None,
+    unlocated_reason: Optional[str] = None,
+) -> Optional[str]:
+    payload: Dict[str, Any] = {"anchors": anchors or []}
+    if pair_id:
+        payload["pair_id"] = pair_id
+    if unlocated_reason:
+        payload["unlocated_reason"] = unlocated_reason
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _issue_index(
     project_id: str,
     audit_version: int,
@@ -259,6 +318,7 @@ def _issue_index(
     sheet_no_b: Optional[str],
     location: str,
     description: str,
+    evidence_json: Optional[str] = None,
 ) -> AuditResult:
     return AuditResult(
         project_id=project_id,
@@ -269,6 +329,7 @@ def _issue_index(
         sheet_no_b=sheet_no_b,
         location=location,
         description=description,
+        evidence_json=evidence_json,
     )
 
 
@@ -316,6 +377,8 @@ def audit_indexes(
     forward_links: List[Dict[str, Any]] = []
     # orphan_candidates: 只有编号没有目标图的索引（候选孤立索引）
     orphan_candidates: List[Dict[str, Any]] = []
+    # 每张图每个索引编号的定位锚点（用于目标图反查）
+    sheet_index_anchor_map: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
 
     for json_data in json_list:
         json_path = json_data.json_path or ""
@@ -327,6 +390,7 @@ def audit_indexes(
                 data = json.load(f)
         except Exception:
             continue
+        data = enrich_json_with_coordinates(data)
 
         raw_sheet_no = (json_data.sheet_no or data.get("sheet_no") or "").strip()
         if not raw_sheet_no:
@@ -343,9 +407,19 @@ def audit_indexes(
             pos = idx.get("position", [])
             idx_key = _norm_index_no(raw_index_no)
             tgt_key = _norm_sheet_no(raw_target_sheet)
+            source_anchor = _build_anchor(
+                role="source",
+                sheet_no=raw_sheet_no,
+                grid=str(idx.get("grid") or "").strip(),
+                global_pct=idx.get("global_pct") if isinstance(idx.get("global_pct"), dict) else None,
+                confidence=1.0,
+                origin="index",
+            )
 
             if idx_key:
                 sheet_index_defs[src_key].add(idx_key)
+                if source_anchor and idx_key not in sheet_index_anchor_map[src_key]:
+                    sheet_index_anchor_map[src_key][idx_key] = source_anchor
 
             # 无编号无目标，属于噪声，跳过
             if not idx_key and not tgt_key:
@@ -359,6 +433,7 @@ def audit_indexes(
                 "target_raw": raw_target_sheet,
                 "target_key": tgt_key,
                 "position": pos,
+                "source_anchor": source_anchor,
             }
             if tgt_key:
                 forward_links.append(row)
@@ -386,6 +461,7 @@ def audit_indexes(
             continue
         tgt_key = rel["target_key"]
         if tgt_key not in existing_sheets:
+            anchors = [rel["source_anchor"]] if rel.get("source_anchor") else []
             issue = _issue_index(
                 project_id=project_id,
                 audit_version=audit_version,
@@ -397,6 +473,7 @@ def audit_indexes(
                     f"图纸{rel['source_raw']}中的索引{rel['index_raw'] or '?'}"
                     f" 指向 {rel['target_raw'] or '未知图号'}，但目录/数据中不存在该目标图。"
                 ),
+                evidence_json=_to_evidence_json(anchors, unlocated_reason=None if anchors else "missing_target_sheet"),
             )
             db.add(issue)
             issues.append(issue)
@@ -411,6 +488,7 @@ def audit_indexes(
             continue
         if idx_key not in sheet_index_defs.get(tgt_key, set()):
             target_raw = sheet_map.get(tgt_key, rel["target_raw"] or "")
+            anchors = [rel["source_anchor"]] if rel.get("source_anchor") else []
             issue = _issue_index(
                 project_id=project_id,
                 audit_version=audit_version,
@@ -422,6 +500,7 @@ def audit_indexes(
                     f"图纸{rel['source_raw']}中的索引{rel['index_raw'] or '?'} 指向 {target_raw or rel['target_raw'] or '目标图'}，"
                     "但目标图中未找到同编号索引。"
                 ),
+                evidence_json=_to_evidence_json(anchors, unlocated_reason=None if anchors else "missing_target_index_no"),
             )
             db.add(issue)
             issues.append(issue)
@@ -439,6 +518,14 @@ def audit_indexes(
         if (tgt_key, src_key) in reverse_link_keys:
             continue
         target_raw = sheet_map.get(tgt_key, rel["target_raw"] or "")
+        anchors: List[Dict[str, Any]] = []
+        if rel.get("source_anchor"):
+            anchors.append(rel["source_anchor"])
+        target_anchor = sheet_index_anchor_map.get(tgt_key, {}).get(rel["index_key"] or "")
+        if target_anchor:
+            target_anchor = dict(target_anchor)
+            target_anchor["role"] = "target"
+            anchors.append(target_anchor)
         issue = _issue_index(
             project_id=project_id,
             audit_version=audit_version,
@@ -450,6 +537,7 @@ def audit_indexes(
                 f"图纸{rel['source_raw']}指向{target_raw or rel['target_raw'] or '目标图'}，"
                 f"但未发现{target_raw or rel['target_raw'] or '目标图'}反向指向{rel['source_raw']}，请确认索引链闭合性。"
             ),
+            evidence_json=_to_evidence_json(anchors, unlocated_reason=None if anchors else "missing_reverse_link"),
         )
         db.add(issue)
         issues.append(issue)
@@ -461,6 +549,7 @@ def audit_indexes(
         pair = (orphan["source_key"], orphan["index_key"])
         if pair in referenced_targets:
             continue
+        anchors = [orphan["source_anchor"]] if orphan.get("source_anchor") else []
         issue = _issue_index(
             project_id=project_id,
             audit_version=audit_version,
@@ -471,6 +560,7 @@ def audit_indexes(
             description=(
                 f"图纸{orphan['source_raw']}中的索引{orphan['index_raw'] or '?'} 未标注目标图号，且未被其他图纸引用，可能是孤立索引。"
             ),
+            evidence_json=_to_evidence_json(anchors, unlocated_reason=None if anchors else "orphan_index_without_target"),
         )
         db.add(issue)
         issues.append(issue)
@@ -668,12 +758,15 @@ def audit_dimensions(
 
     def _build_single_sheet_prompt(sheet_no: str, sheet_name: str, dims_compact: List[Dict[str, Any]]) -> str:
         return (
-            f"对这张图纸（{sheet_no} {sheet_name}）进行尺寸语义分析。\n"
+            f"对图纸（{sheet_no} {sheet_name}）做尺寸语义分析。\n"
             "你将收到5张图：图1全图（带网格），图2-5为四个高清象限（20%重叠）。\n"
+            "请按“先定位，再理解语义”执行：先在图1找网格位置，再去对应象限图确认。\n"
             "以下是DWG提取的精确尺寸数据（无需重新OCR）：\n"
             f"{json.dumps(dims_compact, ensure_ascii=False)}\n"
             "请输出每条尺寸的语义解析结果，只返回JSON数组，不要解释。\n"
-            "格式：[{\"id\":\"\",\"semantic\":\"\",\"location_desc\":\"\",\"dim_type\":\"\",\"value\":0,\"grid\":\"\",\"confidence\":0.0}]"
+            "格式："
+            "[{\"id\":\"\",\"semantic\":\"\",\"location_desc\":\"\",\"dim_type\":\"\",\"value\":0,"
+            "\"grid\":\"\",\"component\":\"\",\"confidence\":0.0,\"evidence\":{\"grid\":\"\",\"why\":\"\"}}]"
         )
 
     def _build_pair_compare_prompt(
@@ -686,12 +779,32 @@ def audit_dimensions(
     ) -> str:
         return (
             "请对比两张图的尺寸语义列表，找出同一构件/空间的尺寸不一致项。\n"
+            "你必须按流程执行：先定位 -> 再配对 -> 再核对。\n"
+            "规则：\n"
+            "1) 先根据 semantic/component/grid 选候选，不要直接猜。\n"
+            "2) 只有定位证据充分时才输出问题；证据不足就不要输出。\n"
+            "3) 输出必须带证据字段，便于人工复核。\n"
             f"A图：{a_sheet_no} {a_sheet_name}\n"
             f"A图语义数据：{json.dumps(a_semantic, ensure_ascii=False)}\n"
             f"B图：{b_sheet_no} {b_sheet_name}\n"
             f"B图语义数据：{json.dumps(b_semantic, ensure_ascii=False)}\n"
             "只返回问题JSON数组，无问题返回[]。\n"
-            "格式：[{\"位置描述\":\"\",\"A图号\":\"\",\"B图号\":\"\",\"A值\":0,\"B值\":0,\"差值\":0,\"description\":\"\"}]"
+            "格式：[{"
+            "\"位置描述\":\"\","
+            "\"A图号\":\"\",\"B图号\":\"\","
+            "\"A值\":0,\"B值\":0,\"差值\":0,"
+            "\"source_grid\":\"\",\"target_grid\":\"\","
+            "\"source_dim_id\":\"\",\"target_dim_id\":\"\","
+            "\"index_hint\":\"\","
+            "\"confidence\":0.0,"
+            "\"description\":\"\","
+            "\"evidence\":{"
+            "\"source_sheet_no\":\"\",\"target_sheet_no\":\"\","
+            "\"source_grid\":\"\",\"target_grid\":\"\","
+            "\"source_dim_id\":\"\",\"target_dim_id\":\"\","
+            "\"confidence\":0.0,\"why\":\"\""
+            "}"
+            "}]"
         )
 
     def _read_int_env(name: str, default: int, *, low: int = 1, high: int = 64) -> int:
@@ -721,8 +834,12 @@ def audit_dimensions(
         st = p.stat()
         return f"{p.resolve()}|{st.st_size}|{int(st.st_mtime)}"
 
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise ValueError("项目不存在")
+
     def _cache_dir_for_project() -> Path:
-        root = Path.home() / "cad-review" / "projects" / project_id / "cache" / "dimension-v1"
+        root = resolve_project_dir(project, ensure=True) / "cache" / "dimension-v1"
         root.mkdir(parents=True, exist_ok=True)
         return root
 
@@ -857,6 +974,16 @@ def audit_dimensions(
                 point = _dimension_global_point(dim, sheet["model_range"])
                 if point:
                     dim["global_pct"] = point
+
+        dimension_lookup: Dict[str, Dict[str, Any]] = {}
+        for dim in dims:
+            dim_id = str(dim.get("id") or "").strip()
+            if not dim_id:
+                continue
+            dim_key = _norm_index_no(dim_id)
+            if dim_key and dim_key not in dimension_lookup:
+                dimension_lookup[dim_key] = dim
+        sheet["dimension_lookup"] = dimension_lookup
 
         page_asset = page_assets_by_sheet.get(sheet_key)
         if not page_asset:
@@ -1066,20 +1193,89 @@ def audit_dimensions(
             value_a = item.get("A值", item.get("平面值", item.get("value_a")))
             value_b = item.get("B值", item.get("立面值", item.get("value_b")))
             desc = str(item.get("description") or "").strip()
+            evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+            source_grid = str(item.get("source_grid") or evidence.get("source_grid") or "").strip()
+            target_grid = str(item.get("target_grid") or evidence.get("target_grid") or "").strip()
+            source_dim_id = str(item.get("source_dim_id") or evidence.get("source_dim_id") or "").strip()
+            target_dim_id = str(item.get("target_dim_id") or evidence.get("target_dim_id") or "").strip()
+            index_hint = str(item.get("index_hint") or evidence.get("index_hint") or "").strip()
+            confidence_raw = item.get("confidence", evidence.get("confidence"))
+            try:
+                confidence = float(confidence_raw)
+            except (TypeError, ValueError):
+                confidence = 0.0
+
             loc = str(item.get("位置描述") or item.get("location") or "").strip()
+            if not loc and (source_grid or target_grid):
+                loc = f"{source_grid or '?'} -> {target_grid or '?'}"
+
+            evidence_parts = []
+            if source_grid or target_grid:
+                evidence_parts.append(f"网格:{source_grid or '?'}->{target_grid or '?'}")
+            if source_dim_id or target_dim_id:
+                evidence_parts.append(f"标注ID:{source_dim_id or '?'}->{target_dim_id or '?'}")
+            if index_hint:
+                evidence_parts.append(f"索引:{index_hint}")
+            evidence_parts.append(f"置信度:{confidence:.2f}")
+            evidence_text = "；".join(evidence_parts)
+
+            final_desc = desc or (
+                f"图纸{a['sheet_no']}与{b['sheet_no']}疑似存在尺寸不一致，A={value_a}, B={value_b}"
+            )
+            if evidence_text:
+                final_desc = f"{final_desc}（{evidence_text}）"
+
+            raw_sheet_no_a = str(item.get("A图号") or item.get("平面图号") or "").strip()
+            raw_sheet_no_b = str(item.get("B图号") or item.get("立面图号") or "").strip()
+            sheet_no_a = raw_sheet_no_a if _norm_sheet_no(raw_sheet_no_a) in json_by_sheet else a["sheet_no"]
+            sheet_no_b = raw_sheet_no_b if _norm_sheet_no(raw_sheet_no_b) in json_by_sheet else b["sheet_no"]
+
             issue = AuditResult(
                 project_id=project_id,
                 audit_version=audit_version,
                 type="dimension",
                 severity="warning",
-                sheet_no_a=str(item.get("A图号") or item.get("平面图号") or a["sheet_no"]),
-                sheet_no_b=str(item.get("B图号") or item.get("立面图号") or b["sheet_no"]),
+                sheet_no_a=sheet_no_a,
+                sheet_no_b=sheet_no_b,
                 location=loc or None,
                 value_a=str(value_a) if value_a is not None else None,
                 value_b=str(value_b) if value_b is not None else None,
-                description=desc or (
-                    f"图纸{a['sheet_no']}与{b['sheet_no']}疑似存在尺寸不一致，A={value_a}, B={value_b}"
-                ),
+                description=final_desc,
+                evidence_json=None,
+            )
+
+            anchors: List[Dict[str, Any]] = []
+            source_dim_key = _norm_index_no(source_dim_id)
+            target_dim_key = _norm_index_no(target_dim_id)
+            source_dim = a.get("dimension_lookup", {}).get(source_dim_key) if source_dim_key else None
+            target_dim = b.get("dimension_lookup", {}).get(target_dim_key) if target_dim_key else None
+
+            source_anchor = _build_anchor(
+                role="source",
+                sheet_no=issue.sheet_no_a or a["sheet_no"],
+                grid=source_grid or (source_dim or {}).get("grid"),
+                global_pct=(source_dim or {}).get("global_pct") if isinstance((source_dim or {}).get("global_pct"), dict) else None,
+                confidence=confidence,
+                origin="dimension",
+            )
+            if source_anchor:
+                anchors.append(source_anchor)
+
+            target_anchor = _build_anchor(
+                role="target",
+                sheet_no=issue.sheet_no_b or b["sheet_no"],
+                grid=target_grid or (target_dim or {}).get("grid"),
+                global_pct=(target_dim or {}).get("global_pct") if isinstance((target_dim or {}).get("global_pct"), dict) else None,
+                confidence=confidence,
+                origin="dimension",
+            )
+            if target_anchor:
+                anchors.append(target_anchor)
+
+            issue.evidence_json = _to_evidence_json(
+                anchors,
+                pair_id=f"{pair['a']}::{pair['b']}",
+                unlocated_reason=None if anchors else "dimension_pair_unlocated",
             )
             db.add(issue)
             issues.append(issue)
@@ -1172,8 +1368,29 @@ def audit_materials(
         except Exception:
             continue
 
+        data = enrich_json_with_coordinates(data)
+
         raw_table = data.get("material_table", []) or []
         raw_used = data.get("materials", []) or []
+
+        material_anchor_by_code: Dict[str, Dict[str, Any]] = {}
+        for mat in raw_used:
+            code_raw = str(mat.get("code", "") or "").strip()
+            code_key = norm_code(code_raw)
+            if not is_valid_material_code(code_key):
+                continue
+            if code_key in material_anchor_by_code:
+                continue
+            anchor = _build_anchor(
+                role="single",
+                sheet_no=json_data.sheet_no,
+                grid=str(mat.get("grid") or "").strip(),
+                global_pct=mat.get("global_pct") if isinstance(mat.get("global_pct"), dict) else None,
+                confidence=1.0,
+                origin="material",
+            )
+            if anchor:
+                material_anchor_by_code[code_key] = anchor
 
         table_map: Dict[str, Dict[str, str]] = {}
         for item in raw_table:
@@ -1199,6 +1416,7 @@ def audit_materials(
         for code_key, used_item in used_map.items():
             if code_key in table_map:
                 continue
+            anchor = material_anchor_by_code.get(code_key)
             issue = AuditResult(
                 project_id=project_id,
                 audit_version=audit_version,
@@ -1209,6 +1427,10 @@ def audit_materials(
                 description=(
                     f"图纸{json_data.sheet_no}中使用了材料编号{used_item['code']}（{used_item['name'] or '未命名'}），"
                     "但材料表中未找到定义。"
+                ),
+                evidence_json=_to_evidence_json(
+                    [anchor] if anchor else [],
+                    unlocated_reason=None if anchor else "material_used_without_location",
                 ),
             )
             db.add(issue)
@@ -1229,6 +1451,7 @@ def audit_materials(
                     f"材料表中定义了材料编号{table_item['code']}（{table_item['name'] or '未命名'}），"
                     "但在图纸标注中未使用。"
                 ),
+                evidence_json=_to_evidence_json([], unlocated_reason="material_table_only_no_anchor"),
             )
             db.add(issue)
             issues.append(issue)
@@ -1248,6 +1471,7 @@ def audit_materials(
             if similarity >= 0.92:
                 # 轻微差异（如空格/符号）忽略
                 continue
+            anchor = material_anchor_by_code.get(code_key)
             issue = AuditResult(
                 project_id=project_id,
                 audit_version=audit_version,
@@ -1258,6 +1482,10 @@ def audit_materials(
                 description=(
                     f"图纸中材料编号{used_item['code']}名称为“{used_item['name'] or '未命名'}”，"
                     f"材料表中同编号名称为“{table_item['name'] or '未命名'}”，请确认是否命名不一致。"
+                ),
+                evidence_json=_to_evidence_json(
+                    [anchor] if anchor else [],
+                    unlocated_reason=None if anchor else "material_name_conflict_unlocated",
                 ),
             )
             db.add(issue)
@@ -1278,6 +1506,7 @@ def audit_materials(
                 ratio = SequenceMatcher(None, used_name, table_name).ratio()
                 if ratio < 0.95:
                     continue
+                anchor = material_anchor_by_code.get(used_key)
                 issue = AuditResult(
                     project_id=project_id,
                     audit_version=audit_version,
@@ -1289,6 +1518,10 @@ def audit_materials(
                         f"图纸中材料“{used_item['name'] or '未命名'}”编号为{used_item['code']}，"
                         f"与材料表中“{table_item['name'] or '未命名'}”编号{table_item['code']}高度相似，"
                         "可能存在编号或命名冲突。"
+                    ),
+                    evidence_json=_to_evidence_json(
+                        [anchor] if anchor else [],
+                        unlocated_reason=None if anchor else "material_similarity_unlocated",
                     ),
                 )
                 db.add(issue)

@@ -15,3 +15,7 @@ cad-review-frontend/node_modules/
 cad-review-frontend/dist/
 cad-review-frontend/.env
 cad-review-frontend/.env.*
+
+# Local project runtime data (do not commit)
+projecs/
+ui.pen

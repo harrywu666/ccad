@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap');
 @import "tailwindcss";
 
 @plugin "tailwindcss-animate";
@@ -39,10 +40,11 @@
     --color-success-foreground: hsl(var(--success-foreground));
 
     --radius-lg: var(--radius);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: var(--radius);
+    --radius-sm: var(--radius);
 
-    --font-sans: "Inter", "Roboto", "Helvetica Neue", sans-serif;
+    --font-sans: "Noto Sans SC", "Inter", "Helvetica Neue", sans-serif;
+    --font-heading: "Noto Sans SC", "Space Grotesk", sans-serif;
 
     --animate-accordion-down: accordion-down 0.2s ease-out;
     --animate-accordion-up: accordion-up 0.2s ease-out;
@@ -70,80 +72,75 @@
 
 @layer base {
     :root {
-        /* 主题基调：干净现代的浅色，微偏蓝 */
-        --background: 210 50% 98%;
-        --foreground: 222.2 84% 4.9%;
+        /* Swiss Clean Light System */
+        --background: 0 0% 100%;
+        --foreground: 0 0% 5%;
 
         --card: 0 0% 100%;
-        --card-foreground: 222.2 84% 4.9%;
+        --card-foreground: 0 0% 5%;
 
         --popover: 0 0% 100%;
-        --popover-foreground: 222.2 84% 4.9%;
+        --popover-foreground: 0 0% 5%;
 
-        /* 品牌蓝 */
-        --primary: 221.2 83.2% 53.3%;
-        --primary-foreground: 210 40% 98%;
+        --primary: 4 84% 48%;
+        /* #E42313 */
+        --primary-foreground: 0 0% 100%;
 
-        --secondary: 210 40% 96.1%;
-        --secondary-foreground: 222.2 47.4% 11.2%;
+        --secondary: 0 0% 98%;
+        /* #FAFAFA */
+        --secondary-foreground: 0 0% 5%;
 
-        --muted: 210 40% 96.1%;
-        --muted-foreground: 215.4 16.3% 46.9%;
+        --muted: 0 0% 98%;
+        --muted-foreground: 0 0% 48%;
+        /* #7A7A7A */
 
-        --accent: 210 40% 96.1%;
-        --accent-foreground: 222.2 47.4% 11.2%;
+        --accent: 0 0% 98%;
+        --accent-foreground: 0 0% 5%;
 
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 210 40% 98%;
+        --destructive: 4 84% 48%;
+        --destructive-foreground: 0 0% 100%;
 
         --warning: 38 92% 50%;
         --warning-foreground: 48 96% 89%;
 
-        --success: 142.1 76.2% 36.3%;
-        --success-foreground: 355.7 100% 97.3%;
+        --success: 142 70% 45%;
+        /* #22C55E */
+        --success-foreground: 0 0% 100%;
 
-        --border: 214.3 31.8% 91.4%;
-        --input: 214.3 31.8% 91.4%;
-        --ring: 221.2 83.2% 53.3%;
+        --border: 0 0% 91%;
+        /* #E8E8E8 */
+        --input: 0 0% 91%;
+        --ring: 4 84% 48%;
 
-        --radius: 0.75rem;
+        --radius: 0px;
     }
 
     .dark {
-        /* 现代酷黑深色模式 */
-        --background: 222.2 84% 4.9%;
-        --foreground: 210 40% 98%;
-
-        --card: 222.2 84% 4.9%;
-        --card-foreground: 210 40% 98%;
-
-        --popover: 222.2 84% 4.9%;
-        --popover-foreground: 210 40% 98%;
-
-        --primary: 217.2 91.2% 59.8%;
-        --primary-foreground: 222.2 47.4% 11.2%;
-
-        --secondary: 217.2 32.6% 17.5%;
-        --secondary-foreground: 210 40% 98%;
-
-        --muted: 217.2 32.6% 17.5%;
-        --muted-foreground: 215 20.2% 65.1%;
-
-        --accent: 217.2 32.6% 17.5%;
-        --accent-foreground: 210 40% 98%;
-
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 210 40% 98%;
-
-        --warning: 48 96% 53%;
-        --warning-foreground: 38 92% 10%;
-
-        --success: 142.1 70.6% 45.3%;
-        --success-foreground: 144.9 80.4% 10%;
-
-        --border: 217.2 32.6% 17.5%;
-        --input: 217.2 32.6% 17.5%;
-        --ring: 224.3 76.3% 48%;
+        /* Keep it same as light for this strict Swiss Light theme, or disable dark mode by reusing light */
+        --background: 0 0% 100%;
+        --foreground: 0 0% 5%;
+        --card: 0 0% 100%;
+        --card-foreground: 0 0% 5%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 0 0% 5%;
+        --primary: 4 84% 48%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 0 0% 98%;
+        --secondary-foreground: 0 0% 5%;
+        --muted: 0 0% 98%;
+        --muted-foreground: 0 0% 48%;
+        --accent: 0 0% 98%;
+        --accent-foreground: 0 0% 5%;
+        --destructive: 4 84% 48%;
+        --destructive-foreground: 0 0% 100%;
+        --warning: 38 92% 50%;
+        --warning-foreground: 48 96% 89%;
+        --success: 142 70% 45%;
+        --success-foreground: 0 0% 100%;
+        --border: 0 0% 91%;
+        --input: 0 0% 91%;
+        --ring: 4 84% 48%;
+        --radius: 0px;
     }
 
     * {

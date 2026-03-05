@@ -3,7 +3,6 @@
 提供PDF和Excel格式的审核报告下载接口
 """
 
-from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -13,11 +12,13 @@ from models import Project, AuditResult
 
 router = APIRouter()
 
-BASE_DIR = Path.home() / "cad-review"
-
-
 @router.get("/projects/{project_id}/report/pdf")
-def generate_pdf_report(project_id: str, version: Optional[int] = None, db: Session = Depends(get_db)):
+def generate_pdf_report(
+    project_id: str,
+    version: Optional[int] = None,
+    mode: str = "marked",
+    db: Session = Depends(get_db),
+):
     """生成并下载PDF报告"""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -35,12 +36,19 @@ def generate_pdf_report(project_id: str, version: Optional[int] = None, db: Sess
     ).all()
     
     from services.report_service import generate_pdf
-    pdf_path = generate_pdf(project, results, version)
-    
+    payload = generate_pdf(project, results, version, db=db, mode=mode)
+    pdf_path = payload["path"]
+    headers = {
+        "X-Report-Mode": str(payload.get("mode") or "plain"),
+        "X-Report-Downgraded": "1" if payload.get("downgraded") else "0",
+        "X-Report-Reason": str(payload.get("reason") or ""),
+    }
+
     return FileResponse(
         pdf_path,
         media_type="application/pdf",
-        filename=f"{project.name}_审核报告_v{version}.pdf"
+        filename=f"{project.name}_审核报告_v{version}.pdf",
+        headers=headers,
     )
 
 

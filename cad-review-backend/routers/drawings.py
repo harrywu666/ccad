@@ -8,6 +8,7 @@ import asyncio
 import logging
 import time
 import re
+from threading import Lock
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -18,12 +19,34 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db
 from models import Project, Catalog, Drawing
+from services.storage_path_service import resolve_project_dir
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_DRAWINGS_UPLOAD_PROGRESS: Dict[str, Dict[str, Any]] = {}
+_DRAWINGS_PROGRESS_LOCK = Lock()
 
-BASE_DIR = Path.home() / "cad-review"
 
+def _set_drawings_upload_progress(project_id: str, phase: str, progress: int, message: str, success: Optional[bool] = None):
+    payload: Dict[str, Any] = {
+        "phase": phase,
+        "progress": max(0, min(100, int(progress))),
+        "message": message,
+        "updated_at": datetime.now().isoformat(),
+    }
+    if success is not None:
+        payload["success"] = success
+    with _DRAWINGS_PROGRESS_LOCK:
+        _DRAWINGS_UPLOAD_PROGRESS[project_id] = payload
+
+
+@router.get("/projects/{project_id}/drawings/upload-progress")
+def get_drawings_upload_progress(project_id: str):
+    with _DRAWINGS_PROGRESS_LOCK:
+        payload = _DRAWINGS_UPLOAD_PROGRESS.get(project_id)
+    if payload:
+        return payload
+    return {"phase": "idle", "progress": 0, "message": "等待上传", "updated_at": datetime.now().isoformat()}
 
 def _render_pdf_page(pdf_path: str, page_index: int, dpi: int = 300) -> bytes:
     """线程中渲染单页PDF，避免阻塞事件循环"""
@@ -147,6 +170,10 @@ class DrawingUpdateRequest(BaseModel):
     sheet_name: Optional[str] = None
 
 
+class DrawingBatchDeleteRequest(BaseModel):
+    drawing_ids: List[str]
+
+
 @router.get("/projects/{project_id}/drawings", response_model=List[DrawingResponse])
 def get_drawings(project_id: str, db: Session = Depends(get_db)):
     """获取项目图纸列表"""
@@ -181,7 +208,7 @@ def get_drawing_image(project_id: str, drawing_id: str, db: Session = Depends(ge
     if not png_path.exists():
         raise HTTPException(status_code=404, detail="图纸PNG文件不存在")
 
-    project_root = (BASE_DIR / "projects" / project_id).resolve()
+    project_root = resolve_project_dir(project, ensure=False).resolve()
     resolved_png = png_path.resolve()
     try:
         resolved_png.relative_to(project_root)
@@ -196,11 +223,13 @@ async def upload_drawings(project_id: str, file: UploadFile = File(...), db: Ses
     """上传PDF图纸并处理"""
     t0 = time.monotonic()
     logger.info("上传图纸开始: project_id=%s file=%s", project_id, file.filename)
+    _set_drawings_upload_progress(project_id, "uploading", 2, "接收上传文件中")
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
+        _set_drawings_upload_progress(project_id, "failed", 0, "项目不存在", success=False)
         raise HTTPException(status_code=404, detail="项目不存在")
     
-    project_dir = BASE_DIR / "projects" / project_id
+    project_dir = resolve_project_dir(project, ensure=True)
     project_dir.mkdir(parents=True, exist_ok=True)
     
     old_drawings = db.query(Drawing).filter(
@@ -220,6 +249,7 @@ async def upload_drawings(project_id: str, file: UploadFile = File(...), db: Ses
     with open(pdf_path, "wb") as f:
         content = await file.read()
         f.write(content)
+    _set_drawings_upload_progress(project_id, "processing", 10, "文件上传完成，读取页数中")
     
     from services.kimi_service import (
         async_recognize_sheet_info,
@@ -230,6 +260,7 @@ async def upload_drawings(project_id: str, file: UploadFile = File(...), db: Ses
     total_pages = len(doc)
     doc.close()
     logger.info("PDF读取完成: pages=%s path=%s", total_pages, str(pdf_path))
+    _set_drawings_upload_progress(project_id, "processing", 12, f"共 {total_pages} 页，开始图像提取")
 
     matched_count = 0
     unmatched_count = 0
@@ -272,10 +303,13 @@ async def upload_drawings(project_id: str, file: UploadFile = File(...), db: Ses
         )
         logger.info("页 %s/%s: PNG已生成并提交识别 -> %s", page_index + 1, total_pages, str(png_path))
         tasks.append(asyncio.create_task(recognize_page(page_index, png_data)))
+        submit_progress = 12 + int(((page_index + 1) / max(total_pages, 1)) * 28)
+        _set_drawings_upload_progress(project_id, "processing", submit_progress, f"图像提取与识别排队 {page_index + 1}/{total_pages}")
     t_raster_done = time.monotonic()
     logger.info("流式转PNG与任务提交完成: pages=%s 耗时=%.2fs", total_pages, t_raster_done - t0)
 
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    _set_drawings_upload_progress(project_id, "processing", 70, "图像识别完成，开始目录匹配")
     t_recognize_done = time.monotonic()
     logger.info("单Agent识别阶段完成: pages=%s 耗时=%.2fs", total_pages, t_recognize_done - t_raster_done)
     page_results: List[Dict[str, Any]] = []
@@ -382,6 +416,9 @@ async def upload_drawings(project_id: str, file: UploadFile = File(...), db: Ses
             no_score,
             name_score,
         )
+        done_count = matched_count + unmatched_count
+        match_progress = 70 + int((done_count / max(total_pages, 1)) * 24)
+        _set_drawings_upload_progress(project_id, "processing", match_progress, f"目录匹配中 {done_count}/{total_pages}")
 
     t_match_done = time.monotonic()
     logger.info("算法匹配阶段完成: matched=%s unmatched=%s 耗时=%.2fs", matched_count, unmatched_count, t_match_done - t_match_start)
@@ -390,6 +427,7 @@ async def upload_drawings(project_id: str, file: UploadFile = File(...), db: Ses
     recalculate_project_status(project_id, db)
     
     db.commit()
+    _set_drawings_upload_progress(project_id, "processing", 97, "写入数据库完成，刷新缓存中")
     
     from services.cache_service import increment_cache_version
     increment_cache_version(project_id, db)
@@ -404,6 +442,7 @@ async def upload_drawings(project_id: str, file: UploadFile = File(...), db: Ses
         current_version,
         t_done - t0,
     )
+    _set_drawings_upload_progress(project_id, "done", 100, "处理完成", success=True)
     
     return {
         "success": True,
@@ -462,6 +501,63 @@ def update_drawing(
     increment_cache_version(project_id, db)
     
     return {"success": True}
+
+
+@router.delete("/projects/{project_id}/drawings/{drawing_id}")
+def delete_drawing(project_id: str, drawing_id: str, db: Session = Depends(get_db)):
+    """删除单张图纸（逻辑删除）"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    drawing = db.query(Drawing).filter(
+        Drawing.id == drawing_id,
+        Drawing.project_id == project_id,
+        Drawing.replaced_at == None
+    ).first()
+    if not drawing:
+        raise HTTPException(status_code=404, detail="图纸不存在")
+
+    drawing.replaced_at = datetime.now()
+
+    from services.cache_service import recalculate_project_status
+    recalculate_project_status(project_id, db)
+    db.commit()
+
+    from services.cache_service import increment_cache_version
+    increment_cache_version(project_id, db)
+
+    return {"success": True}
+
+
+@router.post("/projects/{project_id}/drawings/batch-delete")
+def batch_delete_drawings(project_id: str, request: DrawingBatchDeleteRequest, db: Session = Depends(get_db)):
+    """批量删除图纸（逻辑删除）"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    ids = [str(i).strip() for i in request.drawing_ids if str(i).strip()]
+    if not ids:
+        return {"success": True, "deleted": 0}
+
+    drawings = db.query(Drawing).filter(
+        Drawing.project_id == project_id,
+        Drawing.id.in_(ids),
+        Drawing.replaced_at == None
+    ).all()
+
+    for drawing in drawings:
+        drawing.replaced_at = datetime.now()
+
+    from services.cache_service import recalculate_project_status
+    recalculate_project_status(project_id, db)
+    db.commit()
+
+    from services.cache_service import increment_cache_version
+    increment_cache_version(project_id, db)
+
+    return {"success": True, "deleted": len(drawings)}
 
 
 @router.delete("/projects/{project_id}/drawings")

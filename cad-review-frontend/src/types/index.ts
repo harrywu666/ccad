@@ -84,6 +84,10 @@ export interface AuditStatus {
   current_step: string | null;
   progress: number;
   total_issues: number;
+  run_status?: string | null;
+  error?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
 }
 
 export interface ThreeLineAsset {
@@ -122,3 +126,5 @@ export interface ThreeLineMatch {
   summary: ThreeLineSummary;
   items: ThreeLineItem[];
 }
+
+export type MatchFilter = 'all' | 'ready' | 'missing' | 'missing_png' | 'missing_json' | 'missing_all';

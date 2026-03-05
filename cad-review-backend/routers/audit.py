@@ -27,6 +27,7 @@ class AuditResultResponse(BaseModel):
     value_a: Optional[str] = None
     value_b: Optional[str] = None
     description: Optional[str] = None
+    evidence_json: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -436,3 +437,42 @@ def run_audit(project_id: str, db: Session = Depends(get_db)):
         )
 
     return response
+
+
+@router.post("/projects/{project_id}/audit/clear")
+def clear_audit_report(project_id: str, db: Session = Depends(get_db)):
+    """清空项目审核报告（结果、运行记录与任务记录）"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    deleted_results = (
+        db.query(AuditResult)
+        .filter(AuditResult.project_id == project_id)
+        .delete(synchronize_session=False)
+    )
+    deleted_runs = (
+        db.query(AuditRun)
+        .filter(AuditRun.project_id == project_id)
+        .delete(synchronize_session=False)
+    )
+    deleted_tasks = (
+        db.query(AuditTask)
+        .filter(AuditTask.project_id == project_id)
+        .delete(synchronize_session=False)
+    )
+
+    from services.cache_service import recalculate_project_status, increment_cache_version
+
+    recalculate_project_status(project_id, db)
+    db.commit()
+    increment_cache_version(project_id, db)
+
+    return {
+        "success": True,
+        "deleted": {
+            "results": deleted_results,
+            "runs": deleted_runs,
+            "tasks": deleted_tasks,
+        },
+    }

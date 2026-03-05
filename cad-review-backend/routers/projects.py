@@ -3,22 +3,22 @@
 提供项目的CRUD接口，包含分类筛选、搜索、缓存版本管理
 """
 
-import os
 import json
-from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db
 from models import Project, ProjectCategory
+from services.storage_path_service import (
+    ensure_project_scaffold,
+    remove_project_dirs,
+    rename_project_named_dir,
+    resolve_project_dir,
+)
 
 router = APIRouter()
-
-BASE_DIR = Path.home() / "cad-review"
-PROJECTS_DIR = BASE_DIR / "projects"
-
 
 class ProjectResponse(BaseModel):
     """项目响应模型"""
@@ -52,6 +52,30 @@ class ProjectUpdate(BaseModel):
     description: Optional[str] = None
 
 
+class ProjectUIPreferencesUpdate(BaseModel):
+    preferences: Dict[str, Any]
+
+
+def _load_ui_preferences(db_project: Project) -> Dict[str, Any]:
+    if not db_project.ui_preferences:
+        return {}
+    try:
+        parsed = json.loads(db_project.ui_preferences)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _deep_merge_dict(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 @router.get("/projects", response_model=List[ProjectResponse])
 def get_projects(
     category: Optional[str] = Query(None, description="按分类筛选"),
@@ -81,6 +105,31 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     return project
 
 
+@router.get("/projects/{project_id}/ui-preferences")
+def get_project_ui_preferences(project_id: str, db: Session = Depends(get_db)):
+    """获取项目级UI偏好配置"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return {"project_id": project_id, "preferences": _load_ui_preferences(project)}
+
+
+@router.put("/projects/{project_id}/ui-preferences")
+def update_project_ui_preferences(project_id: str, payload: ProjectUIPreferencesUpdate, db: Session = Depends(get_db)):
+    """更新项目级UI偏好配置（增量合并）"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    current = _load_ui_preferences(project)
+    merged = _deep_merge_dict(current, payload.preferences or {})
+    project.ui_preferences = json.dumps(merged, ensure_ascii=False)
+    project.updated_at = datetime.now()
+    db.commit()
+    db.refresh(project)
+    return {"project_id": project_id, "preferences": merged}
+
+
 @router.post("/projects", response_model=ProjectResponse)
 def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     """创建新项目"""
@@ -101,13 +150,9 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
-    
-    project_dir = PROJECTS_DIR / project_id
-    project_dir.mkdir(parents=True, exist_ok=True)
-    (project_dir / "catalog").mkdir(exist_ok=True)
-    (project_dir / "pngs").mkdir(exist_ok=True)
-    (project_dir / "jsons").mkdir(exist_ok=True)
-    (project_dir / "reports").mkdir(exist_ok=True)
+
+    project_dir = resolve_project_dir(db_project, ensure=True)
+    ensure_project_scaffold(project_dir)
     
     return db_project
 
@@ -118,7 +163,8 @@ def update_project(project_id: str, project: ProjectUpdate, db: Session = Depend
     db_project = db.query(Project).filter(Project.id == project_id).first()
     if not db_project:
         raise HTTPException(status_code=404, detail="项目不存在")
-    
+    old_name = db_project.name
+
     if project.name is not None:
         db_project.name = project.name
     if project.category is not None:
@@ -131,6 +177,10 @@ def update_project(project_id: str, project: ProjectUpdate, db: Session = Depend
     db_project.updated_at = datetime.now()
     db.commit()
     db.refresh(db_project)
+
+    if project.name is not None and project.name != old_name:
+        rename_project_named_dir(db_project, old_name=old_name, new_name=db_project.name)
+
     return db_project
 
 
@@ -141,10 +191,7 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     if not db_project:
         raise HTTPException(status_code=404, detail="项目不存在")
     
-    project_dir = PROJECTS_DIR / project_id
-    if project_dir.exists():
-        import shutil
-        shutil.rmtree(project_dir)
+    remove_project_dirs(db_project)
     
     db.delete(db_project)
     db.commit()

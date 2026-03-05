@@ -35,6 +35,7 @@ class Project(Base):
     category = Column(String, ForeignKey("project_categories.id"), nullable=True)
     tags = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
+    ui_preferences = Column(Text, nullable=True)
     cache_version = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
     status = Column(String, default="new")
@@ -118,6 +119,7 @@ class AuditResult(Base):
     value_a = Column(String, nullable=True)
     value_b = Column(String, nullable=True)
     description = Column(Text, nullable=True)
+    evidence_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
     project = relationship("Project", back_populates="audit_results")
