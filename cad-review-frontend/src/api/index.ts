@@ -1,5 +1,15 @@
 import axios from 'axios';
-import type { Category, Project, ProjectCreate, CatalogItem, Drawing, JsonData, AuditResult, AuditStatus } from '@/types';
+import type {
+  Category,
+  Project,
+  ProjectCreate,
+  CatalogItem,
+  Drawing,
+  JsonData,
+  AuditResult,
+  AuditStatus,
+  ThreeLineMatch,
+} from '@/types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:7000').replace(/\/$/, '');
 
@@ -83,6 +93,8 @@ export const deleteJsonData = (projectId: string, jsonId: string) =>
 // Audit
 export const getAuditStatus = (projectId: string) =>
   api.get<AuditStatus>(`/api/projects/${projectId}/audit/status`).then(res => res.data);
+export const getThreeLineMatch = (projectId: string) =>
+  api.get<ThreeLineMatch>(`/api/projects/${projectId}/audit/three-lines`).then(res => res.data);
 export const getAuditResults = (projectId: string, params?: { version?: number; type?: string }) =>
   api.get<AuditResult[]>(`/api/projects/${projectId}/audit/results`, { params }).then(res => res.data);
 export const getAuditHistory = (projectId: string) =>
@@ -105,6 +117,11 @@ export const downloadExcelReport = (projectId: string, version?: number) => {
     ? `${API_BASE}/api/projects/${projectId}/report/excel?version=${version}`
     : `${API_BASE}/api/projects/${projectId}/report/excel`;
   return url;
+};
+
+export const getDrawingImageUrl = (projectId: string, drawingId: string, cacheVersion?: number) => {
+  const suffix = cacheVersion !== undefined ? `?v=${cacheVersion}` : '';
+  return `${API_BASE}/api/projects/${projectId}/drawings/${drawingId}/image${suffix}`;
 };
 
 export default api;

@@ -15,8 +15,19 @@ import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import * as api from '@/api';
-import type { Project, Category, CatalogItem, Drawing, JsonData, AuditResult, AuditStatus } from '@/types';
+import type {
+  Project,
+  Category,
+  CatalogItem,
+  Drawing,
+  JsonData,
+  AuditResult,
+  AuditStatus,
+  ThreeLineMatch,
+  ThreeLineItem,
+} from '@/types';
 
 const steps = [
   { id: 'catalog', name: '目录', description: '上传并确认图纸总目录', icon: FileText },
@@ -41,6 +52,8 @@ type CatalogDraftItem = {
   sheet_name: string;
 };
 
+type MatchFilter = 'all' | 'ready' | 'missing' | 'missing_png' | 'missing_json' | 'missing_all';
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -51,6 +64,8 @@ export default function ProjectDetail() {
   const [jsonData, setJsonData] = useState<JsonData[]>([]);
   const [auditResults, setAuditResults] = useState<AuditResult[]>([]);
   const [auditStatus, setAuditStatus] = useState<AuditStatus | null>(null);
+  const [threeLineMatch, setThreeLineMatch] = useState<ThreeLineMatch | null>(null);
+  const [matchFilter, setMatchFilter] = useState<MatchFilter>('all');
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -71,6 +86,7 @@ export default function ProjectDetail() {
   const loadData = async () => {
     if (!id) return;
     try {
+      const threeLine = await api.getThreeLineMatch(id).catch(() => null);
       const [proj, cats, cat, drws, js, status, results] = await Promise.all([
         api.getProject(id),
         api.getCategories(),
@@ -83,6 +99,7 @@ export default function ProjectDetail() {
       setProject(proj);
       setCategories(cats);
       setCatalog(cat);
+      setThreeLineMatch(threeLine);
       setCatalogDraft(
         cat.map(item => ({
           id: item.id,
@@ -328,6 +345,72 @@ export default function ProjectDetail() {
   const isCatalogLocked = catalog.length > 0 && catalog[0]?.status === 'locked';
   const currentCatalogRows = isCatalogEditing ? catalogDraft : catalog;
   const unmatchedDrawings = drawings.filter(item => item.status !== 'matched');
+  const fallbackMatchItems: ThreeLineItem[] = catalog.map(item => {
+    const drawing = drawings.find(d => d.catalog_id === item.id) || null;
+    const json = jsonData.find(j => j.catalog_id === item.id) || null;
+    const hasPng = Boolean(drawing?.png_path);
+    const hasJson = Boolean(json?.json_path);
+    const status: ThreeLineItem['status'] = hasPng && hasJson
+      ? 'ready'
+      : !hasPng && hasJson
+        ? 'missing_png'
+        : hasPng && !hasJson
+          ? 'missing_json'
+          : 'missing_all';
+    return {
+      catalog_id: item.id,
+      sheet_no: item.sheet_no,
+      sheet_name: item.sheet_name,
+      sort_order: item.sort_order,
+      status,
+      drawing: drawing
+        ? {
+            id: drawing.id,
+            sheet_no: drawing.sheet_no,
+            sheet_name: drawing.sheet_name,
+            data_version: drawing.data_version,
+            status: drawing.status,
+            png_path: drawing.png_path,
+            page_index: drawing.page_index,
+          }
+        : null,
+      json: json
+        ? {
+            id: json.id,
+            sheet_no: json.sheet_no,
+            data_version: json.data_version,
+            status: json.status,
+            json_path: json.json_path,
+            summary: json.summary,
+            created_at: null,
+          }
+        : null,
+    };
+  });
+  const matchItems = (threeLineMatch?.items || fallbackMatchItems).slice().sort((a, b) => a.sort_order - b.sort_order);
+  const matchSummary = threeLineMatch?.summary || {
+    total: matchItems.length,
+    ready: matchItems.filter(item => item.status === 'ready').length,
+    missing_png: matchItems.filter(item => item.status === 'missing_png').length,
+    missing_json: matchItems.filter(item => item.status === 'missing_json').length,
+    missing_all: matchItems.filter(item => item.status === 'missing_all').length,
+  };
+  const filteredMatchItems = matchItems.filter(item => {
+    if (matchFilter === 'all') return true;
+    if (matchFilter === 'ready') return item.status === 'ready';
+    if (matchFilter === 'missing') return item.status !== 'ready';
+    return item.status === matchFilter;
+  });
+  const canStartAudit = matchSummary.total > 0 && matchSummary.ready === matchSummary.total;
+  const blockedReason = matchSummary.total === 0
+    ? '请先锁定目录并上传图纸数据。'
+    : `缺少数据：缺图纸 ${matchSummary.missing_png}，缺DWG ${matchSummary.missing_json}，都缺 ${matchSummary.missing_all}`;
+  const getDimensionCountFromSummary = (summary?: string | null) => {
+    if (!summary) return '-';
+    const hit = summary.match(/标注:(\d+)/);
+    if (!hit) return '-';
+    return hit[1];
+  };
 
   return (
     <div className="min-h-screen bg-gray-50/50 dark:bg-zinc-950 relative overflow-x-hidden pb-12">
@@ -870,60 +953,148 @@ export default function ProjectDetail() {
                 <div className="mx-auto w-12 h-12 bg-indigo-500/10 rounded-full flex items-center justify-center mb-4">
                   <FileSearch className="h-6 w-6 text-indigo-500" />
                 </div>
-                <CardTitle className="text-2xl">校验全息三线数据结构</CardTitle>
+                <CardTitle className="text-2xl">三线匹配确认</CardTitle>
                 <CardDescription className="text-base text-gray-500 max-w-2xl mx-auto">
-                  基于已确认的目录锚点，系统正在构建视觉(PDF)与数据(DWG)的双端核对关联表。绿色即表示节点健康。
+                  以锁定目录为基准，逐条核验 PNG 与 JSON 是否一对一齐备。缺失项可直接跳转对应步骤修复。
                 </CardDescription>
               </CardHeader>
               <CardContent className="px-8 pb-8">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+                  <Card className="shadow-sm border-gray-200 dark:border-zinc-800">
+                    <CardContent className="p-4">
+                      <p className="text-xs text-muted-foreground">总条目</p>
+                      <p className="text-2xl font-bold">{matchSummary.total}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="shadow-sm border-gray-200 dark:border-zinc-800">
+                    <CardContent className="p-4">
+                      <p className="text-xs text-muted-foreground">可审核</p>
+                      <p className="text-2xl font-bold text-green-600">{matchSummary.ready}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="shadow-sm border-gray-200 dark:border-zinc-800">
+                    <CardContent className="p-4">
+                      <p className="text-xs text-muted-foreground">缺 PNG</p>
+                      <p className="text-2xl font-bold text-amber-600">{matchSummary.missing_png}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="shadow-sm border-gray-200 dark:border-zinc-800">
+                    <CardContent className="p-4">
+                      <p className="text-xs text-muted-foreground">缺 DWG</p>
+                      <p className="text-2xl font-bold text-orange-600">{matchSummary.missing_json}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="shadow-sm border-gray-200 dark:border-zinc-800">
+                    <CardContent className="p-4">
+                      <p className="text-xs text-muted-foreground">都缺</p>
+                      <p className="text-2xl font-bold text-red-600">{matchSummary.missing_all}</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="flex items-center justify-between mb-4 gap-3">
+                  <Select value={matchFilter} onValueChange={value => setMatchFilter(value as MatchFilter)}>
+                    <SelectTrigger className="w-[220px]">
+                      <SelectValue placeholder="筛选状态" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部</SelectItem>
+                      <SelectItem value="missing">仅缺失项</SelectItem>
+                      <SelectItem value="ready">仅可审核</SelectItem>
+                      <SelectItem value="missing_png">缺 PNG</SelectItem>
+                      <SelectItem value="missing_json">缺 DWG</SelectItem>
+                      <SelectItem value="missing_all">都缺</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button variant="outline" onClick={loadData} disabled={uploading}>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    刷新三线状态
+                  </Button>
+                </div>
+
                 <Card className="shadow-sm border-gray-200 dark:border-zinc-800 overflow-hidden mb-8">
                   <ScrollArea className="h-[450px]">
                     <table className="w-full text-sm text-left">
                       <thead className="bg-indigo-50 dark:bg-zinc-900 border-b border-indigo-100 dark:border-zinc-800 sticky top-0 backdrop-blur-md z-10">
                         <tr>
-                          <th className="px-6 py-4 font-bold text-gray-900 dark:text-gray-100 w-1/3">参考锚点（图纸目录）</th>
-                          <th className="px-6 py-4 font-bold text-gray-900 dark:text-gray-100 text-center">视觉空间 (PNG)</th>
-                          <th className="px-6 py-4 font-bold text-gray-900 dark:text-gray-100 text-center">尺寸维度 (JSON)</th>
-                          <th className="px-6 py-4 font-bold text-gray-900 dark:text-gray-100 text-right">健康度</th>
+                          <th className="px-6 py-4 font-bold text-gray-900 dark:text-gray-100">目录锚点</th>
+                          <th className="px-6 py-4 font-bold text-gray-900 dark:text-gray-100 text-center">PNG 预览</th>
+                          <th className="px-6 py-4 font-bold text-gray-900 dark:text-gray-100 text-center">DWG数据摘要</th>
+                          <th className="px-6 py-4 font-bold text-gray-900 dark:text-gray-100 text-center">状态</th>
+                          <th className="px-6 py-4 font-bold text-gray-900 dark:text-gray-100 text-right">修复入口</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
-                        {catalog.map(item => {
-                          const drawing = drawings.find(d => d.catalog_id === item.id);
-                          const json = jsonData.find(j => j.catalog_id === item.id);
-                          const ready = drawing && json;
+                        {filteredMatchItems.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-10 text-center text-muted-foreground">
+                              当前筛选条件下暂无数据
+                            </td>
+                          </tr>
+                        )}
+                        {filteredMatchItems.map(item => {
+                          const statusBadge = item.status === 'ready'
+                            ? { text: '可审核', variant: 'success' as const }
+                            : item.status === 'missing_png'
+                              ? { text: '缺图纸', variant: 'warning' as const }
+                              : item.status === 'missing_json'
+                                ? { text: '缺DWG', variant: 'warning' as const }
+                                : { text: '都缺', variant: 'destructive' as const };
                           return (
-                            <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-zinc-900/50 transition-colors">
-                              <td className="px-6 py-4 font-medium flex items-center justify-between">
-                                <span className="text-primary">{item.sheet_no}</span>
-                                <span className="text-muted-foreground mr-6 truncate max-w-[150px]">{item.sheet_name}</span>
+                            <tr key={item.catalog_id} className="hover:bg-gray-50 dark:hover:bg-zinc-900/50 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="flex flex-col">
+                                  <span className="font-semibold text-primary">{item.sheet_no || '-'}</span>
+                                  <span className="text-muted-foreground truncate max-w-[280px]">{item.sheet_name || '-'}</span>
+                                </div>
                               </td>
                               <td className="px-6 py-4 text-center">
-                                {drawing ? (
-                                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-100 text-green-700 border border-green-200">
-                                    <Check className="w-4 h-4" />
-                                  </span>
+                                {item.drawing?.id && item.drawing.png_path && id ? (
+                                  <img
+                                    src={api.getDrawingImageUrl(id, item.drawing.id, project?.cache_version)}
+                                    alt={item.sheet_no || 'drawing'}
+                                    className="w-[50px] h-[50px] object-cover rounded-md border border-gray-200 dark:border-zinc-700 inline-block"
+                                  />
                                 ) : (
-                                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-100 text-red-600 border border-red-200">
-                                    <X className="w-4 h-4" />
-                                  </span>
+                                  <span className="text-xs text-muted-foreground">未上传</span>
                                 )}
                               </td>
                               <td className="px-6 py-4 text-center">
-                                {json ? (
-                                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-100 text-green-700 border border-green-200">
-                                    <Check className="w-4 h-4" />
-                                  </span>
+                                {item.json?.id && item.json.json_path ? (
+                                  <div className="text-xs leading-relaxed">
+                                    <div>标注数: {getDimensionCountFromSummary(item.json.summary)}</div>
+                                    <div className="text-muted-foreground">v{item.json.data_version || 1}</div>
+                                  </div>
                                 ) : (
-                                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-100 text-red-600 border border-red-200">
-                                    <X className="w-4 h-4" />
-                                  </span>
+                                  <span className="text-xs text-muted-foreground">未生成</span>
                                 )}
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                <Badge variant={statusBadge.variant} className="shadow-sm py-1">
+                                  {statusBadge.text}
+                                </Badge>
                               </td>
                               <td className="px-6 py-4 text-right">
-                                <Badge variant={ready ? 'success' : 'warning'} className="shadow-sm py-1">
-                                  {ready ? '可审核' : '缺损数据'}
-                                </Badge>
+                                {item.status === 'ready' ? (
+                                  <span className="text-xs text-muted-foreground">-</span>
+                                ) : item.status === 'missing_png' ? (
+                                  <Button size="sm" variant="outline" onClick={() => setCurrentStep(1)}>
+                                    去补 PNG
+                                  </Button>
+                                ) : item.status === 'missing_json' ? (
+                                  <Button size="sm" variant="outline" onClick={() => setCurrentStep(2)}>
+                                    去补 DWG
+                                  </Button>
+                                ) : (
+                                  <div className="flex justify-end gap-2">
+                                    <Button size="sm" variant="outline" onClick={() => setCurrentStep(1)}>
+                                      补 PNG
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => setCurrentStep(2)}>
+                                      补 DWG
+                                    </Button>
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           );
@@ -934,16 +1105,31 @@ export default function ProjectDetail() {
                 </Card>
 
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                  <Button variant="outline" size="lg" className="rounded-full w-full sm:w-auto hover-lift border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
-                    部分补充
-                  </Button>
-                  <Button onClick={handleStartAudit} disabled={uploading} size="lg" className="rounded-full w-full sm:w-auto shadow-xl shadow-indigo-500/20 bg-indigo-600 hover:bg-indigo-700 text-white hover:scale-105 transition-all">
-                    {uploading ? (
-                      <><RefreshCw className="mr-2 h-5 w-5 animate-spin" /> 执行高并发计算中...</>
-                    ) : (
-                      <><Play className="mr-2 h-5 w-5 fill-current" /> 正式引爆 AI 强审计</>
-                    )}
-                  </Button>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex w-full sm:w-auto">
+                          <Button
+                            onClick={handleStartAudit}
+                            disabled={uploading || !canStartAudit}
+                            size="lg"
+                            className="rounded-full w-full sm:w-auto shadow-xl shadow-indigo-500/20 bg-indigo-600 hover:bg-indigo-700 text-white hover:scale-105 transition-all disabled:opacity-50"
+                          >
+                            {uploading ? (
+                              <><RefreshCw className="mr-2 h-5 w-5 animate-spin" /> 执行审核中...</>
+                            ) : (
+                              <><Play className="mr-2 h-5 w-5 fill-current" /> 开始审核</>
+                            )}
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {!canStartAudit && (
+                        <TooltipContent sideOffset={8}>
+                          {blockedReason}
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
               </CardContent>
             </Card>

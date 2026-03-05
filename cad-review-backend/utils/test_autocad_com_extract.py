@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Windows AutoCAD COM extraction smoke test.
+DWG extraction smoke test (ODA + ezdxf).
 
 Usage:
   python utils/test_autocad_com_extract.py --dwg-dir D:\\dwgs --out-dir D:\\jsons
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import platform
 import sys
 from pathlib import Path
 
@@ -22,9 +21,6 @@ def main() -> int:
     parser.add_argument("--dwg-dir", default="", help="Directory containing DWG files")
     parser.add_argument("--out-dir", required=True, help="Output directory for layout json files")
     args = parser.parse_args()
-
-    if platform.system() != "Windows":
-        print("[WARN] This script is intended for Windows + AutoCAD COM.")
 
     dwg_paths = [str(Path(p).resolve()) for p in args.dwg]
     if args.dwg_dir:

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db
@@ -159,6 +160,35 @@ def get_drawings(project_id: str, db: Session = Depends(get_db)):
     ).order_by(Drawing.page_index).all()
     
     return drawings
+
+
+@router.get("/projects/{project_id}/drawings/{drawing_id}/image")
+def get_drawing_image(project_id: str, drawing_id: str, db: Session = Depends(get_db)):
+    """获取图纸PNG缩略图源文件"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    drawing = db.query(Drawing).filter(
+        Drawing.id == drawing_id,
+        Drawing.project_id == project_id,
+        Drawing.replaced_at == None
+    ).first()
+    if not drawing or not drawing.png_path:
+        raise HTTPException(status_code=404, detail="图纸PNG不存在")
+
+    png_path = Path(drawing.png_path).expanduser()
+    if not png_path.exists():
+        raise HTTPException(status_code=404, detail="图纸PNG文件不存在")
+
+    project_root = (BASE_DIR / "projects" / project_id).resolve()
+    resolved_png = png_path.resolve()
+    try:
+        resolved_png.relative_to(project_root)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="非法文件访问")
+
+    return FileResponse(str(resolved_png), media_type="image/png")
 
 
 @router.post("/projects/{project_id}/drawings/upload")

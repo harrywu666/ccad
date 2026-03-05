@@ -5,7 +5,9 @@ DWG管理路由
 
 from __future__ import annotations
 
+import json
 import logging
+import shutil
 import re
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -224,6 +226,8 @@ async def upload_dwg(project_id: str, files: List[UploadFile] = File(...), db: S
     total_layouts = 0
     matched_layouts = 0
     unmatched_layouts = 0
+    skipped_extra_layouts = 0
+    placeholder_layouts = 0
 
     dwg_file_infos: List[Dict[str, str]] = []
     for file in files:
@@ -292,6 +296,17 @@ async def upload_dwg(project_id: str, files: List[UploadFile] = File(...), db: S
                     sheet_name = matched_catalog.sheet_name
                 status = "matched"
             else:
+                # 目录已锁定时，按目录一对一约束：额外布局不入库
+                if catalog_items:
+                    skipped_extra_layouts += 1
+                    logger.info(
+                        "跳过额外布局(未命中目录): dwg=%s layout=%s sheet_no=%s",
+                        file_name,
+                        layout_name,
+                        sheet_no,
+                    )
+                    continue
+
                 unmatched_layouts += 1
                 status = "unmatched"
 
@@ -328,6 +343,35 @@ async def upload_dwg(project_id: str, files: List[UploadFile] = File(...), db: S
                 f"索引:{len(indexes)} 标题栏:{len(title_blocks)} 材料:{len(materials)} "
                 f"材料表:{len(material_table)} 图层:{len(layers)}"
             )
+
+            # 版本化存储：{dwg}_{layout}_v{n}.json，保留历史文件
+            normalized_base = re.sub(
+                r'[\\/:*?"<>|]+',
+                "_",
+                f"{Path(file_name).stem}_{layout_name or sheet_no or 'layout'}",
+            ).strip("_") or "layout"
+            versioned_json_path = json_dir / f"{normalized_base}_v{next_version}.json"
+            source_json_path = Path(json_path) if json_path else None
+
+            try:
+                if source_json_path and source_json_path.exists():
+                    if source_json_path.resolve() != versioned_json_path.resolve():
+                        shutil.copy2(source_json_path, versioned_json_path)
+                    else:
+                        # 已是目标路径，保持不动
+                        pass
+                else:
+                    payload = json_info.get("data") or {}
+                    if payload:
+                        versioned_json_path.write_text(
+                            json.dumps(payload, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                if versioned_json_path.exists():
+                    json_path = str(versioned_json_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("JSON版本化落盘失败，保留原路径: %s (%s)", json_path, str(exc))
+
             new_json = JsonData(
                 project_id=project_id,
                 catalog_id=matched_catalog.id if matched_catalog else None,
@@ -368,6 +412,88 @@ async def upload_dwg(project_id: str, files: List[UploadFile] = File(...), db: S
                 }
             )
 
+    # 目录锁定后，若存在未匹配目录项，补占位JSON，保证一对一
+    if catalog_items:
+        for catalog_item in catalog_items:
+            if catalog_item.id in used_catalog_ids:
+                continue
+
+            existing_versions = (
+                db.query(JsonData)
+                .filter(
+                    JsonData.project_id == project_id,
+                    JsonData.catalog_id == catalog_item.id,
+                )
+                .all()
+            )
+
+            next_version = 1
+            for old in existing_versions:
+                next_version = max(next_version, (old.data_version or 0) + 1)
+                if old.is_latest == 1:
+                    old.is_latest = 0
+
+            base_name = re.sub(
+                r'[\\/:*?"<>|]+',
+                "_",
+                f"placeholder_{catalog_item.sheet_no or catalog_item.sheet_name or catalog_item.id}",
+            ).strip("_") or f"placeholder_{catalog_item.id}"
+            placeholder_path = json_dir / f"{base_name}_v{next_version}.json"
+            placeholder_payload = {
+                "source_dwg": "",
+                "layout_name": catalog_item.sheet_name or catalog_item.sheet_no or "未匹配图纸",
+                "sheet_no": catalog_item.sheet_no or "",
+                "sheet_name": catalog_item.sheet_name or "",
+                "extracted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "data_version": next_version,
+                "scale": "",
+                "model_range": {"min": [0.0, 0.0], "max": [0.0, 0.0]},
+                "viewports": [],
+                "dimensions": [],
+                "pseudo_texts": [],
+                "indexes": [],
+                "title_blocks": [],
+                "materials": [],
+                "material_table": [],
+                "layers": [],
+                "is_placeholder": True,
+            }
+            placeholder_path.write_text(
+                json.dumps(placeholder_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            new_json = JsonData(
+                project_id=project_id,
+                catalog_id=catalog_item.id,
+                sheet_no=catalog_item.sheet_no or None,
+                json_path=str(placeholder_path),
+                data_version=next_version,
+                is_latest=1,
+                summary=f"占位JSON: {catalog_item.sheet_no or ''} {catalog_item.sheet_name or ''}".strip(),
+                status="unmatched",
+            )
+            db.add(new_json)
+            db.flush()
+
+            unmatched_layouts += 1
+            placeholder_layouts += 1
+            results.append(
+                {
+                    "dwg": "",
+                    "layout_name": placeholder_payload["layout_name"],
+                    "sheet_no": placeholder_payload["sheet_no"],
+                    "sheet_name": placeholder_payload["sheet_name"],
+                    "status": "unmatched",
+                    "catalog_id": catalog_item.id,
+                    "match_score": 0.0,
+                    "json_id": new_json.id,
+                    "json_path": str(placeholder_path),
+                    "data_version": next_version,
+                    "is_placeholder": True,
+                }
+            )
+
     from services.cache_service import recalculate_project_status
 
     recalculate_project_status(project_id, db)
@@ -384,6 +510,8 @@ async def upload_dwg(project_id: str, files: List[UploadFile] = File(...), db: S
             "layouts_total": total_layouts,
             "matched": matched_layouts,
             "unmatched": unmatched_layouts,
+            "skipped_extra_layouts": skipped_extra_layouts,
+            "placeholder_layouts": placeholder_layouts,
         },
         "results": results,
     }

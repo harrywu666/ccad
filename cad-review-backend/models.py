@@ -1,11 +1,11 @@
 """
 数据库模型定义
-包含所有数据表的ORM模型：projects, project_categories, catalog, drawings, json_data, audit_results
+包含所有数据表的ORM模型：projects, project_categories, catalog, drawings, json_data, audit_results, audit_runs
 """
 
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, Text, ForeignKey
+from sqlalchemy import Column, String, Integer, DateTime, Text, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -45,6 +45,10 @@ class Project(Base):
     drawings = relationship("Drawing", back_populates="project", cascade="all, delete-orphan")
     json_data_list = relationship("JsonData", back_populates="project", cascade="all, delete-orphan")
     audit_results = relationship("AuditResult", back_populates="project", cascade="all, delete-orphan")
+    audit_runs = relationship("AuditRun", back_populates="project", cascade="all, delete-orphan")
+    sheet_contexts = relationship("SheetContext", back_populates="project", cascade="all, delete-orphan")
+    sheet_edges = relationship("SheetEdge", back_populates="project", cascade="all, delete-orphan")
+    audit_tasks = relationship("AuditTask", back_populates="project", cascade="all, delete-orphan")
 
 
 class Catalog(Base):
@@ -117,3 +121,83 @@ class AuditResult(Base):
     created_at = Column(DateTime, default=datetime.now)
 
     project = relationship("Project", back_populates="audit_results")
+
+
+class AuditRun(Base):
+    """审核任务运行记录表（用于异步进度和历史）"""
+    __tablename__ = "audit_runs"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    audit_version = Column(Integer, default=1)
+    status = Column(String, default="running")
+    current_step = Column(String, nullable=True)
+    progress = Column(Integer, default=0)
+    total_issues = Column(Integer, default=0)
+    error = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=datetime.now)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    project = relationship("Project", back_populates="audit_runs")
+
+
+class SheetContext(Base):
+    """图纸上下文分层表（L0/L1/L2）"""
+    __tablename__ = "sheet_contexts"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    catalog_id = Column(String, ForeignKey("catalog.id"), nullable=True)
+    sheet_no = Column(String, nullable=True)
+    sheet_name = Column(String, nullable=True)
+    status = Column(String, default="pending")
+    layer_l0 = Column(Text, nullable=True)
+    layer_l1 = Column(Text, nullable=True)
+    layer_l2_json_path = Column(String, nullable=True)
+    layer_l2_pdf_path = Column(String, nullable=True)
+    layer_l2_page_index = Column(Integer, nullable=True)
+    semantic_hash = Column(String, nullable=True)
+    meta_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    project = relationship("Project", back_populates="sheet_contexts")
+
+
+class SheetEdge(Base):
+    """图纸关系边表（索引引用等）"""
+    __tablename__ = "sheet_edges"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    source_sheet_no = Column(String, nullable=False)
+    target_sheet_no = Column(String, nullable=False)
+    edge_type = Column(String, default="index_ref")
+    confidence = Column(Float, default=1.0)
+    evidence_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    project = relationship("Project", back_populates="sheet_edges")
+
+
+class AuditTask(Base):
+    """审核任务规划表"""
+    __tablename__ = "audit_tasks"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    audit_version = Column(Integer, default=1)
+    task_type = Column(String, nullable=False)  # index/dimension/material
+    source_sheet_no = Column(String, nullable=True)
+    target_sheet_no = Column(String, nullable=True)
+    priority = Column(Integer, default=3)  # 1最高，5最低
+    status = Column(String, default="pending")  # pending/running/done/failed
+    trace_json = Column(Text, nullable=True)
+    result_ref = Column(String, nullable=True)  # 可关联audit_results.id或聚合标识
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    project = relationship("Project", back_populates="audit_tasks")

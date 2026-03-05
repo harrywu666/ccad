@@ -85,3 +85,40 @@ export interface AuditStatus {
   progress: number;
   total_issues: number;
 }
+
+export interface ThreeLineAsset {
+  id: string;
+  sheet_no: string | null;
+  sheet_name: string | null;
+  data_version: number | null;
+  status: string | null;
+  png_path?: string | null;
+  page_index?: number | null;
+  json_path?: string | null;
+  summary?: string | null;
+  created_at?: string | null;
+}
+
+export interface ThreeLineItem {
+  catalog_id: string;
+  sheet_no: string | null;
+  sheet_name: string | null;
+  sort_order: number;
+  status: 'ready' | 'missing_png' | 'missing_json' | 'missing_all';
+  drawing: ThreeLineAsset | null;
+  json: ThreeLineAsset | null;
+}
+
+export interface ThreeLineSummary {
+  total: number;
+  ready: number;
+  missing_png: number;
+  missing_json: number;
+  missing_all: number;
+}
+
+export interface ThreeLineMatch {
+  project_id: string;
+  summary: ThreeLineSummary;
+  items: ThreeLineItem[];
+}
