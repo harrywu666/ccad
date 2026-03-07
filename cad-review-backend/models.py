@@ -5,7 +5,7 @@
 
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, Text, ForeignKey, Float
+from sqlalchemy import Column, String, Integer, DateTime, Text, ForeignKey, Float, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -52,6 +52,16 @@ class Project(Base):
     audit_tasks = relationship("AuditTask", back_populates="project", cascade="all, delete-orphan")
 
 
+class AIPromptSetting(Base):
+    """全局 AI 提示词覆盖配置表"""
+    __tablename__ = "ai_prompt_settings"
+
+    stage_key = Column(String, primary_key=True)
+    system_prompt_override = Column(Text, nullable=True)
+    user_prompt_override = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class Catalog(Base):
     """图纸目录表"""
     __tablename__ = "catalog"
@@ -82,6 +92,7 @@ class Drawing(Base):
     data_version = Column(Integer, default=1)
     replaced_at = Column(DateTime, nullable=True)
     status = Column(String, default="unmatched")
+    annotation_board = Column(Text, nullable=True)
 
     project = relationship("Project", back_populates="drawings")
 
@@ -120,6 +131,8 @@ class AuditResult(Base):
     value_b = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     evidence_json = Column(Text, nullable=True)
+    is_resolved = Column(Integer, default=0)
+    resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
     project = relationship("Project", back_populates="audit_results")
@@ -183,6 +196,25 @@ class SheetEdge(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     project = relationship("Project", back_populates="sheet_edges")
+
+
+class DrawingAnnotation(Base):
+    """图纸标注表（按审图版本隔离）"""
+    __tablename__ = "drawing_annotations"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    drawing_id = Column(String, ForeignKey("drawings.id"), nullable=False)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    audit_version = Column(Integer, nullable=False)
+    annotation_board = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint("drawing_id", "audit_version", name="uq_drawing_audit_version"),
+    )
+
+    drawing = relationship("Drawing")
+    project = relationship("Project")
 
 
 class AuditTask(Base):

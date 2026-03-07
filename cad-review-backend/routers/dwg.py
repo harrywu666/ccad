@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 from threading import Lock
 from difflib import SequenceMatcher
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -23,23 +23,35 @@ from database import get_db
 from models import Catalog, JsonData, Project
 from services.storage_path_service import resolve_project_dir
 
+
+def _safe_filename(raw: str) -> str:
+    """提取纯文件名，防止路径穿越攻击。"""
+    return PurePosixPath(raw).name or "upload"
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 _DWG_UPLOAD_PROGRESS: Dict[str, Dict[str, Any]] = {}
 _DWG_PROGRESS_LOCK = Lock()
+_DWG_PROGRESS_TTL_SECONDS = 600
 
 
 def _set_dwg_upload_progress(project_id: str, phase: str, progress: int, message: str, success: Optional[bool] = None):
+    import time as _time
     payload: Dict[str, Any] = {
         "phase": phase,
         "progress": max(0, min(100, int(progress))),
         "message": message,
         "updated_at": datetime.now().isoformat(),
+        "_ts": _time.monotonic(),
     }
     if success is not None:
         payload["success"] = success
     with _DWG_PROGRESS_LOCK:
         _DWG_UPLOAD_PROGRESS[project_id] = payload
+        stale = [k for k, v in _DWG_UPLOAD_PROGRESS.items()
+                 if _time.monotonic() - v.get("_ts", 0) > _DWG_PROGRESS_TTL_SECONDS and k != project_id]
+        for k in stale:
+            del _DWG_UPLOAD_PROGRESS[k]
 
 def _normalize_text(value: Optional[str]) -> str:
     if not value:
@@ -266,9 +278,11 @@ async def upload_dwg(project_id: str, files: List[UploadFile] = File(...), db: S
                 logger.warning("跳过非DWG文件: %s", file_name)
                 continue
 
-            dwg_path = dwg_dir / file_name
+            dwg_path = dwg_dir / _safe_filename(file_name)
+            content = await file.read()
+            if len(content) > 500 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail=f"DWG 文件 {file_name} 不能超过 500MB")
             with open(dwg_path, "wb") as f:
-                content = await file.read()
                 f.write(content)
             dwg_file_infos.append({"file_name": file_name, "path": str(dwg_path)})
             upload_progress = 4 + int(((idx + 1) / max(len(files), 1)) * 16)

@@ -5,6 +5,7 @@
 
 import os
 import shutil
+from pathlib import PurePosixPath
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
@@ -12,6 +13,11 @@ from pydantic import BaseModel
 from database import get_db
 from models import Project, Catalog
 from services.storage_path_service import resolve_project_dir
+
+
+def _safe_filename(raw: str) -> str:
+    """提取纯文件名，防止路径穿越攻击。"""
+    return PurePosixPath(raw).name or "upload"
 
 router = APIRouter()
 
@@ -60,16 +66,19 @@ async def upload_catalog(project_id: str, file: UploadFile = File(...), db: Sess
     for item in old_catalog_items:
         db.delete(item)
     
-    file_path = project_dir / file.filename
+    file_path = project_dir / _safe_filename(file.filename or "upload.png")
+    content = await file.read()
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="目录文件不能超过 50MB")
     with open(file_path, "wb") as f:
-        content = await file.read()
         f.write(content)
     
     from services.kimi_service import async_recognize_catalog
     try:
         items = await async_recognize_catalog(str(file_path))
     except Exception as e:
-        return {"success": False, "error": str(e), "items": []}
+        db.rollback()
+        raise HTTPException(status_code=502, detail=f"目录识别失败: {str(e)}")
     
     normalized_items = []
 

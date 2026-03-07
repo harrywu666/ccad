@@ -98,35 +98,13 @@ def _run_async(coro):  # noqa: ANN001
     return holder.get("result")
 
 
-def _build_master_planner_prompt(payload: Dict[str, Any]) -> str:
-    return (
-        "你是 CAD 审图系统的总控调度 Agent。"
-        "你要生成可执行任务图（DAG）的任务节点列表。\n\n"
-        "必须遵守：\n"
-        "1) 只允许 task_type 为 index / dimension / material。\n"
-        "2) 所有图号必须严格来自输入 contexts.sheet_no，不能编造。\n"
-        "3) dimension/material 任务必须严格来自输入 edges 的 source->target，不允许新建图对。\n"
-        "4) index 任务只给有索引的图（index_count>0）。\n"
-        "5) 同一任务不能重复（task_type + source_sheet_no + target_sheet_no）。\n"
-        "6) 优先级 priority 取 1~5，1 最高。平面图优先更高。\n"
-        "7) 输出必须是 JSON 对象，字段：\n"
-        "{\n"
-        '  "tasks":[\n'
-        "    {\n"
-        '      "task_type":"index|dimension|material",\n'
-        '      "source_sheet_no":"",\n'
-        '      "target_sheet_no":"",\n'
-        '      "priority":1,\n'
-        '      "reason":"",\n'
-        '      "evidence":{"path":"", "edge_mention_count":0}\n'
-        "    }\n"
-        "  ]\n"
-        "}\n\n"
-        "你必须保证覆盖性：\n"
-        "- 对每个有效 edge，至少生成 1 条 dimension 和 1 条 material 任务。\n"
-        "- 对每个 index_count>0 的图，至少生成 1 条 index 任务。\n\n"
-        "输入数据如下（JSON）：\n"
-        f"{json.dumps(payload, ensure_ascii=False)}\n"
+def _resolve_master_planner_prompts(payload: Dict[str, Any]) -> Dict[str, str]:
+    """通过 ai_prompt_service 解析 master_task_planner 提示词。"""
+    from services.ai_prompt_service import resolve_stage_prompts
+
+    return resolve_stage_prompts(
+        "master_task_planner",
+        {"payload_json": json.dumps(payload, ensure_ascii=False)},
     )
 
 
@@ -299,13 +277,11 @@ def plan_with_master_llm(
     }
 
     try:
+        prompts = _resolve_master_planner_prompts(payload)
         result = _run_async(
             call_kimi(
-                system_prompt=(
-                    "你是施工图审图总控 Agent，负责把输入图纸关系生成可执行任务图。"
-                    "必须只返回 JSON。"
-                ),
-                user_prompt=_build_master_planner_prompt(payload),
+                system_prompt=prompts["system_prompt"],
+                user_prompt=prompts["user_prompt"],
                 temperature=0.0,
             )
         )

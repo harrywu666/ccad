@@ -1,0 +1,87 @@
+{
+  "source_dwg": "封面 COVER.dwg",
+  "layout_name": "COVER 封面",
+  "sheet_no": "COVER",
+  "sheet_name": "封面",
+  "extracted_at": "2026-03-05 11:19:18",
+  "data_version": 1,
+  "scale": "1:1",
+  "model_range": {
+    "min": [
+      226.117,
+      0.318
+    ],
+    "max": [
+      820.118,
+      420.318
+    ]
+  },
+  "viewports": [
+    {
+      "id": "BC",
+      "viewport_id": 2,
+      "position": [
+        297.0,
+        210.0
+      ],
+      "width": 594.0000000000003,
+      "height": 420.0000000000036,
+      "scale": 0.0,
+      "layer": "0",
+      "active_layer": "",
+      "frozen_layers": [],
+      "model_range": {
+        "min": [
+          226.117,
+          0.318
+        ],
+        "max": [
+          820.118,
+          420.318
+        ]
+      }
+    }
+  ],
+  "dimensions": [],
+  "pseudo_texts": [],
+  "indexes": [],
+  "title_blocks": [],
+  "materials": [],
+  "material_table": [
+    {
+      "code": "{\\H2x;SHANGHAI",
+      "name": "EXHIBITION CENTER }"
+    },
+    {
+      "code": "{\\H1.5x;红星花园咖啡",
+      "name": "} {\\H2x;上海展览中心 }"
+    },
+    {
+      "code": "{\\H1.5x;",
+      "name": "Red Star Cafe }"
+    }
+  ],
+  "layers": [
+    {
+      "name": "0",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-SHBD",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "Defpoints",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    }
+  ]
+}

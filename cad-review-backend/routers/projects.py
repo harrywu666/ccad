@@ -4,6 +4,7 @@
 """
 
 import json
+import uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db
 from models import Project, ProjectCategory
+from services.cache_service import recalculate_project_status
 from services.storage_path_service import (
     ensure_project_scaffold,
     remove_project_dirs,
@@ -83,17 +85,29 @@ def get_projects(
     search: Optional[str] = Query(None, description="项目名称搜索"),
     db: Session = Depends(get_db)
 ):
-    """获取项目列表，支持分类、状态筛选和名称搜索"""
-    query = db.query(Project)
-    
-    if category:
-        query = query.filter(Project.category == category)
-    if status:
-        query = query.filter(Project.status == status)
-    if search:
-        query = query.filter(Project.name.contains(search))
-    
-    return query.order_by(Project.updated_at.desc()).all()
+    """获取项目列表，支持分类、状态筛选和名称搜索（含状态实时重算）"""
+    rows = db.query(Project).order_by(Project.updated_at.desc()).all()
+
+    changed = False
+    for project in rows:
+        previous = project.status
+        next_status = recalculate_project_status(project.id, db)
+        if next_status and next_status != previous:
+            changed = True
+
+    if changed:
+        db.commit()
+
+    def matched(project: Project) -> bool:
+        if category and project.category != category:
+            return False
+        if status and project.status != status:
+            return False
+        if search and (search not in project.name):
+            return False
+        return True
+
+    return [project for project in rows if matched(project)]
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
@@ -102,6 +116,11 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
+    previous = project.status
+    next_status = recalculate_project_status(project_id, db)
+    if next_status and next_status != previous:
+        db.commit()
+        db.refresh(project)
     return project
 
 
@@ -133,9 +152,7 @@ def update_project_ui_preferences(project_id: str, payload: ProjectUIPreferences
 @router.post("/projects", response_model=ProjectResponse)
 def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     """创建新项目"""
-    project_id = f"proj_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-    while db.query(Project).filter(Project.id == project_id).first():
-        project_id = f"proj_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+    project_id = f"proj_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
     
     tags_json = json.dumps(project.tags) if project.tags else None
     

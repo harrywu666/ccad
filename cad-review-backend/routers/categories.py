@@ -3,6 +3,7 @@
 提供项目分类的CRUD接口
 """
 
+import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -45,8 +46,11 @@ def get_categories(db: Session = Depends(get_db)):
 @router.post("/categories", response_model=CategoryResponse)
 def create_category(category: CategoryCreate, db: Session = Depends(get_db)):
     """创建新分类"""
+    existing = db.query(ProjectCategory).filter(ProjectCategory.name == category.name).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"分类名称 '{category.name}' 已存在")
     db_category = ProjectCategory(
-        id=f"cat_{category.name}",
+        id=f"cat_{uuid.uuid4().hex[:12]}",
         name=category.name,
         color=category.color
     )

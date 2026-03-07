@@ -1,0 +1,150 @@
+{
+  "source_dwg": "G2.02 装饰设计说明 GENERAL NOTES.dwg",
+  "layout_name": "G2.02 装饰设计说明（一）",
+  "sheet_no": "G2.02",
+  "sheet_name": "装饰设计说明（一）",
+  "extracted_at": "2026-03-05 20:40:05",
+  "data_version": 1,
+  "scale": "1:1",
+  "model_range": {
+    "min": [
+      33398.105,
+      3615.04
+    ],
+    "max": [
+      34058.146,
+      4179.04
+    ]
+  },
+  "viewports": [
+    {
+      "id": "FCBE",
+      "viewport_id": 2,
+      "position": [
+        393.0,
+        298.186
+      ],
+      "width": 660.0401775707214,
+      "height": 563.9999999999688,
+      "scale": 0.0,
+      "layer": "Defpoints",
+      "active_layer": "",
+      "frozen_layers": [],
+      "model_range": {
+        "min": [
+          33398.105,
+          3615.04
+        ],
+        "max": [
+          34058.146,
+          4179.04
+        ]
+      }
+    }
+  ],
+  "dimensions": [],
+  "pseudo_texts": [],
+  "indexes": [],
+  "title_blocks": [
+    {
+      "id": "11D7A",
+      "block_name": "TB_A1",
+      "sheet_no": "",
+      "sheet_name": "",
+      "position": [
+        71770.76,
+        112758.286
+      ],
+      "layer": "0",
+      "attrs": []
+    }
+  ],
+  "materials": [],
+  "material_table": [],
+  "layers": [
+    {
+      "name": "0",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "Defpoints",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-SHBD",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—平面—文字",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—平面—填充01(线状)",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "C—图框—文字",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—平面—尺寸标注（总包砌筑）",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框填写字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图名",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "20251229-修改云线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    }
+  ]
+}

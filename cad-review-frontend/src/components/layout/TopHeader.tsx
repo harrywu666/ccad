@@ -1,8 +1,7 @@
-import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { RefreshCw } from 'lucide-react';
 import type { Category } from '@/types';
+import type { ReactNode } from 'react';
 
 interface TopHeaderProps {
     onBack: () => void;
@@ -10,15 +9,19 @@ interface TopHeaderProps {
     category?: Category;
     statusInfo: { label: string; variant: 'default' | 'secondary' | 'success' | 'warning' | 'destructive' };
     isAuditing?: boolean;
+    auditPill?: ReactNode;
 }
 
-export default function TopHeader({ onBack, title, category, statusInfo, isAuditing = false }: TopHeaderProps) {
+export default function TopHeader({ onBack, title, category, statusInfo, isAuditing = false, auditPill }: TopHeaderProps) {
     return (
         <header className="bg-white border-b border-border sticky top-0 z-50">
             <div className="px-8 py-[18px] flex items-center justify-between w-full">
-                <h1 className="text-[20px] font-semibold font-sans truncate tracking-tight text-foreground">
-                    {title}
-                </h1>
+                <div className="flex items-center gap-3 min-w-0">
+                    <h1 className="text-[20px] font-semibold font-sans truncate tracking-tight text-foreground">
+                        {title}
+                    </h1>
+                    {auditPill}
+                </div>
 
                 <div className="flex items-center gap-4">
                     {category && (

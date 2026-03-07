@@ -12,7 +12,7 @@ from typing import Optional
 
 MARKER_FILENAME = ".project_id"
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-PROJECTS_ROOT = WORKSPACE_ROOT / "projecs"
+PROJECTS_ROOT = WORKSPACE_ROOT / "projects"
 LEGACY_PROJECTS_ROOT = Path.home() / "cad-review" / "projects"
 
 

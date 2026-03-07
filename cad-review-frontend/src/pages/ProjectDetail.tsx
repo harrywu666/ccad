@@ -5,18 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import * as api from '@/api';
 import type { Project, Category, CatalogItem, Drawing, JsonData, AuditResult, AuditStatus, ThreeLineMatch, ThreeLineItem, MatchFilter } from '@/types';
+import type { AuditHistoryItem } from '@/types/api';
 
 // Layout & UI Components
 import AppLayout from '@/components/layout/AppLayout';
@@ -25,6 +16,8 @@ import AuditStepper from './ProjectDetail/components/AuditStepper';
 import UploadCard from './ProjectDetail/components/UploadCard';
 import CatalogTable from './ProjectDetail/components/CatalogTable';
 import MatchTable from './ProjectDetail/components/MatchTable';
+import ProjectStepAudit from './ProjectDetail/components/project-detail/ProjectStepAudit';
+import AuditProgressDialog, { AuditProgressPill } from './ProjectDetail/components/AuditProgressDialog';
 
 const STAGE_FLOW = [
   { match: ['校验三线匹配'], title: '准备检查' },
@@ -51,6 +44,8 @@ export default function ProjectDetail() {
   // Audit States
   const [auditStatus, setAuditStatus] = useState<AuditStatus | null>(null);
   const [auditResults, setAuditResults] = useState<AuditResult[]>([]);
+  const [auditHistory, setAuditHistory] = useState<AuditHistoryItem[]>([]);
+  const [selectedAuditVersion, setSelectedAuditVersion] = useState<number | null>(null);
   const [threeLineMatch, setThreeLineMatch] = useState<ThreeLineMatch | null>(null);
 
   // UI States
@@ -65,8 +60,11 @@ export default function ProjectDetail() {
   const [pdfUploadProgressText, setPdfUploadProgressText] = useState('上传进度');
   const [dwgUploadProgressText, setDwgUploadProgressText] = useState('上传进度');
   const [startingAudit, setStartingAudit] = useState(false);
-  const [clearingAudit, setClearingAudit] = useState(false);
-  const [showClearAuditDialog, setShowClearAuditDialog] = useState(false);
+  const [isAuditInlinePreviewOpen, setIsAuditInlinePreviewOpen] = useState(false);
+  const [isAuditProgressDialogOpen, setIsAuditProgressDialogOpen] = useState(false);
+  const [isAuditProgressMinimized, setIsAuditProgressMinimized] = useState(false);
+  const [isAuditProgressDismissed, setIsAuditProgressDismissed] = useState(false);
+  const [awaitingAuditStatusSync, setAwaitingAuditStatusSync] = useState(false);
   const [previewDrawing, setPreviewDrawing] = useState<{
     sheetNo: string;
     sheetName: string;
@@ -92,6 +90,8 @@ export default function ProjectDetail() {
   // Generic Error State
   const [error, setError] = useState('');
 
+  const loadSeqRef = useRef(0);
+
   useEffect(() => {
     if (id) loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -108,14 +108,13 @@ export default function ProjectDetail() {
         const latest = await api.getAuditStatus(id);
         setAuditStatus(latest);
         if (latest.run_status === 'done' || latest.status === 'done') {
-          if (latest.audit_version) {
-            const results = await api.getAuditResults(id, { version: latest.audit_version });
-            setAuditResults(results);
-          }
           stopped = true;
+          setSelectedAuditVersion(null);
+          await loadData();
         } else if (latest.run_status === 'failed') {
           stopped = true;
           setError(`审核失败: ${latest.error}`);
+          await loadData();
         }
       } catch (error) {
         console.error('获取审核状态失败', error);
@@ -131,6 +130,37 @@ export default function ProjectDetail() {
   }, [id, currentStep]);
 
   useEffect(() => {
+    if (currentStep !== 2) {
+      setIsAuditInlinePreviewOpen(false);
+    }
+  }, [currentStep]);
+
+  const auditRunStatus = (auditStatus?.run_status || '').toLowerCase();
+  const auditStatusValue = (auditStatus?.status || '').toLowerCase();
+  const isAuditRunning = startingAudit
+    || project?.status === 'auditing'
+    || auditStatusValue === 'auditing'
+    || ['running', 'queued', 'pending'].includes(auditRunStatus);
+  const shouldShowAuditProgress = isAuditRunning || awaitingAuditStatusSync;
+
+  useEffect(() => {
+    if (!shouldShowAuditProgress) {
+      setIsAuditProgressDialogOpen(false);
+      setIsAuditProgressMinimized(false);
+      setIsAuditProgressDismissed(false);
+      return;
+    }
+    if (isAuditProgressDismissed || isAuditProgressMinimized) return;
+    setIsAuditProgressDialogOpen(true);
+  }, [shouldShowAuditProgress, isAuditProgressDismissed, isAuditProgressMinimized]);
+
+  useEffect(() => {
+    if (isAuditRunning || auditRunStatus === 'done' || auditRunStatus === 'failed') {
+      setAwaitingAuditStatusSync(false);
+    }
+  }, [isAuditRunning, auditRunStatus]);
+
+  useEffect(() => {
     if (!previewDrawing) return;
     const handleEscClose = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -143,9 +173,10 @@ export default function ProjectDetail() {
 
   const loadData = async () => {
     if (!id) return;
+    const seq = ++loadSeqRef.current;
     try {
       setLoading(true);
-      const [proj, cats, allProjs, cat, drws, js, status, results, threeLine] = await Promise.all([
+      const [proj, cats, allProjs, cat, drws, js, status, history, threeLine] = await Promise.all([
         api.getProject(id),
         api.getCategories(),
         api.getProjects(),
@@ -153,9 +184,10 @@ export default function ProjectDetail() {
         api.getDrawings(id),
         api.getJsonDataList(id),
         api.getAuditStatus(id),
-        api.getAuditResults(id),
+        api.getAuditHistory(id).catch(() => []),
         api.getThreeLineMatch(id).catch(() => null)
       ]);
+      if (seq !== loadSeqRef.current) return;
       setProject(proj);
       setCategories(cats);
 
@@ -170,6 +202,21 @@ export default function ProjectDetail() {
       setDrawings(drws);
       setJsonData(js);
       setAuditStatus(status);
+      const historyList = (Array.isArray(history) ? history : []) as AuditHistoryItem[];
+      setAuditHistory(historyList);
+      const effectiveVersion = (() => {
+        if (selectedAuditVersion !== null && historyList.some((item) => item.version === selectedAuditVersion)) {
+          return selectedAuditVersion;
+        }
+        if (status.audit_version !== null && status.audit_version !== undefined) return status.audit_version;
+        return historyList[0]?.version ?? null;
+      })();
+      setSelectedAuditVersion(effectiveVersion);
+      const results = await api.getAuditResults(id, {
+        view: 'grouped',
+        ...(effectiveVersion !== null ? { version: effectiveVersion } : {}),
+      });
+      if (seq !== loadSeqRef.current) return;
       setAuditResults(results);
       setThreeLineMatch(threeLine);
 
@@ -178,9 +225,10 @@ export default function ProjectDetail() {
       else if (proj.status === 'catalog_locked' || proj.status === 'matching' || proj.status === 'ready') setCurrentStep(1);
       else if (proj.status === 'auditing' || proj.status === 'done') setCurrentStep(2);
     } catch (err: any) {
+      if (seq !== loadSeqRef.current) return;
       setError(err?.response?.data?.detail || err.message || '加载失败');
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   };
 
@@ -321,27 +369,31 @@ export default function ProjectDetail() {
     if (!id) return;
     try {
       setStartingAudit(true);
+      setAwaitingAuditStatusSync(true);
+      setIsAuditProgressDismissed(false);
+      setIsAuditProgressMinimized(false);
+      setIsAuditProgressDialogOpen(true);
       await api.startAudit(id);
       await loadData();
       setCurrentStep(2);
     } catch (err: any) {
+      setAwaitingAuditStatusSync(false);
+      setIsAuditProgressDialogOpen(false);
+      setIsAuditProgressMinimized(false);
       setError(err?.response?.data?.detail || '启动审核失败');
     } finally {
       setStartingAudit(false);
     }
   };
 
-  const handleClearAuditReport = async () => {
+  const handleSelectAuditVersion = async (version: number) => {
     if (!id) return;
     try {
-      setClearingAudit(true);
-      await api.clearAuditReport(id);
-      setShowClearAuditDialog(false);
-      await loadData();
+      const results = await api.getAuditResults(id, { version, view: 'grouped' });
+      setSelectedAuditVersion(version);
+      setAuditResults(results);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || '清空审核报告失败');
-    } finally {
-      setClearingAudit(false);
+      setError(err?.response?.data?.detail || '切换审核版本失败');
     }
   };
 
@@ -538,14 +590,77 @@ export default function ProjectDetail() {
     return activeStage ? activeStage.title : status.current_step;
   };
 
+  const getDialogPhases = (status: AuditStatus | null) => {
+    const step = status?.current_step || '';
+    const normalizedProgress = Math.max(0, Math.min(100, status?.progress || 0));
+
+    const planningDone = normalizedProgress >= 15 || step.includes('构建图纸上下文') || step.includes('规划审核任务图') || step.includes('索引核对') || step.includes('尺寸核对') || step.includes('材料核对') || step.includes('审核完成');
+    const checkingDone = normalizedProgress >= 85 || step.includes('审核完成');
+    const inChecking = !checkingDone && (normalizedProgress >= 15 || step.includes('索引核对') || step.includes('尺寸核对') || step.includes('材料核对'));
+
+    return [
+      {
+        title: '准备数据',
+        description: '核对目录、图纸与 DWG 三线关系',
+        state: planningDone ? 'complete' : 'current',
+      },
+      {
+        title: '深度审核',
+        description: '执行索引、尺寸、材料等规则检查',
+        state: checkingDone ? 'complete' : (inChecking ? 'current' : 'pending'),
+      },
+      {
+        title: '生成报告',
+        description: '汇总问题并输出审核报告',
+        state: checkingDone ? 'current' : 'pending',
+      },
+    ] as const;
+  };
+
+  const getDialogEtaText = (status: AuditStatus | null) => {
+    const progress = Math.max(0, Math.min(100, status?.progress || 0));
+    if (progress >= 98) return '预计几十秒内完成';
+    if (progress >= 85) return '预计 1 分钟内完成';
+    if (progress >= 60) return '预计 1-2 分钟';
+    if (progress >= 30) return '预计 2-4 分钟';
+    return '预计 3-6 分钟';
+  };
+
+  const handleDeleteAuditVersion = async (version: number) => {
+    if (!id) return;
+    if (!window.confirm(`确认删除审核版本 v${version}？该操作不可恢复。`)) return;
+    try {
+      setError('');
+      await api.deleteAuditVersion(id, version);
+      await loadData();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || '删除审核版本失败');
+    }
+  };
+
   return (
-    <AppLayout categories={categories} categoryCount={categoryCount} showSidebar={false}>
+    <AppLayout
+      categories={categories}
+      categoryCount={categoryCount}
+      showSidebar={false}
+      fullWidth={currentStep === 2 && isAuditInlinePreviewOpen}
+    >
       <TopHeader
         title={project.name}
         category={category}
         onBack={() => navigate('/')}
         statusInfo={statusMap[project.status] || { label: '未知', variant: 'default' }}
         isAuditing={project.status === 'auditing'}
+        auditPill={shouldShowAuditProgress && isAuditProgressMinimized ? (
+          <AuditProgressPill
+            progress={Math.max(3, Math.min(99, auditStatus?.progress || 0))}
+            onClick={() => {
+              setIsAuditProgressMinimized(false);
+              setIsAuditProgressDialogOpen(true);
+              setIsAuditProgressDismissed(false);
+            }}
+          />
+        ) : undefined}
       />
 
       <div className="flex flex-col flex-1 pb-16 px-8 gap-6">
@@ -701,91 +816,21 @@ export default function ProjectDetail() {
           )}
 
           {currentStep === 2 && (
-            <div className="w-full space-y-8 animate-in fade-in duration-500 mx-auto">
-              {project.status === 'auditing' ? (
-                <Card className="rounded-none border-border shadow-none border p-16 text-center w-full bg-white">
-                  <RefreshCw className="h-12 w-12 text-primary animate-spin mx-auto mb-6" />
-                  <h3 className="text-[20px] font-semibold mb-3">AI 内核正在扫描核对</h3>
-                  <p className="text-[14px] text-muted-foreground mb-8 text-balance">
-                    正在持续深入挖掘分析，由于要进行庞大的交叉核对运算，这个过程可能需要几分钟。您可以先去喝杯咖啡。目前：{getStageTitle(auditStatus)}
-                  </p>
-                  <Progress value={auditStatus?.progress || 0} className="w-[300px] mx-auto h-1 bg-secondary [&>div]:bg-primary" />
-                </Card>
-              ) : (
-                <div className="space-y-6">
-                  <div className="flex justify-between items-center mb-6">
-                    <div>
-                      <h2 className="text-[24px] font-semibold flex items-center gap-2">
-                        <CheckCircle className="h-6 w-6 text-success" />
-                        审核报告就绪
-                      </h2>
-                      <p className="text-[14px] text-muted-foreground mt-1 text-balance">全部深度核查完成，您可以直观浏览异常项，也可以下载留存 PDF 报告。</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => setShowClearAuditDialog(true)}
-                        className="rounded-none bg-white shadow-none h-10 px-4"
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        清空审核报告
-                      </Button>
-                      <Button className="rounded-none bg-primary shadow-none h-10 w-[160px]">
-                        <Download className="w-4 h-4 mr-2" />
-                        导出详细报告
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <Card className="rounded-none border-border shadow-none bg-secondary/10">
-                      <CardContent className="p-6">
-                        <p className="text-[13px] text-muted-foreground mb-2">发现异常总计</p>
-                        <p className="text-[32px] font-semibold text-foreground leading-none">{auditStatus?.total_issues || 0}</p>
-                      </CardContent>
-                    </Card>
-                    <Card className="rounded-none border-border shadow-none bg-destructive/5">
-                      <CardContent className="p-6">
-                        <p className="text-[13px] text-destructive/80 mb-2 flex items-center gap-1.5"><X className="w-4 h-4" />索引错误</p>
-                        <p className="text-[32px] font-semibold text-destructive leading-none">{auditResults.filter(r => r.type === 'index').length}</p>
-                      </CardContent>
-                    </Card>
-                    <Card className="rounded-none border-border shadow-none bg-warning/5">
-                      <CardContent className="p-6">
-                        <p className="text-[13px] text-warning-foreground mb-2 flex items-center gap-1.5"><AlertCircle className="w-4 h-4" />尺寸分歧</p>
-                        <p className="text-[32px] font-semibold text-warning-foreground leading-none">{auditResults.filter(r => r.type === 'dimension').length}</p>
-                      </CardContent>
-                    </Card>
-                    <Card className="rounded-none border-border shadow-none bg-info/5">
-                      <CardContent className="p-6">
-                        <p className="text-[13px] text-primary/80 mb-2 flex items-center gap-1.5"><Database className="w-4 h-4" />材料未对齐</p>
-                        <p className="text-[32px] font-semibold text-primary leading-none">{auditResults.filter(r => r.type === 'material').length}</p>
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  <div className="space-y-4 pt-6">
-                    {auditResults.map(res => (
-                      <div key={res.id} className="p-6 bg-white border border-border flex items-start gap-4">
-                        <Badge variant={res.severity === 'error' ? 'destructive' : 'warning'} className="rounded-none shrink-0 h-6 px-3">{res.type}</Badge>
-                        <div className="flex-1">
-                          <div className="flex gap-2 items-center mb-1.5">
-                            <span className="text-[13px] font-medium bg-secondary px-2 py-0.5 text-foreground">{res.sheet_no_a}</span>
-                            {res.sheet_no_b && (
-                              <>
-                                <X className="w-3 h-3 text-muted-foreground" />
-                                <span className="text-[13px] font-medium bg-secondary px-2 py-0.5 text-foreground">{res.sheet_no_b}</span>
-                              </>
-                            )}
-                          </div>
-                          <p className="text-[14px] text-muted-foreground/90">{res.description}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <ProjectStepAudit
+              projectId={id}
+              projectStatus={project?.status || 'new'}
+              projectCacheVersion={project?.cache_version}
+              auditStatus={auditStatus}
+              auditHistory={auditHistory}
+              selectedAuditVersion={selectedAuditVersion}
+              auditResults={auditResults}
+              drawings={drawings}
+              stageTitle={getStageTitle(auditStatus)}
+              onSelectAuditVersion={(version) => { void handleSelectAuditVersion(version); }}
+              onRequestDeleteVersion={(version) => { void handleDeleteAuditVersion(version); }}
+              onAuditResultsChange={setAuditResults}
+              onInlinePreviewChange={setIsAuditInlinePreviewOpen}
+            />
           )}
         </div>
       </div>
@@ -855,44 +900,73 @@ export default function ProjectDetail() {
         </>
       )}
 
-      <AlertDialog
-        open={showClearAuditDialog}
-        onOpenChange={(open) => {
-          if (!clearingAudit) setShowClearAuditDialog(open);
-        }}
-      >
-        <AlertDialogContent className="max-w-[560px] rounded-none border border-border bg-white p-0 shadow-lg">
-          <AlertDialogHeader className="items-start gap-4 px-7 pt-7 text-left">
-            <AlertDialogTitle className="text-[22px] font-semibold leading-none text-zinc-900">
-              清空审核报告
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-[14px] leading-6 text-zinc-600">
-              将删除该项目现有审核结果与运行记录。该操作不可撤销。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+      {shouldShowAuditProgress && isAuditProgressDialogOpen ? (
+        <AuditProgressDialog
+          open
+          progress={Math.max(3, Math.min(99, auditStatus?.progress || 0))}
+          headline={getStageTitle(auditStatus)}
+          supportingText={
+            auditStatus?.current_step
+              ? `当前阶段：${auditStatus.current_step}`
+              : '系统正在后台持续扫描和核对图纸数据。'
+          }
+          etaText={getDialogEtaText(auditStatus)}
+          phases={[...getDialogPhases(auditStatus)]}
+          onMinimize={() => {
+            setIsAuditProgressDialogOpen(false);
+            setIsAuditProgressMinimized(true);
+          }}
+          onRequestClose={async (onStep) => {
+            const pid = id || '';
+            let abortedVersion: number | null = null;
 
-          <div className="mx-7 mt-5 rounded-none border border-border bg-secondary px-4 py-3.5 text-[14px] text-zinc-700">
-            <span className="text-zinc-500">项目：</span>
-            <span className="font-medium text-zinc-900">{project?.name || '-'}</span>
-          </div>
+            onStep('正在发送终止信号...');
+            try {
+              const res = await api.stopAudit(pid);
+              abortedVersion = res.audit_version ?? null;
+            } catch {
+              // 任务可能已结束
+            }
 
-          <AlertDialogFooter className="mt-7 flex-row justify-end gap-3 border-t border-zinc-100 px-7 py-5">
-            <AlertDialogCancel
-              disabled={clearingAudit}
-              className="h-10 rounded-none border-border bg-white px-6 text-[15px] font-medium text-zinc-700 hover:bg-secondary"
-            >
-              取消
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleClearAuditReport}
-              disabled={clearingAudit}
-              className="h-10 rounded-none bg-red-600 px-6 text-[15px] font-semibold text-white hover:bg-red-700"
-            >
-              {clearingAudit ? '清空中...' : '确认清空'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            onStep('等待后台任务结束...');
+            for (let i = 0; i < 60; i++) {
+              await new Promise((r) => setTimeout(r, 1500));
+              try {
+                const s = await api.getAuditStatus(pid);
+                const runSt = (s.run_status || '').toLowerCase();
+                if (!['running', 'queued', 'pending'].includes(runSt)) {
+                  if (!abortedVersion && s.audit_version) {
+                    abortedVersion = s.audit_version;
+                  }
+                  break;
+                }
+              } catch {
+                break;
+              }
+            }
+
+            if (abortedVersion) {
+              onStep('清除本次审图数据...');
+              try {
+                await api.deleteAuditVersion(pid, abortedVersion);
+              } catch {
+                // 忽略清除失败
+              }
+            }
+
+            onStep('刷新页面数据...');
+            setIsAuditProgressDialogOpen(false);
+            setIsAuditProgressMinimized(false);
+            setIsAuditProgressDismissed(true);
+            setAuditStatus(null);
+            setAuditResults([]);
+            setAuditHistory([]);
+            setSelectedAuditVersion(null);
+            await loadData();
+          }}
+        />
+      ) : null}
+
     </AppLayout>
   );
 }

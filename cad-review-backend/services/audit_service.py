@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
-from models import JsonData, AuditResult, Catalog, Drawing, Project
+from models import JsonData, AuditResult, AuditRun, Catalog, Drawing, Project
 from services.coordinate_service import cad_to_global_pct, enrich_json_with_coordinates
 from services.storage_path_service import resolve_project_dir
 
@@ -64,6 +64,40 @@ def _derive_project_status(summary: Dict[str, int]) -> str:
     return "matching"
 
 
+def _derive_audit_override_status(project_id: str, db) -> Optional[str]:  # noqa: ANN001
+    running_run = (
+        db.query(AuditRun.id)
+        .filter(
+            AuditRun.project_id == project_id,
+            AuditRun.status == "running",
+        )
+        .first()
+    )
+    if running_run:
+        return "auditing"
+
+    done_run = (
+        db.query(AuditRun.id)
+        .filter(
+            AuditRun.project_id == project_id,
+            AuditRun.status == "done",
+        )
+        .first()
+    )
+    if done_run:
+        return "done"
+
+    any_result = (
+        db.query(AuditResult.id)
+        .filter(AuditResult.project_id == project_id)
+        .first()
+    )
+    if any_result:
+        return "done"
+
+    return None
+
+
 def match_three_lines(project_id: str, db) -> Dict[str, Any]:
     """
     三线匹配：以锁定目录为基准，汇总目录 / PNG / JSON 的一对一状态。
@@ -98,7 +132,7 @@ def match_three_lines(project_id: str, db) -> Dict[str, Any]:
     }
 
     if not catalogs:
-        next_status = _derive_project_status(summary)
+        next_status = _derive_audit_override_status(project_id, db) or _derive_project_status(summary)
         if project.status != next_status:
             project.status = next_status
             db.commit()
@@ -196,7 +230,7 @@ def match_three_lines(project_id: str, db) -> Dict[str, Any]:
             }
         )
 
-    next_status = _derive_project_status(summary)
+    next_status = _derive_audit_override_status(project_id, db) or _derive_project_status(summary)
     if project.status != next_status:
         project.status = next_status
         db.commit()

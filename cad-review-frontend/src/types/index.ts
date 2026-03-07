@@ -75,6 +75,14 @@ export interface AuditResult {
   value_a: string | null;
   value_b: string | null;
   description: string | null;
+  evidence_json: string | null;
+  locations: string[];
+  occurrence_count: number;
+  is_resolved: boolean;
+  resolved_at: string | null;
+  is_grouped: boolean;
+  group_id: string | null;
+  issue_ids: string[];
 }
 
 export interface AuditStatus {

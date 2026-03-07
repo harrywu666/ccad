@@ -1,0 +1,97 @@
+{
+  "source_dwg": "G2.00 图纸索引.dwg",
+  "layout_name": "G2.00 图纸索引",
+  "sheet_no": "G2.00",
+  "sheet_name": "图纸索引",
+  "extracted_at": "2026-03-05 11:19:18",
+  "data_version": 1,
+  "scale": "",
+  "model_range": {
+    "min": [
+      0.0,
+      0.0
+    ],
+    "max": [
+      0.0,
+      0.0
+    ]
+  },
+  "viewports": [],
+  "dimensions": [],
+  "pseudo_texts": [],
+  "indexes": [],
+  "title_blocks": [
+    {
+      "id": "365",
+      "block_name": "TB_A1",
+      "sheet_no": "",
+      "sheet_name": "",
+      "position": [
+        71770.76,
+        112758.286
+      ],
+      "layer": "0",
+      "attrs": []
+    }
+  ],
+  "materials": [],
+  "material_table": [],
+  "layers": [
+    {
+      "name": "0",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-SHBD",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "Defpoints",
+      "visible": false,
+      "on": false,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框填写字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图名",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "GN_00_A1_V_index$0$A-ANNO-TEXT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    }
+  ]
+}

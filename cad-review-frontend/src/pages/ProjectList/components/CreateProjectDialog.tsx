@@ -23,7 +23,7 @@ interface CreateProjectDialogProps {
 }
 
 export default function CreateProjectDialog({ isOpen, onOpenChange, categories, onSuccess }: CreateProjectDialogProps) {
-    const [newProject, setNewProject] = useState({ name: '', category: '', description: '' });
+    const [newProject, setNewProject] = useState({ name: '', category: '' });
     const [createError, setCreateError] = useState('');
     const [isCreating, setIsCreating] = useState(false);
 
@@ -48,10 +48,9 @@ export default function CreateProjectDialog({ isOpen, onOpenChange, categories, 
             await api.createProject({
                 name: newProject.name,
                 category: newProject.category || undefined,
-                description: newProject.description || undefined,
             });
             onOpenChange(false);
-            setNewProject({ name: '', category: '', description: '' });
+            setNewProject({ name: '', category: '' });
             onSuccess();
         } catch (error) {
             setCreateError(getErrorMessage(error, '创建项目失败，请稍后重试。'));
@@ -83,6 +82,7 @@ export default function CreateProjectDialog({ isOpen, onOpenChange, categories, 
                         </Label>
                         <Input
                             id="name"
+                            autoComplete="off"
                             placeholder="例如：上海某某旗舰店室内方案..."
                             value={newProject.name}
                             onChange={e => {
@@ -93,38 +93,23 @@ export default function CreateProjectDialog({ isOpen, onOpenChange, categories, 
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="category" className="text-[14px] text-foreground font-sans">项目分类</Label>
-                            <Select value={newProject.category} onValueChange={v => {
-                                setNewProject({ ...newProject, category: v });
-                                if (createError) setCreateError('');
-                            }}>
-                                <SelectTrigger className="bg-white border-border rounded-none h-10 shadow-none text-[14px]">
-                                    <SelectValue placeholder="选择分类" />
-                                </SelectTrigger>
-                                <SelectContent className="bg-white border-border rounded-none shadow-sm">
-                                    {categories.map(cat => (
-                                        <SelectItem key={cat.id} value={cat.id} className="text-[14px] rounded-none cursor-pointer">
-                                            {cat.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="description" className="text-[14px] text-foreground font-sans">备注</Label>
-                            <Input
-                                id="description"
-                                placeholder="选填"
-                                value={newProject.description}
-                                onChange={e => {
-                                    setNewProject({ ...newProject, description: e.target.value });
-                                    if (createError) setCreateError('');
-                                }}
-                                className="bg-white border-border rounded-none h-10 text-[14px] focus-visible:ring-1 focus-visible:ring-primary shadow-none"
-                            />
-                        </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="category" className="text-[14px] text-foreground font-sans">项目分类</Label>
+                        <Select value={newProject.category} onValueChange={v => {
+                            setNewProject({ ...newProject, category: v });
+                            if (createError) setCreateError('');
+                        }}>
+                            <SelectTrigger className="bg-white border-border rounded-none h-10 shadow-none text-[14px]">
+                                <SelectValue placeholder="选择分类" />
+                            </SelectTrigger>
+                            <SelectContent position="popper" className="bg-white border-border rounded-none shadow-sm">
+                                {categories.map(cat => (
+                                    <SelectItem key={cat.id} value={cat.id} className="text-[14px] rounded-none cursor-pointer">
+                                        {cat.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                     </div>
 
                     {createError && (

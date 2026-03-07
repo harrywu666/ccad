@@ -3,8 +3,10 @@
 提供审核启动、进度查询、结果查询接口
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
+import hashlib
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, ConfigDict
@@ -28,6 +30,13 @@ class AuditResultResponse(BaseModel):
     value_b: Optional[str] = None
     description: Optional[str] = None
     evidence_json: Optional[str] = None
+    locations: List[str] = []
+    occurrence_count: int = 1
+    is_resolved: bool = False
+    resolved_at: Optional[datetime] = None
+    is_grouped: bool = False
+    group_id: Optional[str] = None
+    issue_ids: List[str] = []
 
     class Config:
         from_attributes = True
@@ -45,6 +54,15 @@ class AuditStatusResponse(BaseModel):
     error: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+
+
+class AuditResultUpdateRequest(BaseModel):
+    is_resolved: bool
+
+
+class BatchAuditResultUpdateRequest(BaseModel):
+    result_ids: List[str]
+    is_resolved: bool
 
 
 class AuditTaskResponse(BaseModel):
@@ -104,12 +122,116 @@ class ThreeLineMatchResponse(BaseModel):
     items: List[ThreeLineItemResponse]
 
 
+def _normalize_index_description(description: Optional[str]) -> str:
+    text = (description or "").strip()
+    if not text:
+        return ""
+    # 将“索引A1/索引6”这类位置标签归一，便于相似问题合并
+    text = re.sub(r"中的索引[^\s，。]+", "中的索引*", text)
+    text = re.sub(r"索引[\w\-.]+", "索引*", text)
+    return text
+
+
+def _serialize_audit_result(item: AuditResult) -> Dict[str, Any]:
+    location = item.location.strip() if isinstance(item.location, str) else item.location
+    return {
+        "id": item.id,
+        "project_id": item.project_id,
+        "audit_version": item.audit_version,
+        "type": item.type,
+        "severity": item.severity,
+        "sheet_no_a": item.sheet_no_a,
+        "sheet_no_b": item.sheet_no_b,
+        "location": location,
+        "locations": [location] if location else [],
+        "occurrence_count": 1,
+        "value_a": item.value_a,
+        "value_b": item.value_b,
+        "description": item.description,
+        "evidence_json": item.evidence_json,
+        "is_resolved": bool(item.is_resolved),
+        "resolved_at": item.resolved_at,
+        "is_grouped": False,
+        "group_id": None,
+        "issue_ids": [item.id],
+    }
+
+
+def _group_results_for_view(raw_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    groups: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
+    for item in raw_items:
+        if item.get("type") == "index":
+            key = (
+                "index",
+                item.get("sheet_no_a") or "",
+                item.get("sheet_no_b") or "",
+                _normalize_index_description(item.get("description")),
+            )
+        else:
+            # 仅对索引问题做合并，其他类型保留单条
+            key = ("single", item["id"])
+        groups.setdefault(key, []).append(item)
+
+    grouped: List[Dict[str, Any]] = []
+    for key, entries in groups.items():
+        if len(entries) == 1 and key[0] == "single":
+            grouped.append(entries[0])
+            continue
+
+        first = entries[0]
+        issue_ids = [entry["id"] for entry in entries]
+        all_locations: List[str] = []
+        for entry in entries:
+            for loc in entry.get("locations") or []:
+                if isinstance(loc, str) and loc and loc not in all_locations:
+                    all_locations.append(loc)
+
+        if not all_locations and first.get("location"):
+            all_locations = [first["location"]]
+
+        if len(all_locations) <= 4:
+            location_text = "、".join(all_locations) if all_locations else first.get("location")
+        else:
+            location_text = f"{'、'.join(all_locations[:4])} 等{len(all_locations)}处"
+
+        resolved_values = [bool(entry.get("is_resolved")) for entry in entries]
+        is_resolved = all(resolved_values) if resolved_values else False
+        resolved_candidates = [entry.get("resolved_at") for entry in entries if entry.get("resolved_at")]
+        resolved_at = max(resolved_candidates) if (is_resolved and resolved_candidates) else None
+
+        key_text = "|".join(str(part) for part in key)
+        group_id = f"group_{hashlib.md5(key_text.encode('utf-8')).hexdigest()[:16]}"
+
+        grouped.append(
+            {
+                **first,
+                "id": group_id,
+                "location": location_text,
+                "locations": all_locations,
+                "occurrence_count": len(issue_ids),
+                "is_resolved": is_resolved,
+                "resolved_at": resolved_at,
+                "is_grouped": True,
+                "group_id": group_id,
+                "issue_ids": issue_ids,
+            }
+        )
+
+    return grouped
+
+
 @router.get("/projects/{project_id}/audit/status", response_model=AuditStatusResponse)
 def get_audit_status(project_id: str, db: Session = Depends(get_db)):
     """获取审核状态"""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
+    from services.cache_service import recalculate_project_status
+    previous = project.status
+    next_status = recalculate_project_status(project_id, db)
+    if next_status and next_status != previous:
+        db.commit()
+        db.refresh(project)
 
     from services.audit_runtime_service import get_latest_run, build_run_snapshot
 
@@ -169,6 +291,7 @@ def get_audit_results(
     project_id: str, 
     version: Optional[int] = Query(None, description="审核版本号"),
     type: Optional[str] = Query(None, description="问题类型筛选"),
+    view: str = Query("raw", description="返回视图：raw/grouped"),
     db: Session = Depends(get_db)
 ):
     """获取审核结果"""
@@ -189,8 +312,77 @@ def get_audit_results(
     
     if type:
         query = query.filter(AuditResult.type == type)
-    
-    return query.all()
+
+    raw_rows = query.order_by(AuditResult.created_at.asc()).all()
+    raw_items = [_serialize_audit_result(item) for item in raw_rows]
+    if view == "grouped":
+        return _group_results_for_view(raw_items)
+    return raw_items
+
+
+@router.patch("/projects/{project_id}/audit/results/batch")
+def batch_update_audit_results(
+    project_id: str,
+    payload: BatchAuditResultUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """批量更新审核结果处理状态"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    result_ids = list(dict.fromkeys(payload.result_ids or []))
+    if not result_ids:
+        raise HTTPException(status_code=400, detail="result_ids 不能为空")
+
+    results = (
+        db.query(AuditResult)
+        .filter(
+            AuditResult.project_id == project_id,
+            AuditResult.id.in_(result_ids),
+        )
+        .all()
+    )
+    if not results:
+        raise HTTPException(status_code=404, detail="审核结果不存在")
+
+    now = datetime.now()
+    for item in results:
+        item.is_resolved = 1 if payload.is_resolved else 0
+        item.resolved_at = now if payload.is_resolved else None
+
+    db.commit()
+    return {"success": True, "updated": len(results)}
+
+
+@router.patch("/projects/{project_id}/audit/results/{result_id}", response_model=AuditResultResponse)
+def update_audit_result(
+    project_id: str,
+    result_id: str,
+    payload: AuditResultUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """更新单条审核结果的人工处理状态"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    result = (
+        db.query(AuditResult)
+        .filter(
+            AuditResult.project_id == project_id,
+            AuditResult.id == result_id,
+        )
+        .first()
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="审核结果不存在")
+
+    result.is_resolved = 1 if payload.is_resolved else 0
+    result.resolved_at = datetime.now() if payload.is_resolved else None
+    db.commit()
+    db.refresh(result)
+    return _serialize_audit_result(result)
 
 
 @router.get("/projects/{project_id}/audit/history")
@@ -221,6 +413,7 @@ def get_audit_history(project_id: str, db: Session = Depends(get_db)):
             types = {}
             for item in results:
                 types[item.type] = types.get(item.type, 0) + 1
+            grouped_count = len(_group_results_for_view([_serialize_audit_result(item) for item in results]))
 
             history.append(
                 {
@@ -229,6 +422,7 @@ def get_audit_history(project_id: str, db: Session = Depends(get_db)):
                     "current_step": run.current_step,
                     "progress": run.progress,
                     "count": run.total_issues if run.total_issues else len(results),
+                    "grouped_count": grouped_count,
                     "types": types,
                     "error": run.error,
                     "started_at": run.started_at.isoformat() if run.started_at else None,
@@ -243,10 +437,13 @@ def get_audit_history(project_id: str, db: Session = Depends(get_db)):
     for result in results:
         ver = result.audit_version
         if ver not in history:
-            history[ver] = {"version": ver, "count": 0, "types": {}, "status": "done"}
+            history[ver] = {"version": ver, "count": 0, "grouped_count": 0, "types": {}, "status": "done"}
         history[ver]["count"] += 1
         t = result.type
         history[ver]["types"][t] = history[ver]["types"].get(t, 0) + 1
+    for ver in list(history.keys()):
+        version_items = [item for item in results if item.audit_version == ver]
+        history[ver]["grouped_count"] = len(_group_results_for_view([_serialize_audit_result(item) for item in version_items]))
     return list(history.values())
 
 
@@ -357,8 +554,12 @@ def start_audit(project_id: str, db: Session = Depends(get_db)):
             "audit_version": latest_run.audit_version if latest_run else None,
         }
 
-    # 进程重启或异常中断后，清理遗留的running记录
     mark_stale_running_runs(project_id, db)
+
+    from services.audit_runtime_service import _set_running, _clear_running
+
+    if not _set_running(project_id):
+        raise HTTPException(status_code=409, detail="该项目已有审核任务在运行")
 
     new_version = get_next_audit_version(project_id, db)
 
@@ -383,12 +584,44 @@ def start_audit(project_id: str, db: Session = Depends(get_db)):
         run.finished_at = datetime.now()
         project.status = "ready"
         db.commit()
+        _clear_running(project_id)
         raise HTTPException(status_code=409, detail=str(exc))
 
     return {
         "success": True,
         "message": "审核已开始",
         "audit_version": new_version
+    }
+
+
+@router.post("/projects/{project_id}/audit/stop")
+def stop_audit(project_id: str, db: Session = Depends(get_db)):
+    """中断当前审核任务（协作取消）。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    running_run = (
+        db.query(AuditRun)
+        .filter(
+            AuditRun.project_id == project_id,
+            AuditRun.status == "running",
+        )
+        .order_by(AuditRun.audit_version.desc(), AuditRun.created_at.desc())
+        .first()
+    )
+    if not running_run:
+        return {"success": True, "message": "当前没有运行中的审核任务"}
+
+    from services.audit_runtime.cancel_registry import request_cancel
+
+    request_cancel(project_id)
+    running_run.current_step = "正在中断（用户请求）"
+    db.commit()
+    return {
+        "success": True,
+        "message": "已发送中断请求",
+        "audit_version": running_run.audit_version,
     }
 
 
@@ -475,4 +708,86 @@ def clear_audit_report(project_id: str, db: Session = Depends(get_db)):
             "runs": deleted_runs,
             "tasks": deleted_tasks,
         },
+    }
+
+
+@router.delete("/projects/{project_id}/audit/version/{version}")
+def delete_audit_version(project_id: str, version: int, db: Session = Depends(get_db)):
+    """删除单个审核版本（结果、运行记录与任务记录）"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    running = (
+        db.query(AuditRun)
+        .filter(
+            AuditRun.project_id == project_id,
+            AuditRun.audit_version == version,
+            AuditRun.status == "running",
+        )
+        .first()
+    )
+    if running:
+        raise HTTPException(status_code=409, detail="该审核版本仍在运行，无法删除")
+
+    deleted_results = (
+        db.query(AuditResult)
+        .filter(
+            AuditResult.project_id == project_id,
+            AuditResult.audit_version == version,
+        )
+        .delete(synchronize_session=False)
+    )
+    deleted_runs = (
+        db.query(AuditRun)
+        .filter(
+            AuditRun.project_id == project_id,
+            AuditRun.audit_version == version,
+        )
+        .delete(synchronize_session=False)
+    )
+    deleted_tasks = (
+        db.query(AuditTask)
+        .filter(
+            AuditTask.project_id == project_id,
+            AuditTask.audit_version == version,
+        )
+        .delete(synchronize_session=False)
+    )
+
+    if (deleted_results + deleted_runs + deleted_tasks) == 0:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=f"审核版本 v{version} 不存在")
+
+    from services.cache_service import recalculate_project_status, increment_cache_version
+
+    recalculate_project_status(project_id, db)
+    db.commit()
+    increment_cache_version(project_id, db)
+
+    latest_run = (
+        db.query(AuditRun)
+        .filter(AuditRun.project_id == project_id)
+        .order_by(AuditRun.audit_version.desc(), AuditRun.created_at.desc())
+        .first()
+    )
+    if latest_run:
+        latest_remaining_version = latest_run.audit_version
+    else:
+        latest_result = (
+            db.query(AuditResult)
+            .filter(AuditResult.project_id == project_id)
+            .order_by(AuditResult.audit_version.desc())
+            .first()
+        )
+        latest_remaining_version = latest_result.audit_version if latest_result else None
+
+    return {
+        "success": True,
+        "deleted": {
+            "results": deleted_results,
+            "runs": deleted_runs,
+            "tasks": deleted_tasks,
+        },
+        "latest_remaining_version": latest_remaining_version,
     }

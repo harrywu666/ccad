@@ -14,7 +14,8 @@ from typing import Dict, List, Optional, Tuple
 
 from database import SessionLocal
 from models import AuditResult, AuditRun, AuditTask, Project
-from services.audit_service import match_three_lines, audit_indexes, audit_dimensions, audit_materials
+from services.audit import audit_dimensions, audit_indexes, audit_materials
+from services.audit_service import match_three_lines
 from services.cache_service import increment_cache_version
 from services.context_service import build_sheet_contexts
 from services.task_planner_service import build_audit_tasks
@@ -592,10 +593,7 @@ def execute_audit_pipeline(project_id: str, audit_version: int) -> None:
 
 
 def start_audit_async(project_id: str, audit_version: int) -> None:
-    """启动后台审核线程"""
-    if not _set_running(project_id):
-        raise RuntimeError("该项目已有审核任务在运行")
-
+    """启动后台审核线程（调用方需已持有 _set_running 锁）。"""
     worker = threading.Thread(
         target=execute_audit_pipeline,
         args=(project_id, audit_version),

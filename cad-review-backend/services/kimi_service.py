@@ -191,18 +191,13 @@ async def async_recognize_catalog(image_path: str) -> list:
 
     images = [to_png_bytes(left_crop), to_png_bytes(img)]
 
+    from services.ai_prompt_service import resolve_stage_prompts
+
+    prompts = resolve_stage_prompts("catalog_recognition")
     result = await call_kimi(
-        system_prompt="你是室内装饰施工图识别专家，只返回JSON，不要任何解释。",
-        user_prompt=(
-            "你将收到2张图：第1张是目录表左侧放大图，第2张是全图。"
-            "请以第1张为主提取所有目录条目，结合第2张纠正。"
-            "只返回JSON数组，不要markdown，不要解释。"
-            "每条记录字段固定为：图号、图名、版本、日期。"
-            "图号需保留原样（例如 A1-01 / 02.03 / A4.02）。"
-            "无法识别的字段填空字符串。"
-            "输出示例：[{\"图号\":\"A1-01\",\"图名\":\"平面布置图\",\"版本\":\"A\",\"日期\":\"2026.01\"}]"
-        ),
-        images=images
+        system_prompt=prompts["system_prompt"],
+        user_prompt=prompts["user_prompt"],
+        images=images,
     )
     return result if isinstance(result, list) else []
 
@@ -289,15 +284,12 @@ async def async_recognize_sheet_info(image_data: bytes, page_index: int = 0) -> 
     """
     logger.info("页 %s: 开始单Agent识别（输入3块裁剪图）", page_index + 1)
     crops = _prepare_sheet_crops(image_data)
+    from services.ai_prompt_service import resolve_stage_prompts
+
+    prompts = resolve_stage_prompts("sheet_recognition")
     result = await call_kimi(
-        system_prompt="你是施工图识别Agent，只输出JSON。",
-        user_prompt=(
-            "你将收到同一页施工图的3张裁剪图：第1张左侧，第2张右侧，第3张下方。"
-            "请综合三张图，识别该页唯一的图号和图名。"
-            "图号格式不固定，保留原样（如 A1-01、02.03、A4.02、S-01）。"
-            "只返回JSON对象，不要解释："
-            "{\"图号\":\"\",\"图名\":\"\",\"置信度\":0.0,\"依据\":\"\"}"
-        ),
+        system_prompt=prompts["system_prompt"],
+        user_prompt=prompts["user_prompt"],
         images=[crops["left"], crops["right"], crops["bottom"]],
         temperature=0.0,
     )
@@ -345,17 +337,15 @@ async def async_summarize_sheet_infos(page_results: List[Dict[str, Any]]) -> Lis
         ]
     }
 
+    from services.ai_prompt_service import resolve_stage_prompts
+
+    prompts = resolve_stage_prompts(
+        "sheet_summarization",
+        {"payload_json": json.dumps(payload, ensure_ascii=False)},
+    )
     result = await call_kimi(
-        system_prompt="你是施工图汇总Agent，只输出JSON。",
-        user_prompt=(
-            "请对输入的页级识别结果做统一汇总纠偏，输出每一页最终图号和图名。"
-            "可修复轻微OCR误差，但不要凭空新增页。"
-            "输入JSON：\n"
-            f"{json.dumps(payload, ensure_ascii=False)}\n"
-            "只返回JSON数组，不要解释。"
-            "数组每项格式："
-            "{\"page_index\":0,\"图号\":\"A1-01\",\"图名\":\"平面布置图\",\"置信度\":0.0,\"理由\":\"\"}"
-        ),
+        system_prompt=prompts["system_prompt"],
+        user_prompt=prompts["user_prompt"],
         temperature=0.0,
     )
 
@@ -421,18 +411,15 @@ async def async_validate_sheet_catalog_mapping(
         ],
     }
 
+    from services.ai_prompt_service import resolve_stage_prompts
+
+    prompts = resolve_stage_prompts(
+        "sheet_catalog_validation",
+        {"payload_json": json.dumps(payload, ensure_ascii=False)},
+    )
     result = await call_kimi(
-        system_prompt="你是施工图匹配校验Agent，只输出JSON。",
-        user_prompt=(
-            "请将 pages 与 catalog 做一对一匹配：每个 page 至多匹配一个 catalog，每个 catalog 只能使用一次。"
-            "允许轻微OCR误差，优先图号，其次图名。"
-            "输入JSON：\n"
-            f"{json.dumps(payload, ensure_ascii=False)}\n"
-            "只返回JSON数组，不要解释。"
-            "数组每项格式："
-            "{\"page_index\":0,\"catalog_sheet_no\":\"A1-01\",\"catalog_sheet_name\":\"平面布置图\",\"置信度\":0.0,\"理由\":\"\"}"
-            "如果无法判断，则对应字段留空字符串。"
-        ),
+        system_prompt=prompts["system_prompt"],
+        user_prompt=prompts["user_prompt"],
         temperature=0.0,
     )
 

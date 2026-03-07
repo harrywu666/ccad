@@ -54,6 +54,14 @@ export const getProjectUiPreferences = (id: string) =>
   api.get<{ project_id: string; preferences: Record<string, any> }>(`/api/projects/${id}/ui-preferences`).then(res => res.data);
 export const updateProjectUiPreferences = (id: string, preferences: Record<string, any>) =>
   api.put<{ project_id: string; preferences: Record<string, any> }>(`/api/projects/${id}/ui-preferences`, { preferences }).then(res => res.data);
+export const getAIPromptSettings = () =>
+  api.get<{ stages: any[] }>('/api/settings/ai-prompts').then(res => res.data);
+export const updateAIPromptSettings = (
+  stages: Array<{ stage_key: string; system_prompt: string; user_prompt: string }>,
+) =>
+  api.put<{ success: boolean }>('/api/settings/ai-prompts', { stages }).then(res => res.data);
+export const resetAIPromptStage = (stageKey: string) =>
+  api.post<{ success: boolean }>(`/api/settings/ai-prompts/${stageKey}/reset`).then(res => res.data);
 
 // Catalog
 export const getCatalog = (projectId: string) =>
@@ -105,6 +113,23 @@ export const batchDeleteDrawings = (projectId: string, drawingIds: string[]) =>
   api.post<{ success: boolean; deleted: number }>(`/api/projects/${projectId}/drawings/batch-delete`, { drawing_ids: drawingIds }).then(res => res.data);
 export const deleteDrawings = (projectId: string) =>
   api.delete(`/api/projects/${projectId}/drawings`);
+export const getDrawingAnnotations = (projectId: string, drawingId: string, auditVersion: number) =>
+  api.get<any>(`/api/projects/${projectId}/drawings/${drawingId}/annotations`, { params: { audit_version: auditVersion } }).then(res => res.data);
+export const saveDrawingAnnotations = (
+  projectId: string,
+  drawingId: string,
+  auditVersion: number,
+  payload: {
+    drawing_data_version: number;
+    schema_version: number;
+    objects: any[];
+  },
+) =>
+  api.put<any>(`/api/projects/${projectId}/drawings/${drawingId}/annotations`, payload, { params: { audit_version: auditVersion } }).then(res => res.data);
+export const clearDrawingAnnotations = (projectId: string, drawingId: string, auditVersion: number) =>
+  api.delete<any>(`/api/projects/${projectId}/drawings/${drawingId}/annotations`, { params: { audit_version: auditVersion } }).then(res => res.data);
+export const getAnnotationsBySheet = (projectId: string, sheetNo: string, auditVersion: number) =>
+  api.get<any>(`/api/projects/${projectId}/annotations-by-sheet`, { params: { sheet_no: sheetNo, audit_version: auditVersion } }).then(res => res.data);
 
 // DWG
 export const getJsonDataList = (projectId: string) =>
@@ -133,18 +158,42 @@ export const getAuditStatus = (projectId: string) =>
   api.get<AuditStatus>(`/api/projects/${projectId}/audit/status`).then(res => res.data);
 export const getThreeLineMatch = (projectId: string) =>
   api.get<ThreeLineMatch>(`/api/projects/${projectId}/audit/three-lines`).then(res => res.data);
-export const getAuditResults = (projectId: string, params?: { version?: number; type?: string }) =>
+export const getAuditResults = (
+  projectId: string,
+  params?: { version?: number; type?: string; view?: 'grouped' | 'raw' },
+) =>
   api.get<AuditResult[]>(`/api/projects/${projectId}/audit/results`, { params }).then(res => res.data);
 export const getAuditHistory = (projectId: string) =>
   api.get<any[]>(`/api/projects/${projectId}/audit/history`).then(res => res.data);
+export const updateAuditResult = (
+  projectId: string,
+  resultId: string,
+  payload: { is_resolved: boolean },
+) =>
+  api.patch<AuditResult>(`/api/projects/${projectId}/audit/results/${resultId}`, payload).then(res => res.data);
+export const batchUpdateAuditResults = (
+  projectId: string,
+  resultIds: string[],
+  payload: { is_resolved: boolean },
+) =>
+  api.patch<{ success: boolean }>(`/api/projects/${projectId}/audit/results/batch`, {
+    result_ids: resultIds,
+    ...payload,
+  }).then(res => res.data);
 export const startAudit = (projectId: string) =>
   api.post<{ success: boolean; audit_version: number }>(`/api/projects/${projectId}/audit/start`).then(res => res.data);
 export const runAudit = (projectId: string) =>
   api.post<{ success: boolean; audit_version: number; total_issues: number }>(`/api/projects/${projectId}/audit/run`)
     .then(res => res.data);
+export const stopAudit = (projectId: string) =>
+  api.post<{ success: boolean; message: string; audit_version?: number }>(`/api/projects/${projectId}/audit/stop`).then(res => res.data);
 export const clearAuditReport = (projectId: string) =>
   api.post<{ success: boolean; deleted: { results: number; runs: number; tasks: number } }>(`/api/projects/${projectId}/audit/clear`)
     .then(res => res.data);
+export const deleteAuditVersion = (projectId: string, version: number) =>
+  api.delete<{ success: boolean; deleted: { results: number; runs: number; tasks: number } }>(
+    `/api/projects/${projectId}/audit/version/${version}`,
+  ).then(res => res.data);
 
 // Report
 export const downloadPdfReport = (projectId: string, version?: number) => {

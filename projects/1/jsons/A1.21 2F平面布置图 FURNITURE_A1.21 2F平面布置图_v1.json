@@ -1,0 +1,352 @@
+{
+  "source_dwg": "A1.21 2F平面布置图 FURNITURE.dwg",
+  "layout_name": "A1.21 2F平面布置图",
+  "sheet_no": "A1.21",
+  "sheet_name": "2F平面布置图 2F FURNITURE PLAN",
+  "extracted_at": "2026-03-05 11:47:48",
+  "data_version": 1,
+  "scale": "1:30",
+  "model_range": {
+    "min": [
+      46740.0,
+      60900.0
+    ],
+    "max": [
+      67980.0,
+      73540.0
+    ]
+  },
+  "viewports": [
+    {
+      "id": "5B7A",
+      "viewport_id": 2,
+      "position": [
+        403.0,
+        327.0
+      ],
+      "width": 708.0000000000002,
+      "height": 421.3333333333371,
+      "scale": 0.0,
+      "layer": "DefPoints",
+      "active_layer": "",
+      "frozen_layers": [],
+      "model_range": {
+        "min": [
+          46740.0,
+          60900.0
+        ],
+        "max": [
+          67980.0,
+          73540.0
+        ]
+      }
+    }
+  ],
+  "dimensions": [],
+  "pseudo_texts": [],
+  "indexes": [],
+  "title_blocks": [
+    {
+      "id": "5B7E",
+      "block_name": "TB_A1",
+      "sheet_no": "",
+      "sheet_name": "",
+      "position": [
+        71770.76,
+        112758.286
+      ],
+      "layer": "0",
+      "attrs": []
+    },
+    {
+      "id": "5B7F",
+      "block_name": "*U4",
+      "sheet_no": "",
+      "sheet_name": "2F平面布置图 2F FURNITURE PLAN",
+      "position": [
+        273.235,
+        33.872
+      ],
+      "layer": "_ACM-G-ANNO-TXTL",
+      "attrs": [
+        {
+          "tag": "_ACM-TITLELABEL",
+          "value": "1"
+        },
+        {
+          "tag": "_ACM-TITLEMARK",
+          "value": "2F平面布置图 2F FURNITURE PLAN"
+        },
+        {
+          "tag": "_ACM-SHEETNUMBER",
+          "value": "A1.21"
+        },
+        {
+          "tag": "_ACM-VPSCALE",
+          "value": "Scale 1:30"
+        }
+      ]
+    }
+  ],
+  "materials": [],
+  "material_table": [
+    {
+      "code": "2F平面布置图",
+      "name": "{\\T0.75;2F FURNITURE PLAN}"
+    }
+  ],
+  "layers": [
+    {
+      "name": "0",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "DefPoints",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$消火栓",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$1-窗",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$1-墙",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$A-Fire box",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": true
+    },
+    {
+      "name": "2F-I-AR$0$A-stairs",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$0-建-楼梯",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$I—平面—装饰面层线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$I—平面—门",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框填写字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图名",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-G-ANNO-MARK-DETC",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-G-ANNO-TXTL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-DETL-THIN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-ANNO-TEXT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-LOL060_1",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-SHBD",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-ANNO-DIMS",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-DETL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-PLAN$0$FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-PLAN$0$P-平面活动家具",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-PLAN$0$ID-TEXT-HEADING-3",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-PLAN$0$I-PL-FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$0-标注",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$A-Doors",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$I-SCOPE",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$AXIS_TEXT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$0-建-轴号",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-GRID",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-GZET_DIM",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$1-完成面",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$GZET_COL_GRID_1-200_轴线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "2F-I-AR$0$GZET_DIM_1-200_平面尺寸标注",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    }
+  ]
+}

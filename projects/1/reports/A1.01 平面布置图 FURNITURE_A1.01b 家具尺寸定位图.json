@@ -1,0 +1,4263 @@
+{
+  "source_dwg": "A1.01 平面布置图 FURNITURE.dwg",
+  "layout_name": "A1.01b 家具尺寸定位图",
+  "sheet_no": "A1.01b",
+  "sheet_name": "家具尺寸定位图 FURNITURE SIZE POSITIONING",
+  "extracted_at": "2026-03-05 11:19:18",
+  "data_version": 1,
+  "scale": "1:30",
+  "model_range": {
+    "min": [
+      47790.0,
+      59015.756
+    ],
+    "max": [
+      68580.0,
+      73240.0
+    ]
+  },
+  "viewports": [
+    {
+      "id": "18305",
+      "viewport_id": 2,
+      "position": [
+        400.5,
+        320.596
+      ],
+      "width": 693.0000000000002,
+      "height": 474.1414696900072,
+      "scale": 0.0,
+      "layer": "DefPoints",
+      "active_layer": "",
+      "frozen_layers": [],
+      "model_range": {
+        "min": [
+          47790.0,
+          59015.756
+        ],
+        "max": [
+          68580.0,
+          73240.0
+        ]
+      }
+    }
+  ],
+  "dimensions": [
+    {
+      "id": "18421",
+      "value": 1347.939392,
+      "display_text": "1347.939",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        285.132,
+        407.845
+      ],
+      "defpoint2": [
+        240.201,
+        374.888
+      ],
+      "text_position": [
+        262.667,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18422",
+      "value": 852.060608,
+      "display_text": "852.061",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        313.534,
+        407.845
+      ],
+      "defpoint2": [
+        285.132,
+        374.888
+      ],
+      "text_position": [
+        299.333,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18423",
+      "value": 1347.939392,
+      "display_text": "1347.939",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        358.466,
+        407.845
+      ],
+      "defpoint2": [
+        313.534,
+        374.888
+      ],
+      "text_position": [
+        336.0,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18424",
+      "value": 852.060608,
+      "display_text": "852.061",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        386.868,
+        407.845
+      ],
+      "defpoint2": [
+        358.466,
+        374.888
+      ],
+      "text_position": [
+        372.667,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18425",
+      "value": 852.060608,
+      "display_text": "852.061",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        460.201,
+        407.845
+      ],
+      "defpoint2": [
+        431.799,
+        374.888
+      ],
+      "text_position": [
+        446.0,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18426",
+      "value": 1347.939392,
+      "display_text": "1347.939",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        431.799,
+        407.845
+      ],
+      "defpoint2": [
+        386.868,
+        374.888
+      ],
+      "text_position": [
+        409.333,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18427",
+      "value": 1347.939392,
+      "display_text": "1347.939",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        505.132,
+        407.845
+      ],
+      "defpoint2": [
+        460.201,
+        374.888
+      ],
+      "text_position": [
+        482.667,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18428",
+      "value": 642.655287,
+      "display_text": "642.655",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        272.568,
+        331.0
+      ],
+      "defpoint2": [
+        262.667,
+        352.422
+      ],
+      "text_position": [
+        270.291,
+        341.711
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18429",
+      "value": 568.579911,
+      "display_text": "568.58",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        163.786,
+        407.845
+      ],
+      "defpoint2": [
+        144.833,
+        374.888
+      ],
+      "text_position": [
+        154.309,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1842A",
+      "value": 752.698769,
+      "display_text": "752.699",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        144.833,
+        407.845
+      ],
+      "defpoint2": [
+        119.743,
+        374.888
+      ],
+      "text_position": [
+        132.288,
+        410.116
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1842B",
+      "value": 313.606424,
+      "display_text": "313.606",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        100.787,
+        407.845
+      ],
+      "defpoint2": [
+        90.333,
+        374.888
+      ],
+      "text_position": [
+        95.56,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1842C",
+      "value": 2292.456967,
+      "display_text": "2292.457",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        240.201,
+        407.845
+      ],
+      "defpoint2": [
+        163.786,
+        374.888
+      ],
+      "text_position": [
+        201.993,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1842D",
+      "value": 568.688233,
+      "display_text": "568.688",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        119.743,
+        407.845
+      ],
+      "defpoint2": [
+        100.787,
+        374.888
+      ],
+      "text_position": [
+        110.265,
+        410.122
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1842E",
+      "value": 3000.0,
+      "display_text": "3000",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        168.786,
+        478.5
+      ],
+      "defpoint2": [
+        124.811,
+        378.5
+      ],
+      "text_position": [
+        166.508,
+        428.5
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1842F",
+      "value": 634.520969,
+      "display_text": "634.521",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        168.786,
+        499.651
+      ],
+      "defpoint2": [
+        124.811,
+        478.5
+      ],
+      "text_position": [
+        166.508,
+        489.075
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18430",
+      "value": 750.0,
+      "display_text": "750",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        168.786,
+        524.651
+      ],
+      "defpoint2": [
+        124.811,
+        499.651
+      ],
+      "text_position": [
+        166.509,
+        512.151
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18431",
+      "value": 40.479031,
+      "display_text": "40.479",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        168.786,
+        526.0
+      ],
+      "defpoint2": [
+        124.811,
+        524.651
+      ],
+      "text_position": [
+        166.509,
+        525.325
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18432",
+      "value": 825.0,
+      "display_text": "825",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        168.786,
+        378.5
+      ],
+      "defpoint2": [
+        124.811,
+        351.0
+      ],
+      "text_position": [
+        166.509,
+        364.75
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18433",
+      "value": 600.0,
+      "display_text": "600",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        168.786,
+        351.0
+      ],
+      "defpoint2": [
+        124.811,
+        331.0
+      ],
+      "text_position": [
+        166.509,
+        341.0
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18434",
+      "value": 1200.0,
+      "display_text": "1200",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        112.287,
+        358.13
+      ],
+      "defpoint2": [
+        152.287,
+        351.0
+      ],
+      "text_position": [
+        132.287,
+        360.407
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18435",
+      "value": 658.597134,
+      "display_text": "658.597",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        90.333,
+        358.13
+      ],
+      "defpoint2": [
+        112.287,
+        351.0
+      ],
+      "text_position": [
+        101.31,
+        360.407
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18436",
+      "value": 1000.0,
+      "display_text": "1000",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        278.381,
+        480.52
+      ],
+      "defpoint2": [
+        311.714,
+        486.167
+      ],
+      "text_position": [
+        295.048,
+        482.796
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18437",
+      "value": 871.428454,
+      "display_text": "871.428",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        249.333,
+        480.52
+      ],
+      "defpoint2": [
+        278.381,
+        486.167
+      ],
+      "text_position": [
+        263.857,
+        482.796
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18438",
+      "value": 358.571546,
+      "display_text": "358.572",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        311.714,
+        480.52
+      ],
+      "defpoint2": [
+        323.667,
+        486.167
+      ],
+      "text_position": [
+        317.69,
+        482.797
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18439",
+      "value": 800.0,
+      "display_text": "800",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        350.333,
+        480.52
+      ],
+      "defpoint2": [
+        377.0,
+        486.167
+      ],
+      "text_position": [
+        363.667,
+        482.796
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1843A",
+      "value": 540.0,
+      "display_text": "540",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        377.0,
+        480.52
+      ],
+      "defpoint2": [
+        395.0,
+        486.167
+      ],
+      "text_position": [
+        386.0,
+        482.796
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1843B",
+      "value": 800.0,
+      "display_text": "800",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        395.0,
+        480.52
+      ],
+      "defpoint2": [
+        421.667,
+        486.167
+      ],
+      "text_position": [
+        408.333,
+        482.796
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1843C",
+      "value": 358.571546,
+      "display_text": "358.572",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        421.667,
+        480.52
+      ],
+      "defpoint2": [
+        433.619,
+        486.167
+      ],
+      "text_position": [
+        427.643,
+        482.797
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1843D",
+      "value": 1000.0,
+      "display_text": "1000",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        433.619,
+        480.52
+      ],
+      "defpoint2": [
+        466.952,
+        486.167
+      ],
+      "text_position": [
+        450.286,
+        482.796
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1843E",
+      "value": 871.428454,
+      "display_text": "871.428",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        466.952,
+        480.52
+      ],
+      "defpoint2": [
+        496.0,
+        486.167
+      ],
+      "text_position": [
+        481.476,
+        482.796
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1843F",
+      "value": 1000.0,
+      "display_text": "1000",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        383.969,
+        473.533
+      ],
+      "defpoint2": [
+        377.0,
+        506.867
+      ],
+      "text_position": [
+        381.692,
+        490.2
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18440",
+      "value": 574.113173,
+      "display_text": "574.113",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        383.969,
+        506.867
+      ],
+      "defpoint2": [
+        377.0,
+        526.004
+      ],
+      "text_position": [
+        381.697,
+        516.435
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18441",
+      "value": 1000.0,
+      "display_text": "1000",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        308.181,
+        502.833
+      ],
+      "defpoint2": [
+        295.048,
+        469.5
+      ],
+      "text_position": [
+        305.905,
+        486.167
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18442",
+      "value": 694.000012,
+      "display_text": "694",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        308.181,
+        525.967
+      ],
+      "defpoint2": [
+        295.048,
+        502.833
+      ],
+      "text_position": [
+        305.905,
+        514.4
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18443",
+      "value": 1347.939392,
+      "display_text": "1347.939",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        272.568,
+        352.422
+      ],
+      "defpoint2": [
+        262.667,
+        397.353
+      ],
+      "text_position": [
+        270.29,
+        374.888
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18444",
+      "value": 1000.0,
+      "display_text": "1000",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        341.538,
+        356.855
+      ],
+      "defpoint2": [
+        315.223,
+        377.681
+      ],
+      "text_position": [
+        331.362,
+        370.25
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18445",
+      "value": 1000.436652,
+      "display_text": "1000.437",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        332.412,
+        354.864
+      ],
+      "defpoint2": [
+        351.977,
+        382.48
+      ],
+      "text_position": [
+        342.626,
+        368.239
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18446",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        235.5,
+        279.474
+      ],
+      "defpoint2": [
+        278.333,
+        286.272
+      ],
+      "text_position": [
+        256.917,
+        281.75
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18447",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        278.333,
+        279.474
+      ],
+      "defpoint2": [
+        321.167,
+        286.272
+      ],
+      "text_position": [
+        299.75,
+        281.75
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18448",
+      "value": 750.0,
+      "display_text": "750",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        296.691,
+        311.272
+      ],
+      "defpoint2": [
+        284.979,
+        286.272
+      ],
+      "text_position": [
+        294.414,
+        298.772
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18449",
+      "value": 41.842968,
+      "display_text": "41.843",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        296.691,
+        312.667
+      ],
+      "defpoint2": [
+        285.508,
+        311.272
+      ],
+      "text_position": [
+        294.414,
+        311.969
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1844A",
+      "value": 564.816585,
+      "display_text": "564.817",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        262.608,
+        289.358
+      ],
+      "defpoint2": [
+        265.88,
+        308.185
+      ],
+      "text_position": [
+        260.332,
+        298.772
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1844B",
+      "value": 569.969522,
+      "display_text": "569.97",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        265.833,
+        292.867
+      ],
+      "defpoint2": [
+        246.834,
+        298.821
+      ],
+      "text_position": [
+        256.334,
+        295.144
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1844C",
+      "value": 1045.000212,
+      "display_text": "1045",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        321.167,
+        279.474
+      ],
+      "defpoint2": [
+        356.0,
+        286.272
+      ],
+      "text_position": [
+        338.583,
+        281.75
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1844D",
+      "value": 999.999788,
+      "display_text": "1000",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        356.0,
+        279.474
+      ],
+      "defpoint2": [
+        389.333,
+        286.272
+      ],
+      "text_position": [
+        372.667,
+        281.75
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1844E",
+      "value": 1045.0,
+      "display_text": "1045",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        389.333,
+        279.474
+      ],
+      "defpoint2": [
+        424.167,
+        286.272
+      ],
+      "text_position": [
+        406.75,
+        281.75
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1844F",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        509.833,
+        279.474
+      ],
+      "defpoint2": [
+        467.0,
+        286.272
+      ],
+      "text_position": [
+        488.417,
+        281.75
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18450",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        467.0,
+        279.474
+      ],
+      "defpoint2": [
+        424.167,
+        286.272
+      ],
+      "text_position": [
+        445.583,
+        281.75
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18451",
+      "value": 1200.0,
+      "display_text": "1200",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        551.369,
+        249.333
+      ],
+      "defpoint2": [
+        563.833,
+        289.333
+      ],
+      "text_position": [
+        549.093,
+        269.333
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18452",
+      "value": 700.0,
+      "display_text": "700",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        551.369,
+        289.333
+      ],
+      "defpoint2": [
+        563.833,
+        312.667
+      ],
+      "text_position": [
+        549.093,
+        301.0
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18453",
+      "value": 700.0,
+      "display_text": "700",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        551.369,
+        226.0
+      ],
+      "defpoint2": [
+        563.833,
+        249.333
+      ],
+      "text_position": [
+        549.093,
+        237.667
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18454",
+      "value": 1200.0,
+      "display_text": "1200",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        199.042,
+        249.333
+      ],
+      "defpoint2": [
+        181.5,
+        289.333
+      ],
+      "text_position": [
+        196.766,
+        269.333
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18455",
+      "value": 700.0,
+      "display_text": "700",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        199.042,
+        289.333
+      ],
+      "defpoint2": [
+        181.5,
+        312.667
+      ],
+      "text_position": [
+        196.766,
+        301.0
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18456",
+      "value": 700.0,
+      "display_text": "700",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        199.042,
+        226.0
+      ],
+      "defpoint2": [
+        181.5,
+        249.333
+      ],
+      "text_position": [
+        196.766,
+        237.667
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18457",
+      "value": 400.0,
+      "display_text": "400",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        563.833,
+        237.126
+      ],
+      "defpoint2": [
+        577.167,
+        249.333
+      ],
+      "text_position": [
+        570.5,
+        239.403
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18458",
+      "value": 400.0,
+      "display_text": "400",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        168.167,
+        237.126
+      ],
+      "defpoint2": [
+        181.5,
+        249.333
+      ],
+      "text_position": [
+        174.833,
+        239.403
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18459",
+      "value": 1500.0,
+      "display_text": "1500",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        296.196,
+        201.333
+      ],
+      "defpoint2": [
+        286.993,
+        251.333
+      ],
+      "text_position": [
+        293.92,
+        226.333
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1845A",
+      "value": 748.566954,
+      "display_text": "748.567",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        265.858,
+        258.948
+      ],
+      "defpoint2": [
+        290.81,
+        243.602
+      ],
+      "text_position": [
+        278.334,
+        261.224
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1845B",
+      "value": 945.725673,
+      "display_text": "945.726",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        234.333,
+        258.948
+      ],
+      "defpoint2": [
+        265.858,
+        243.726
+      ],
+      "text_position": [
+        250.095,
+        261.224
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1845C",
+      "value": 705.853731,
+      "display_text": "705.854",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        431.0,
+        258.948
+      ],
+      "defpoint2": [
+        454.528,
+        243.726
+      ],
+      "text_position": [
+        442.764,
+        261.224
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1845D",
+      "value": 748.345715,
+      "display_text": "748.346",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        454.528,
+        258.948
+      ],
+      "defpoint2": [
+        479.473,
+        243.726
+      ],
+      "text_position": [
+        467.001,
+        261.224
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1845E",
+      "value": 1025.800554,
+      "display_text": "1025.801",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        479.473,
+        258.948
+      ],
+      "defpoint2": [
+        513.667,
+        243.726
+      ],
+      "text_position": [
+        496.57,
+        261.224
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1845F",
+      "value": 3370.0,
+      "display_text": "3370",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        318.667,
+        258.948
+      ],
+      "defpoint2": [
+        431.0,
+        243.726
+      ],
+      "text_position": [
+        374.833,
+        261.225
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18460",
+      "value": 835.707374,
+      "display_text": "835.707",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        290.81,
+        258.948
+      ],
+      "defpoint2": [
+        318.667,
+        243.726
+      ],
+      "text_position": [
+        304.738,
+        261.225
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18461",
+      "value": 699.948666,
+      "display_text": "699.949",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        542.75,
+        206.003
+      ],
+      "defpoint2": [
+        566.081,
+        211.192
+      ],
+      "text_position": [
+        554.416,
+        208.279
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18462",
+      "value": 570.007823,
+      "display_text": "570.008",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        566.081,
+        206.003
+      ],
+      "defpoint2": [
+        585.082,
+        211.192
+      ],
+      "text_position": [
+        575.582,
+        208.279
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18463",
+      "value": 912.54977,
+      "display_text": "912.55",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        585.082,
+        206.003
+      ],
+      "defpoint2": [
+        615.5,
+        211.192
+      ],
+      "text_position": [
+        600.291,
+        208.279
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18464",
+      "value": 570.010425,
+      "display_text": "570.01",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        523.749,
+        206.003
+      ],
+      "defpoint2": [
+        542.75,
+        211.192
+      ],
+      "text_position": [
+        533.25,
+        208.279
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18465",
+      "value": 700.0,
+      "display_text": "700",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        565.284,
+        199.41
+      ],
+      "defpoint2": [
+        554.415,
+        222.743
+      ],
+      "text_position": [
+        563.008,
+        211.076
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18466",
+      "value": 122.288474,
+      "display_text": "122.288",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        565.284,
+        195.333
+      ],
+      "defpoint2": [
+        554.415,
+        199.41
+      ],
+      "text_position": [
+        563.008,
+        197.371
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18467",
+      "value": 699.486261,
+      "display_text": "699.486",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        183.278,
+        205.414
+      ],
+      "defpoint2": [
+        206.594,
+        211.643
+      ],
+      "text_position": [
+        194.936,
+        207.69
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18468",
+      "value": 700.0,
+      "display_text": "700",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        213.347,
+        199.41
+      ],
+      "defpoint2": [
+        194.941,
+        222.743
+      ],
+      "text_position": [
+        211.071,
+        211.076
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18469",
+      "value": 122.288474,
+      "display_text": "122.288",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        213.347,
+        195.333
+      ],
+      "defpoint2": [
+        194.941,
+        199.41
+      ],
+      "text_position": [
+        211.071,
+        197.371
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1846A",
+      "value": 500.0,
+      "display_text": "500",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        450.286,
+        486.167
+      ],
+      "defpoint2": [
+        0.0,
+        0.0
+      ],
+      "text_position": [
+        431.763,
+        471.334
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1846B",
+      "value": 500.0,
+      "display_text": "500",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        295.048,
+        486.167
+      ],
+      "defpoint2": [
+        0.0,
+        0.0
+      ],
+      "text_position": [
+        275.937,
+        472.099
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1846C",
+      "value": 200.0,
+      "display_text": "200",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        558.024,
+        440.122
+      ],
+      "defpoint2": [
+        0.0,
+        0.0
+      ],
+      "text_position": [
+        545.579,
+        446.108
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1846D",
+      "value": 500.0,
+      "display_text": "500",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        372.667,
+        292.76
+      ],
+      "defpoint2": [
+        0.0,
+        0.0
+      ],
+      "text_position": [
+        389.32,
+        309.664
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1846E",
+      "value": 350.0,
+      "display_text": "350",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        554.415,
+        211.076
+      ],
+      "defpoint2": [
+        0.0,
+        0.0
+      ],
+      "text_position": [
+        543.236,
+        226.14
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1846F",
+      "value": 350.0,
+      "display_text": "350",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        194.941,
+        211.076
+      ],
+      "defpoint2": [
+        0.0,
+        0.0
+      ],
+      "text_position": [
+        204.537,
+        227.195
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18470",
+      "value": 800.0,
+      "display_text": "800",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "layout_space",
+      "defpoint": [
+        323.667,
+        480.52
+      ],
+      "defpoint2": [
+        350.333,
+        486.167
+      ],
+      "text_position": [
+        337.0,
+        482.796
+      ],
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    }
+  ],
+  "pseudo_texts": [],
+  "indexes": [],
+  "title_blocks": [
+    {
+      "id": "1838C",
+      "block_name": "TB_A1",
+      "sheet_no": "",
+      "sheet_name": "",
+      "position": [
+        71770.76,
+        112758.286
+      ],
+      "layer": "0",
+      "attrs": []
+    },
+    {
+      "id": "1838D",
+      "block_name": "*U5",
+      "sheet_no": "",
+      "sheet_name": "家具尺寸定位图 FURNITURE SIZE POSITIONING",
+      "position": [
+        273.235,
+        33.872
+      ],
+      "layer": "_ACM-G-ANNO-TXTL",
+      "attrs": [
+        {
+          "tag": "_ACM-TITLELABEL",
+          "value": "1"
+        },
+        {
+          "tag": "_ACM-TITLEMARK",
+          "value": "家具尺寸定位图 FURNITURE SIZE POSITIONING"
+        },
+        {
+          "tag": "_ACM-SHEETNUMBER",
+          "value": "A1.01b"
+        },
+        {
+          "tag": "_ACM-VPSCALE",
+          "value": "Scale 1:30"
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "id": "186DC",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L2}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L2}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "186E1",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L2}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L2}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "186E6",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L2}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L2}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "186EB",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L2}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L2}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "186F0",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L3}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L3}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "186F5",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L5}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L5}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "186FA",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L5}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L5}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "186FF",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L6}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L6}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18704",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L6}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L6}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18709",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L7}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L7}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1870E",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L7}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L7}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18713",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F1}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F1}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18718",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F2}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F2}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1871D",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F3}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F3}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18722",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18727",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1872C",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F5}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F5}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18731",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F6}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F6}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18736",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F12}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F12}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1873B",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F12}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F12}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18745",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F9}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F9}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1874A",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F10}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F10}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18754",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F4}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F4}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "18759",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F13}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F13}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1875E",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F20}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F20}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC17",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC1C",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F6}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F6}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC21",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F3}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F3}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC26",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F3}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F3}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC2B",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F3}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F3}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC30",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F8}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F8}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC35",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F8}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F8}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC3A",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F8}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F8}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC3F",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F8}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F8}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC44",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F1}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F1}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC49",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F2}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F2}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1DC54",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F086",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F08B",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F091",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F096",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F09C",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L7}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L7}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F0A1",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F0A6",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F0AB",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L7}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L7}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F0B0",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F0B5",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F26A",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F4}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F4}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "1F275",
+      "entity_type": "MLEADER",
+      "content": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F4}",
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F4}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    }
+  ],
+  "material_table": [
+    {
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F1",
+      "name": "} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F2 } \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F3 } \\pt2.25;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;编号 NO.} \\pt2.25;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;品名 NAME } \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;餐桌 DINING TABLE} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;餐椅 DINING CHAIR} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;餐椅 DINING CHAIR} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F8} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F9 } \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F10} \\pt2.25;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;编号 NO.} \\pt2.25;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;品名 NAME } \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;服务台 SERVICE DESK} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;裝飾桌 DECORATIVE TABLE} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;餐桌 DINING TABLE} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F15} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F16} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F17} \\pt2.25;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;编号 NO.} \\pt2.25;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;品名 NAME } \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\T0.8;\\C256;户外备餐台 OUTDOOR SERVING STATION } \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;戶外餐桌 OUTDOOR DINING TABLE } \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;户外沙发 OUTDOOR SOFA} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;戶外咖啡桌 OUTDOOR COFFEE TABLE } \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L1 } \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L2 } \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L3} \\pt2.25;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;编号 NO.} \\pt2.25;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;品名 NAME } \\pt2.25;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;吊灯 LAMP} {\\fMicrosoft YaHei|b0|i0|c134|p34;\\C256;壁灯 \\fArial|b0|i0|c0|p34;WALL LAMP} {\\fMicrosoft YaHei|b0|i0|c134|p34;\\H0.83333x;\\T0.75;\\C256;装饰灯座 DECORATIVE LAMP HOLDER}"
+    },
+    {
+      "code": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F4}",
+      "name": "\\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F5 } \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F6 } \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F7 } \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;餐桌 DINING TABLE} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;吧椅 BAR STOOL} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;餐椅 DINING CHAIR} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;餐桌 DINING TABLE} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F11} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F12} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F13} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F14} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;裝飾桌 DECORATIVE TABLE} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;服务台 SERVICE DESK} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;戶外单人椅 OUTDOOR SINGLE CHAIR } \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;餐桌 DINING TABLE} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F18} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F19} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F20} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;F21} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\T0.8;\\C256;户外备餐台 OUTDOOR SERVING STATION } \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;卡座 BANQUETTE SEAT} \\pxt0.75;{\\fSimHei|b0|i0|c134|p49;\\H0.83333x;\\C256;户外太阳伞 SUN UMBRELLA} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L4} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L5} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L6} \\pxsm1,ql,t0.75;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;L7 } \\pt2.25;{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;吊灯 LAMP} {\\fMicrosoft YaHei|b0|i0|c134|p34;\\C256;壁灯 \\fArial|b0|i0|c0|p34;WALL LAMP} {\\fMicrosoft YaHei|b0|i0|c134|p34;\\C256;台灯 DESK LAMP} {\\fMicrosoft YaHei|b0|i0|c134|p34;\\C256;台灯 DESK LAMP} {\\T0.8;A1.01b}"
+    }
+  ],
+  "layers": [
+    {
+      "name": "0",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "DefPoints",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "P-平面活动家具",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "ID-TEXT-HEADING-3",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$D-FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$D-BASE-INTWALL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$D-BASE-WALL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$L-ELEV-MARK",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$消火栓",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$3-地面",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$9-填充",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$1-窗",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$A-Fire box",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": true
+    },
+    {
+      "name": "I-AR$0$A-stairs",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$0-建-楼梯",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$I—平面—装饰面层线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$I—平面—门",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$0M-FIRE",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$P-平面活动家具",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$A-FURN-PRES",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$FF-活动家具",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$ID-TEXT-HEADING-3",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PL-LIGHT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框填写字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图名",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-G-ANNO-MARK-DETC",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-G-ANNO-TXTL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-DETL-THIN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-ANNO-TEXT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-LOL060_1",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-SHBD",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-ANNO-DIMS",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "ISH-Refe",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-DETL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-RCP-LIGHT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$L-ELEV-MARK",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$A-stairs",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$0-建-楼梯",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I—平面—门",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$P-平面活动家具",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$ID-TEXT-HEADING-3",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PL-WALL-FHINISH",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PL-FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PL-IDS-MILL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PL-LIGHT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-GRID",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PL-DOOR",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$A-天花投影线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "ISH-Refe1",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$A-Doors",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$A-LOL061W1",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$I-SCOPE",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$AXIS_TEXT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$0-建-轴号",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-GRID",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-GZET_DIM",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$GZET_COL_GRID_1-200_轴线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$GZET_DIM_1-200_平面尺寸标注",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-WALL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$_ACM-A-WALL-HACH",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$I-stairs",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "JEM-给排水点",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$I—平面—装饰面层线a",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "20251222-修改云线",
+      "visible": false,
+      "on": true,
+      "frozen": true,
+      "locked": false
+    },
+    {
+      "name": "20251229-修改云线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PLAN$0$I-PL-FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    }
+  ]
+}

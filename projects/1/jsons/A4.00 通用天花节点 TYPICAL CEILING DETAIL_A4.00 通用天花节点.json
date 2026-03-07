@@ -1,0 +1,1492 @@
+{
+  "source_dwg": "A4.00 通用天花节点 TYPICAL CEILING DETAIL.dwg",
+  "layout_name": "A4.00 通用天花节点",
+  "sheet_no": "A4.00",
+  "sheet_name": "通用天花节点",
+  "extracted_at": "2026-03-05 11:47:48",
+  "data_version": 1,
+  "scale": "1:5",
+  "model_range": {
+    "min": [
+      40058.564,
+      8084.772
+    ],
+    "max": [
+      43728.564,
+      10944.772
+    ]
+  },
+  "viewports": [
+    {
+      "id": "3E9D8",
+      "viewport_id": 2,
+      "position": [
+        393.0,
+        297.0
+      ],
+      "width": 734.0,
+      "height": 572.0,
+      "scale": 0.0,
+      "layer": "Defpoints",
+      "active_layer": "",
+      "frozen_layers": [],
+      "model_range": {
+        "min": [
+          40058.564,
+          8084.772
+        ],
+        "max": [
+          43728.564,
+          10944.772
+        ]
+      }
+    }
+  ],
+  "dimensions": [
+    {
+      "id": "4344E",
+      "value": 15.0,
+      "display_text": "15",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        43108.396,
+        8606.679
+      ],
+      "defpoint2": [
+        43123.396,
+        8682.567
+      ],
+      "text_position": [
+        43115.896,
+        8617.066
+      ],
+      "global_pct": {
+        "x": 83.3,
+        "y": 81.4
+      },
+      "grid": "T14",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 72.2,
+          "local_y_pct": 69.0
+        }
+      }
+    },
+    {
+      "id": "434CD",
+      "value": 250.122118,
+      "display_text": "250.122",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        42858.274,
+        8606.679
+      ],
+      "defpoint2": [
+        43108.396,
+        8682.567
+      ],
+      "text_position": [
+        42983.335,
+        8617.066
+      ],
+      "global_pct": {
+        "x": 79.7,
+        "y": 81.4
+      },
+      "grid": "T14",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 66.2,
+          "local_y_pct": 69.0
+        }
+      }
+    },
+    {
+      "id": "43504",
+      "value": 14.877882,
+      "display_text": "14.878",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        42843.396,
+        8606.679
+      ],
+      "defpoint2": [
+        42858.274,
+        8682.567
+      ],
+      "text_position": [
+        42850.835,
+        8617.066
+      ],
+      "global_pct": {
+        "x": 76.1,
+        "y": 81.4
+      },
+      "grid": "S14",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 60.2,
+          "local_y_pct": 69.0
+        }
+      }
+    },
+    {
+      "id": "43548",
+      "value": 110.0,
+      "display_text": "110",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        42733.396,
+        8606.679
+      ],
+      "defpoint2": [
+        42843.396,
+        8682.567
+      ],
+      "text_position": [
+        42788.396,
+        8617.066
+      ],
+      "global_pct": {
+        "x": 74.4,
+        "y": 81.4
+      },
+      "grid": "R14",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 57.3,
+          "local_y_pct": 69.0
+        }
+      }
+    },
+    {
+      "id": "43593",
+      "value": 15.0,
+      "display_text": "15",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        42718.396,
+        8606.679
+      ],
+      "defpoint2": [
+        42733.396,
+        8682.567
+      ],
+      "text_position": [
+        42725.896,
+        8617.066
+      ],
+      "global_pct": {
+        "x": 72.7,
+        "y": 81.4
+      },
+      "grid": "R14",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 54.5,
+          "local_y_pct": 69.0
+        }
+      }
+    },
+    {
+      "id": "435EB",
+      "value": 130.0,
+      "display_text": "130",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        42588.396,
+        8606.679
+      ],
+      "defpoint2": [
+        42718.396,
+        8682.567
+      ],
+      "text_position": [
+        42653.396,
+        8617.066
+      ],
+      "global_pct": {
+        "x": 70.7,
+        "y": 81.4
+      },
+      "grid": "Q14",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 51.2,
+          "local_y_pct": 69.0
+        }
+      }
+    },
+    {
+      "id": "437AB",
+      "value": 265.361815,
+      "display_text": "265.362",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        42627.53,
+        8417.205
+      ],
+      "defpoint2": [
+        42588.396,
+        8682.567
+      ],
+      "text_position": [
+        42617.143,
+        8549.886
+      ],
+      "global_pct": {
+        "x": 69.7,
+        "y": 83.7
+      },
+      "grid": "Q15",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 49.5,
+          "local_y_pct": 72.8
+        }
+      }
+    },
+    {
+      "id": "4388A",
+      "value": 119.99998,
+      "display_text": "120",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        42588.396,
+        8383.22
+      ],
+      "defpoint2": [
+        42468.396,
+        8417.205
+      ],
+      "text_position": [
+        42528.396,
+        8393.607
+      ],
+      "global_pct": {
+        "x": 67.3,
+        "y": 89.2
+      },
+      "grid": "Q16",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 45.5,
+          "local_y_pct": 82.0
+        }
+      }
+    },
+    {
+      "id": "438F9",
+      "value": 7.5,
+      "display_text": "7.5",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        42898.633,
+        8682.567
+      ],
+      "defpoint2": [
+        42850.896,
+        8675.067
+      ],
+      "text_position": [
+        42888.247,
+        8678.817
+      ],
+      "global_pct": {
+        "x": 77.1,
+        "y": 79.2
+      },
+      "grid": "S14",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 61.8,
+          "local_y_pct": 65.3
+        }
+      }
+    },
+    {
+      "id": "44056",
+      "value": 7.5,
+      "display_text": "7.5",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        43115.896,
+        8682.567
+      ],
+      "defpoint2": [
+        0.0,
+        0.0
+      ],
+      "text_position": [
+        43105.015,
+        8684.454
+      ],
+      "global_pct": {
+        "x": 83.0,
+        "y": 79.0
+      },
+      "grid": "T14",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 71.7,
+          "local_y_pct": 65.0
+        }
+      }
+    },
+    {
+      "id": "440D6",
+      "value": 149.999962,
+      "display_text": "%%P200\\P({\\A0;REF TO MEP DRAWINGS)}",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        41537.556,
+        8449.925
+      ],
+      "defpoint2": [
+        41387.556,
+        8471.653
+      ],
+      "text_position": [
+        41460.556,
+        8449.925
+      ],
+      "global_pct": {
+        "x": 38.2,
+        "y": 87.2
+      },
+      "grid": "J15",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 63.7,
+          "local_y_pct": 78.7
+        }
+      }
+    },
+    {
+      "id": "9F42A",
+      "value": 200.0,
+      "display_text": "200",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        43610.685,
+        9384.96
+      ],
+      "defpoint2": [
+        43576.538,
+        9584.96
+      ],
+      "text_position": [
+        43600.299,
+        9484.96
+      ],
+      "global_pct": {
+        "x": 96.5,
+        "y": 51.0
+      },
+      "grid": "X9",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 94.2,
+          "local_y_pct": 85.0
+        },
+        "图5右下": {
+          "local_x_pct": 94.2,
+          "local_y_pct": 18.3
+        }
+      }
+    },
+    {
+      "id": "9F493",
+      "value": 25.0,
+      "display_text": "25",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        43610.685,
+        9584.96
+      ],
+      "defpoint2": [
+        43576.538,
+        9609.96
+      ],
+      "text_position": [
+        43600.299,
+        9597.46
+      ],
+      "global_pct": {
+        "x": 96.5,
+        "y": 47.1
+      },
+      "grid": "X9",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 94.2,
+          "local_y_pct": 78.5
+        },
+        "图5右下": {
+          "local_x_pct": 94.2,
+          "local_y_pct": 11.8
+        }
+      }
+    },
+    {
+      "id": "9F4C8",
+      "value": 25.0,
+      "display_text": "25",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        43610.685,
+        9359.96
+      ],
+      "defpoint2": [
+        43576.538,
+        9384.96
+      ],
+      "text_position": [
+        43600.299,
+        9372.46
+      ],
+      "global_pct": {
+        "x": 96.5,
+        "y": 55.0
+      },
+      "grid": "X10",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 94.2,
+          "local_y_pct": 91.7
+        },
+        "图5右下": {
+          "local_x_pct": 94.2,
+          "local_y_pct": 25.0
+        }
+      }
+    },
+    {
+      "id": "A62BB",
+      "value": 3.0,
+      "display_text": "MIN",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        41284.078,
+        9438.469
+      ],
+      "defpoint2": [
+        41287.078,
+        9486.225
+      ],
+      "text_position": [
+        41285.578,
+        9448.719
+      ],
+      "global_pct": {
+        "x": 33.4,
+        "y": 52.3
+      },
+      "grid": "I9",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 55.7,
+          "local_y_pct": 87.2
+        },
+        "图4左下": {
+          "local_x_pct": 55.7,
+          "local_y_pct": 20.5
+        }
+      }
+    },
+    {
+      "id": "A62CD",
+      "value": 30.750026,
+      "display_text": "30.75",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        41456.328,
+        9405.26
+      ],
+      "defpoint2": [
+        41487.078,
+        9486.264
+      ],
+      "text_position": [
+        41471.703,
+        9415.646
+      ],
+      "global_pct": {
+        "x": 38.5,
+        "y": 53.5
+      },
+      "grid": "J10",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 64.2,
+          "local_y_pct": 89.2
+        },
+        "图4左下": {
+          "local_x_pct": 64.2,
+          "local_y_pct": 22.5
+        }
+      }
+    },
+    {
+      "id": "AA5BC",
+      "value": 5.0,
+      "display_text": "\\A1;MIN",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        40238.606,
+        9448.188
+      ],
+      "defpoint2": [
+        40233.606,
+        9484.265
+      ],
+      "text_position": [
+        40236.106,
+        9458.438
+      ],
+      "global_pct": {
+        "x": 4.8,
+        "y": 52.0
+      },
+      "grid": "B9",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 8.0,
+          "local_y_pct": 86.7
+        },
+        "图4左下": {
+          "local_x_pct": 8.0,
+          "local_y_pct": 20.0
+        }
+      }
+    },
+    {
+      "id": "AA5BF",
+      "value": 570.0,
+      "display_text": "580(根据设备尺寸)",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        40808.606,
+        9448.188
+      ],
+      "defpoint2": [
+        40238.606,
+        9484.265
+      ],
+      "text_position": [
+        40523.606,
+        9461.337
+      ],
+      "global_pct": {
+        "x": 12.7,
+        "y": 51.9
+      },
+      "grid": "D9",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 21.2,
+          "local_y_pct": 86.5
+        },
+        "图4左下": {
+          "local_x_pct": 21.2,
+          "local_y_pct": 19.8
+        }
+      }
+    },
+    {
+      "id": "AA5C2",
+      "value": 5.0,
+      "display_text": "\\A1;MIN",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        40813.606,
+        9448.188
+      ],
+      "defpoint2": [
+        40808.606,
+        9484.265
+      ],
+      "text_position": [
+        40811.106,
+        9458.438
+      ],
+      "global_pct": {
+        "x": 20.5,
+        "y": 52.0
+      },
+      "grid": "E9",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 34.2,
+          "local_y_pct": 86.7
+        },
+        "图4左下": {
+          "local_x_pct": 34.2,
+          "local_y_pct": 20.0
+        }
+      }
+    },
+    {
+      "id": "AA5C5",
+      "value": 66.0,
+      "display_text": "70",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        40419.477,
+        9552.265
+      ],
+      "defpoint2": [
+        40332.743,
+        9486.265
+      ],
+      "text_position": [
+        40409.091,
+        9519.265
+      ],
+      "global_pct": {
+        "x": 9.6,
+        "y": 49.8
+      },
+      "grid": "C9",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 16.0,
+          "local_y_pct": 83.0
+        },
+        "图4左下": {
+          "local_x_pct": 16.0,
+          "local_y_pct": 16.3
+        }
+      }
+    },
+    {
+      "id": "AA648",
+      "value": 50.0,
+      "display_text": "50",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        41406.328,
+        9405.26
+      ],
+      "defpoint2": [
+        41456.328,
+        9486.264
+      ],
+      "text_position": [
+        41431.328,
+        9415.646
+      ],
+      "global_pct": {
+        "x": 37.4,
+        "y": 53.5
+      },
+      "grid": "I10",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 62.3,
+          "local_y_pct": 89.2
+        },
+        "图4左下": {
+          "local_x_pct": 62.3,
+          "local_y_pct": 22.5
+        }
+      }
+    },
+    {
+      "id": "AA669",
+      "value": 122.249974,
+      "display_text": "122.25",
+      "layer": "DE-MT",
+      "source": "model_space",
+      "defpoint": [
+        41284.078,
+        9405.26
+      ],
+      "defpoint2": [
+        41406.328,
+        9486.264
+      ],
+      "text_position": [
+        41345.203,
+        9415.646
+      ],
+      "global_pct": {
+        "x": 35.1,
+        "y": 53.5
+      },
+      "grid": "I10",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 58.5,
+          "local_y_pct": 89.2
+        },
+        "图4左下": {
+          "local_x_pct": 58.5,
+          "local_y_pct": 22.5
+        }
+      }
+    }
+  ],
+  "pseudo_texts": [],
+  "indexes": [],
+  "title_blocks": [
+    {
+      "id": "84E11",
+      "block_name": "TB_A1",
+      "sheet_no": "",
+      "sheet_name": "",
+      "position": [
+        71770.76,
+        112758.286
+      ],
+      "layer": "0",
+      "attrs": []
+    }
+  ],
+  "materials": [],
+  "material_table": [],
+  "layers": [
+    {
+      "name": "0",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "Defpoints",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "D-BASE-INTWALL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "D-BASE-WALL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-stairs",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—平面—装饰面层线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—平面—门",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "ID-TEXT-HEADING-3",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-Doors",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-LOL061W1",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-SCOPE",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-stairs",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "L-ELEV-MARK",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "0-建-楼梯",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "P-平面活动家具",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PL-WALL-FHINISH",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PL-FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PL-IDS-MILL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PL-LIGHT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-GRID",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PL-DOOR",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-天花投影线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-WALL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-WALL-HACH",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-FC-HATCH",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-FC",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-HACH",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-RCP",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-RCP-COVER",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "0-LIGHT-RC",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "0-LIGHT-TXT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$SUSP",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "G-ANNO-TITL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-DETL-LW08",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-DETL-LW02",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-DETL-LW251",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "PE-尺寸标注",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-DETL-LW01",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$I-SECT-LW03",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$G-ANNO-NOTE-CH",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$HATCH",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-ANNO-DIMS",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$YELLOW",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "PE-立面结构",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "DE-MT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "Structure【大样结构线】",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-SECT-LW01",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-DETL-THIN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-DETL-PATT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "IA10-16 Floor Detail$0$E-4施工图标注尺寸",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "IA10-16 Floor Detail$0$A-ELEV-HATC-8",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "IA10-16 Floor Detail$0$家具填充",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "IA10-16 Floor Detail$0$I-DETL-2",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "G-ANNO-SYMB",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "IA10-16 Floor Detail$0$I-SECT-LW09",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$g-anno-note",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$G-ANNO-DIMS",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$I-SECT-LW09",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$I-SECT-LW08",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$I-SECT-LW04",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$I-SECT-LW05",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$I-SECT-LW01",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$RED",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$GREY",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "WALL TYPE$0$I-SEC-LW09",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "视图标题",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "Thick Line",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-SECT-LW251-PATT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框填写字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图名",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "4-Fine(立面细线)",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-ELVE-HIDD",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "图层8",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "ES-填充层",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-SECT-LW02",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "1-窗",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "JDT-13Light",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A Detail Thin",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A Annotate",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A Detail Xthin",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A Dims",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A Detail Xthick",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A Elev Dims",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "20220323-修改内容",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "JEL-35HEAVY",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-SHBD",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—装饰—细线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-RCP-AIR",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "20251222-修改云线",
+      "visible": false,
+      "on": true,
+      "frozen": true,
+      "locked": false
+    },
+    {
+      "name": "20251229-修改云线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A Elev Patt-250",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—装饰—填充03(灰度)",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "CURTWALL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "DP_1040",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—装饰—超细",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "L立面线填充",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "E",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—装饰—填充01(线状)",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—装饰—粗线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I—平顶—填充03(灰度)",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    }
+  ]
+}

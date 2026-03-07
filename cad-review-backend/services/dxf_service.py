@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+from domain.text_cleaning import strip_mtext_formatting
 from services.coordinate_service import enrich_json_with_coordinates
 
 logger = logging.getLogger(__name__)
@@ -127,9 +128,7 @@ def _display_scale(scale: float) -> str:
 
 
 def _normalize_plain_text(text: str) -> str:
-    s = str(text or "")
-    s = s.replace("\\P", " ").replace("\\p", " ")
-    return s.strip()
+    return strip_mtext_formatting(text)
 
 
 def _is_numeric_like_text(text: str) -> bool:
@@ -158,7 +157,7 @@ def _collect_text_entities(layout) -> List[Dict[str, Any]]:  # noqa: ANN001
             texts.append({"text": text, "position": _point_xy(getattr(entity.dxf, "insert", None))})
 
     for entity in layout.query("MTEXT"):
-        text = str(getattr(entity, "text", "") or "").replace("\\P", " ").strip()
+        text = strip_mtext_formatting(str(getattr(entity, "text", "") or ""))
         if text:
             texts.append({"text": text, "position": _point_xy(getattr(entity.dxf, "insert", None))})
 
@@ -578,6 +577,7 @@ def _extract_materials(layout) -> List[Dict[str, Any]]:  # noqa: ANN001
                 content = ""
         if not content:
             content = str(getattr(ml.dxf, "text", "") or "")
+        content = strip_mtext_formatting(content)
 
         arrow = _point_xy(
             getattr(ml.dxf, "insert", None)
@@ -585,15 +585,15 @@ def _extract_materials(layout) -> List[Dict[str, Any]]:  # noqa: ANN001
             or getattr(ml.dxf, "arrow_head", None)
         )
 
-        token = content.strip().split()[0] if content.strip() else ""
+        token = content.split()[0] if content else ""
         code = token if token and re.search(r"\d", token) else ""
 
-        if content.strip() or any(keyword in layer.upper() for keyword in MATERIAL_LAYER_KEYWORDS):
+        if content or any(keyword in layer.upper() for keyword in MATERIAL_LAYER_KEYWORDS):
             items.append(
                 {
                     "id": str(getattr(ml.dxf, "handle", "") or ""),
                     "entity_type": "MLEADER",
-                    "content": content.strip(),
+                    "content": content,
                     "code": code,
                     "position": arrow,
                     "arrow": arrow,
@@ -705,11 +705,11 @@ def _extract_material_table(layout) -> List[Dict[str, str]]:  # noqa: ANN001
 
         for ridx in range(n_rows):
             try:
-                c0 = str(table.get_cell_text(ridx, 0) or "").strip()
+                c0 = strip_mtext_formatting(str(table.get_cell_text(ridx, 0) or ""))
             except Exception:  # noqa: BLE001
                 c0 = ""
             try:
-                c1 = str(table.get_cell_text(ridx, 1) or "").strip() if n_cols > 1 else ""
+                c1 = strip_mtext_formatting(str(table.get_cell_text(ridx, 1) or "")) if n_cols > 1 else ""
             except Exception:  # noqa: BLE001
                 c1 = ""
 

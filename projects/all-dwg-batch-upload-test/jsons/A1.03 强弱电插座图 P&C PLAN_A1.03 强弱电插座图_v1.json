@@ -1,0 +1,2574 @@
+{
+  "source_dwg": "A1.03 强弱电插座图 P&C PLAN.dwg",
+  "layout_name": "A1.03 强弱电插座图",
+  "sheet_no": "A1.03",
+  "sheet_name": "强弱电插座图 P&C PLAN - A0P",
+  "extracted_at": "2026-03-05 20:40:05",
+  "data_version": 1,
+  "scale": "1:30",
+  "model_range": {
+    "min": [
+      47790.0,
+      59007.624
+    ],
+    "max": [
+      68730.0,
+      73240.0
+    ]
+  },
+  "viewports": [
+    {
+      "id": "6361",
+      "viewport_id": 2,
+      "position": [
+        403.0,
+        320.731
+      ],
+      "width": 698.0000000000002,
+      "height": 474.4125237175435,
+      "scale": 0.0,
+      "layer": "DefPoints",
+      "active_layer": "",
+      "frozen_layers": [],
+      "model_range": {
+        "min": [
+          47790.0,
+          59007.624
+        ],
+        "max": [
+          68730.0,
+          73240.0
+        ]
+      }
+    }
+  ],
+  "dimensions": [
+    {
+      "id": "67F8",
+      "value": 550.113173,
+      "display_text": "550.113",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        49129.887,
+        67249.224
+      ],
+      "defpoint2": [
+        49680.0,
+        66823.968
+      ],
+      "text_position": [
+        49404.943,
+        67317.517
+      ],
+      "global_pct": {
+        "x": 7.7,
+        "y": 41.6
+      },
+      "grid": "B8",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 12.8,
+          "local_y_pct": 69.3
+        },
+        "图4左下": {
+          "local_x_pct": 12.8,
+          "local_y_pct": 2.7
+        }
+      }
+    },
+    {
+      "id": "6817",
+      "value": 1008.597135,
+      "display_text": "1008.597",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        49130.0,
+        72024.043
+      ],
+      "defpoint2": [
+        50138.597,
+        72290.0
+      ],
+      "text_position": [
+        49634.299,
+        72092.336
+      ],
+      "global_pct": {
+        "x": 8.8,
+        "y": 8.1
+      },
+      "grid": "C2",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 14.7,
+          "local_y_pct": 13.5
+        }
+      }
+    },
+    {
+      "id": "6870",
+      "value": 850.0,
+      "display_text": "850",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        51839.217,
+        63290.0
+      ],
+      "defpoint2": [
+        51215.0,
+        64140.0
+      ],
+      "text_position": [
+        51770.924,
+        63715.0
+      ],
+      "global_pct": {
+        "x": 19.0,
+        "y": 66.9
+      },
+      "grid": "E12",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 31.7,
+          "local_y_pct": 44.8
+        }
+      }
+    },
+    {
+      "id": "688F",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        53235.0,
+        65580.699
+      ],
+      "defpoint2": [
+        54520.0,
+        65890.0
+      ],
+      "text_position": [
+        53877.5,
+        65648.992
+      ],
+      "global_pct": {
+        "x": 29.1,
+        "y": 53.3
+      },
+      "grid": "G10",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 48.5,
+          "local_y_pct": 88.8
+        },
+        "图4左下": {
+          "local_x_pct": 48.5,
+          "local_y_pct": 22.2
+        }
+      }
+    },
+    {
+      "id": "68C9",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        54520.0,
+        65580.699
+      ],
+      "defpoint2": [
+        55805.0,
+        65890.0
+      ],
+      "text_position": [
+        55162.5,
+        65648.992
+      ],
+      "global_pct": {
+        "x": 35.2,
+        "y": 53.3
+      },
+      "grid": "I10",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 58.7,
+          "local_y_pct": 88.8
+        },
+        "图4左下": {
+          "local_x_pct": 58.7,
+          "local_y_pct": 22.2
+        }
+      }
+    },
+    {
+      "id": "68E8",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        58895.0,
+        65580.699
+      ],
+      "defpoint2": [
+        60180.0,
+        65890.0
+      ],
+      "text_position": [
+        59537.5,
+        65648.992
+      ],
+      "global_pct": {
+        "x": 56.1,
+        "y": 53.3
+      },
+      "grid": "N10",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 93.5,
+          "local_y_pct": 88.8
+        },
+        "图3右上": {
+          "local_x_pct": 26.8,
+          "local_y_pct": 88.8
+        },
+        "图4左下": {
+          "local_x_pct": 93.5,
+          "local_y_pct": 22.2
+        },
+        "图5右下": {
+          "local_x_pct": 26.8,
+          "local_y_pct": 22.2
+        }
+      }
+    },
+    {
+      "id": "6922",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        60180.0,
+        65580.699
+      ],
+      "defpoint2": [
+        61465.0,
+        65890.0
+      ],
+      "text_position": [
+        60822.5,
+        65648.992
+      ],
+      "global_pct": {
+        "x": 62.2,
+        "y": 53.3
+      },
+      "grid": "O10",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 37.0,
+          "local_y_pct": 88.8
+        },
+        "图5右下": {
+          "local_x_pct": 37.0,
+          "local_y_pct": 22.2
+        }
+      }
+    },
+    {
+      "id": "6941",
+      "value": 1320.0,
+      "display_text": "1320",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        53200.0,
+        62838.545
+      ],
+      "defpoint2": [
+        54520.0,
+        62550.0
+      ],
+      "text_position": [
+        53860.0,
+        62906.864
+      ],
+      "global_pct": {
+        "x": 29.0,
+        "y": 72.6
+      },
+      "grid": "G13",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 48.3,
+          "local_y_pct": 54.3
+        }
+      }
+    },
+    {
+      "id": "697B",
+      "value": 1370.0,
+      "display_text": "1370",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        54520.0,
+        62838.545
+      ],
+      "defpoint2": [
+        55890.0,
+        62550.0
+      ],
+      "text_position": [
+        55205.0,
+        62906.864
+      ],
+      "global_pct": {
+        "x": 35.4,
+        "y": 72.6
+      },
+      "grid": "I13",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 59.0,
+          "local_y_pct": 54.3
+        }
+      }
+    },
+    {
+      "id": "699A",
+      "value": 1240.0,
+      "display_text": "1240",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        58940.0,
+        62838.545
+      ],
+      "defpoint2": [
+        60180.0,
+        62550.0
+      ],
+      "text_position": [
+        59560.0,
+        62906.838
+      ],
+      "global_pct": {
+        "x": 56.2,
+        "y": 72.6
+      },
+      "grid": "N13",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 93.7,
+          "local_y_pct": 54.3
+        },
+        "图5右下": {
+          "local_x_pct": 27.0,
+          "local_y_pct": 54.3
+        }
+      }
+    },
+    {
+      "id": "69D4",
+      "value": 1400.0,
+      "display_text": "1400",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        60180.0,
+        62838.545
+      ],
+      "defpoint2": [
+        61580.0,
+        62550.0
+      ],
+      "text_position": [
+        60880.0,
+        62906.838
+      ],
+      "global_pct": {
+        "x": 62.5,
+        "y": 72.6
+      },
+      "grid": "P13",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 37.5,
+          "local_y_pct": 54.3
+        }
+      }
+    },
+    {
+      "id": "69F3",
+      "value": 850.0,
+      "display_text": "850",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        63181.119,
+        63290.0
+      ],
+      "defpoint2": [
+        63485.0,
+        64140.0
+      ],
+      "text_position": [
+        63112.826,
+        63715.0
+      ],
+      "global_pct": {
+        "x": 73.2,
+        "y": 66.9
+      },
+      "grid": "R12",
+      "in_quadrants": {
+        "图5右下": {
+          "local_x_pct": 55.3,
+          "local_y_pct": 44.8
+        }
+      }
+    },
+    {
+      "id": "6A12",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        53235.0,
+        66860.41
+      ],
+      "defpoint2": [
+        54520.0,
+        66440.0
+      ],
+      "text_position": [
+        53877.5,
+        66928.703
+      ],
+      "global_pct": {
+        "x": 29.1,
+        "y": 44.3
+      },
+      "grid": "G8",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 48.5,
+          "local_y_pct": 73.8
+        },
+        "图4左下": {
+          "local_x_pct": 48.5,
+          "local_y_pct": 7.2
+        }
+      }
+    },
+    {
+      "id": "6A13",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        54520.0,
+        66860.41
+      ],
+      "defpoint2": [
+        55805.0,
+        66440.0
+      ],
+      "text_position": [
+        55162.5,
+        66928.703
+      ],
+      "global_pct": {
+        "x": 35.2,
+        "y": 44.3
+      },
+      "grid": "I8",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 58.7,
+          "local_y_pct": 73.8
+        },
+        "图4左下": {
+          "local_x_pct": 58.7,
+          "local_y_pct": 7.2
+        }
+      }
+    },
+    {
+      "id": "6A14",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        58895.0,
+        66860.41
+      ],
+      "defpoint2": [
+        60180.0,
+        66440.0
+      ],
+      "text_position": [
+        59537.5,
+        66928.703
+      ],
+      "global_pct": {
+        "x": 56.1,
+        "y": 44.3
+      },
+      "grid": "N8",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 93.5,
+          "local_y_pct": 73.8
+        },
+        "图3右上": {
+          "local_x_pct": 26.8,
+          "local_y_pct": 73.8
+        },
+        "图4左下": {
+          "local_x_pct": 93.5,
+          "local_y_pct": 7.2
+        },
+        "图5右下": {
+          "local_x_pct": 26.8,
+          "local_y_pct": 7.2
+        }
+      }
+    },
+    {
+      "id": "6A15",
+      "value": 1285.0,
+      "display_text": "1285",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        60180.0,
+        66860.41
+      ],
+      "defpoint2": [
+        61465.0,
+        66440.0
+      ],
+      "text_position": [
+        60822.5,
+        66928.703
+      ],
+      "global_pct": {
+        "x": 62.2,
+        "y": 44.3
+      },
+      "grid": "O8",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 37.0,
+          "local_y_pct": 73.8
+        },
+        "图5右下": {
+          "local_x_pct": 37.0,
+          "local_y_pct": 7.2
+        }
+      }
+    },
+    {
+      "id": "6ED2",
+      "value": 2114.285773,
+      "display_text": "2114.286",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        57815.0,
+        70700.927
+      ],
+      "defpoint2": [
+        55700.714,
+        71275.052
+      ],
+      "text_position": [
+        56757.857,
+        70769.22
+      ],
+      "global_pct": {
+        "x": 42.8,
+        "y": 17.4
+      },
+      "grid": "K3",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 71.3,
+          "local_y_pct": 29.0
+        },
+        "图3右上": {
+          "local_x_pct": 4.7,
+          "local_y_pct": 29.0
+        }
+      }
+    },
+    {
+      "id": "6F0C",
+      "value": 1184.285773,
+      "display_text": "1184.286",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        58999.286,
+        70700.927
+      ],
+      "defpoint2": [
+        57815.0,
+        71275.052
+      ],
+      "text_position": [
+        58407.143,
+        70769.22
+      ],
+      "global_pct": {
+        "x": 50.7,
+        "y": 17.4
+      },
+      "grid": "M3",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 84.5,
+          "local_y_pct": 29.0
+        },
+        "图3右上": {
+          "local_x_pct": 17.8,
+          "local_y_pct": 29.0
+        }
+      }
+    },
+    {
+      "id": "6F2B",
+      "value": 2050.714227,
+      "display_text": "2050.714",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        61050.0,
+        70700.927
+      ],
+      "defpoint2": [
+        58999.286,
+        71275.052
+      ],
+      "text_position": [
+        60024.643,
+        70769.22
+      ],
+      "global_pct": {
+        "x": 58.4,
+        "y": 17.4
+      },
+      "grid": "O3",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 97.3,
+          "local_y_pct": 29.0
+        },
+        "图3右上": {
+          "local_x_pct": 30.7,
+          "local_y_pct": 29.0
+        }
+      }
+    },
+    {
+      "id": "6F4A",
+      "value": 2050.714227,
+      "display_text": "2050.714",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        55700.714,
+        70700.927
+      ],
+      "defpoint2": [
+        53650.0,
+        71275.052
+      ],
+      "text_position": [
+        54675.357,
+        70769.22
+      ],
+      "global_pct": {
+        "x": 32.9,
+        "y": 17.4
+      },
+      "grid": "H3",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 54.8,
+          "local_y_pct": 29.0
+        }
+      }
+    },
+    {
+      "id": "7479",
+      "value": 1090.060807,
+      "display_text": "1090.061",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        56084.398,
+        72290.113
+      ],
+      "defpoint2": [
+        55775.539,
+        71200.052
+      ],
+      "text_position": [
+        56016.105,
+        71745.083
+      ],
+      "global_pct": {
+        "x": 39.3,
+        "y": 10.5
+      },
+      "grid": "J2",
+      "in_quadrants": {
+        "图2左上": {
+          "local_x_pct": 65.5,
+          "local_y_pct": 17.5
+        }
+      }
+    },
+    {
+      "id": "7498",
+      "value": 450.0,
+      "display_text": "450",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        64143.063,
+        72290.0
+      ],
+      "defpoint2": [
+        63560.0,
+        71840.0
+      ],
+      "text_position": [
+        64074.77,
+        72065.0
+      ],
+      "global_pct": {
+        "x": 77.8,
+        "y": 8.3
+      },
+      "grid": "S2",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 63.0,
+          "local_y_pct": 13.8
+        }
+      }
+    },
+    {
+      "id": "7520",
+      "value": 1240.0,
+      "display_text": "1240",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        64143.063,
+        71840.0
+      ],
+      "defpoint2": [
+        63560.0,
+        70600.0
+      ],
+      "text_position": [
+        64074.77,
+        71220.0
+      ],
+      "global_pct": {
+        "x": 77.8,
+        "y": 14.2
+      },
+      "grid": "S3",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 63.0,
+          "local_y_pct": 23.7
+        }
+      }
+    },
+    {
+      "id": "756C",
+      "value": 1699.999886,
+      "display_text": "1700",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        64143.063,
+        70600.0
+      ],
+      "defpoint2": [
+        63560.0,
+        68900.0
+      ],
+      "text_position": [
+        64074.77,
+        69750.0
+      ],
+      "global_pct": {
+        "x": 77.8,
+        "y": 24.5
+      },
+      "grid": "S5",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 63.0,
+          "local_y_pct": 40.8
+        }
+      }
+    },
+    {
+      "id": "758B",
+      "value": 1100.0,
+      "display_text": "1100",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        64143.063,
+        68900.0
+      ],
+      "defpoint2": [
+        63560.0,
+        67800.0
+      ],
+      "text_position": [
+        64074.77,
+        68350.0
+      ],
+      "global_pct": {
+        "x": 77.8,
+        "y": 34.4
+      },
+      "grid": "S6",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 63.0,
+          "local_y_pct": 57.3
+        }
+      }
+    },
+    {
+      "id": "7772",
+      "value": 851.50326,
+      "display_text": "851.503",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        65910.0,
+        71985.855
+      ],
+      "defpoint2": [
+        65058.497,
+        72290.0
+      ],
+      "text_position": [
+        65484.248,
+        72054.148
+      ],
+      "global_pct": {
+        "x": 84.5,
+        "y": 8.3
+      },
+      "grid": "U2",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 74.2,
+          "local_y_pct": 13.8
+        }
+      }
+    },
+    {
+      "id": "7791",
+      "value": 450.0,
+      "display_text": "450",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        66263.524,
+        72290.0
+      ],
+      "defpoint2": [
+        65910.0,
+        71840.0
+      ],
+      "text_position": [
+        66195.231,
+        72065.0
+      ],
+      "global_pct": {
+        "x": 87.9,
+        "y": 8.3
+      },
+      "grid": "V2",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 79.8,
+          "local_y_pct": 13.8
+        }
+      }
+    },
+    {
+      "id": "77CB",
+      "value": 1389.999967,
+      "display_text": "1390",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        66263.524,
+        71840.0
+      ],
+      "defpoint2": [
+        65910.0,
+        70450.0
+      ],
+      "text_position": [
+        66195.205,
+        71145.0
+      ],
+      "global_pct": {
+        "x": 87.9,
+        "y": 14.7
+      },
+      "grid": "V3",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 79.8,
+          "local_y_pct": 24.5
+        }
+      }
+    },
+    {
+      "id": "8045",
+      "value": 600.0,
+      "display_text": "600",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        66263.524,
+        70450.0
+      ],
+      "defpoint2": [
+        65910.0,
+        69850.0
+      ],
+      "text_position": [
+        66195.231,
+        70150.0
+      ],
+      "global_pct": {
+        "x": 87.9,
+        "y": 21.7
+      },
+      "grid": "V4",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 79.8,
+          "local_y_pct": 36.2
+        }
+      }
+    },
+    {
+      "id": "8064",
+      "value": 500.0,
+      "display_text": "500",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        66263.524,
+        69850.0
+      ],
+      "defpoint2": [
+        65910.0,
+        69350.0
+      ],
+      "text_position": [
+        66195.231,
+        69600.0
+      ],
+      "global_pct": {
+        "x": 87.9,
+        "y": 25.6
+      },
+      "grid": "V5",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 79.8,
+          "local_y_pct": 42.7
+        }
+      }
+    },
+    {
+      "id": "8083",
+      "value": 600.0,
+      "display_text": "600",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        66263.524,
+        69350.0
+      ],
+      "defpoint2": [
+        65910.0,
+        68750.0
+      ],
+      "text_position": [
+        66195.231,
+        69050.0
+      ],
+      "global_pct": {
+        "x": 87.9,
+        "y": 29.4
+      },
+      "grid": "V5",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 79.8,
+          "local_y_pct": 49.0
+        }
+      }
+    },
+    {
+      "id": "950D",
+      "value": 350.0,
+      "display_text": "350",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        67155.278,
+        67800.0
+      ],
+      "defpoint2": [
+        66649.887,
+        68150.0
+      ],
+      "text_position": [
+        67086.96,
+        67975.0
+      ],
+      "global_pct": {
+        "x": 92.2,
+        "y": 37.0
+      },
+      "grid": "W7",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 87.0,
+          "local_y_pct": 61.7
+        }
+      }
+    },
+    {
+      "id": "9B60",
+      "value": 1000.0,
+      "display_text": "1000",
+      "layer": "_ACM-A-ANNO-DIMS",
+      "source": "model_space",
+      "defpoint": [
+        65910.0,
+        66935.238
+      ],
+      "defpoint2": [
+        64910.0,
+        66440.0
+      ],
+      "text_position": [
+        65410.0,
+        67003.531
+      ],
+      "global_pct": {
+        "x": 84.1,
+        "y": 43.8
+      },
+      "grid": "U8",
+      "in_quadrants": {
+        "图3右上": {
+          "local_x_pct": 73.5,
+          "local_y_pct": 73.0
+        },
+        "图5右下": {
+          "local_x_pct": 73.5,
+          "local_y_pct": 6.3
+        }
+      }
+    }
+  ],
+  "pseudo_texts": [],
+  "indexes": [],
+  "title_blocks": [
+    {
+      "id": "6365",
+      "block_name": "TB_A1",
+      "sheet_no": "",
+      "sheet_name": "",
+      "position": [
+        71770.76,
+        112758.286
+      ],
+      "layer": "0",
+      "attrs": []
+    },
+    {
+      "id": "6366",
+      "block_name": "*U4",
+      "sheet_no": "",
+      "sheet_name": "强弱电插座图 P&C PLAN - A0P",
+      "position": [
+        342.61,
+        33.872
+      ],
+      "layer": "_ACM-G-ANNO-TXTL",
+      "attrs": [
+        {
+          "tag": "_ACM-TITLELABEL",
+          "value": "1"
+        },
+        {
+          "tag": "_ACM-TITLEMARK",
+          "value": "强弱电插座图 P&C PLAN - A0P"
+        },
+        {
+          "tag": "_ACM-SHEETNUMBER",
+          "value": "A1.03"
+        },
+        {
+          "tag": "_ACM-VPSCALE",
+          "value": "Scale 1:30"
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "id": "63B7",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimSun|b0|i0|c134|p2;\\C256;地面电源插座}",
+      "code": "{\\fSimSun|b0|i0|c134|p2;\\C256;地面电源插座}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63BC",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimSun|b0|i0|c134|p2;\\C256;地面电源插座}",
+      "code": "{\\fSimSun|b0|i0|c134|p2;\\C256;地面电源插座}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63C1",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimSun|b0|i0|c134|p2;\\C256;地面电源插座}",
+      "code": "{\\fSimSun|b0|i0|c134|p2;\\C256;地面电源插座}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63C6",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\C256;桌面安装}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\C256;桌面安装}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63CB",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:1900}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:1900}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63D0",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:2300}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:2300}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63D5",
+      "entity_type": "MLEADER",
+      "content": "{\\C256;H:350}",
+      "code": "{\\C256;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63DA",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:850(\\fSimHei|b0|i0|c134|p49;结合家具\\fArial|b0|i0|c0|p34;)}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:850(\\fSimHei|b0|i0|c134|p49;结合家具\\fArial|b0|i0|c0|p34;)}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63DF",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:1900}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:1900}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63E4",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;灯带预留接线盒}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;灯带预留接线盒}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63E9",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;灯带预留接线盒}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;灯带预留接线盒}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63EE",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;制冰机插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;制冰机插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63F3",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;咖啡机插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:1100}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;咖啡机插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:1100}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63F8",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;冷藏柜插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;冷藏柜插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "63FD",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;冷藏柜插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;冷藏柜插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "6402",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;冷藏柜插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;冷藏柜插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "6407",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;冷藏柜插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;冷藏柜插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "640C",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;冷藏柜插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;冷藏柜插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "6411",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;洗碗机插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;洗碗机插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "6416",
+      "entity_type": "MLEADER",
+      "content": "{\\C256;H:350}",
+      "code": "{\\C256;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "641B",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\fArial|b0|i0|c0|p34;\\T1;\\PH:850(\\fSimHei|b0|i0|c134|p49;结合家具\\fArial|b0|i0|c0|p34;)}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\fArial|b0|i0|c0|p34;\\T1;\\PH:850(\\fSimHei|b0|i0|c134|p49;结合家具\\fArial|b0|i0|c0|p34;)}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "6420",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:2300}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:2300}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "6425",
+      "entity_type": "MLEADER",
+      "content": "{\\C256;H:350}",
+      "code": "{\\C256;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "642A",
+      "entity_type": "MLEADER",
+      "content": "{\\C256;H:350}",
+      "code": "{\\C256;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "642F",
+      "entity_type": "MLEADER",
+      "content": "{\\C256;H:350}",
+      "code": "{\\C256;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "6434",
+      "entity_type": "MLEADER",
+      "content": "{\\C256;H:350}",
+      "code": "{\\C256;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "6439",
+      "entity_type": "MLEADER",
+      "content": "{\\C256;H:350}",
+      "code": "{\\C256;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "643E",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:850(\\fSimHei|b0|i0|c134|p49;结合家具\\fArial|b0|i0|c0|p34;)}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:850(\\fSimHei|b0|i0|c134|p49;结合家具\\fArial|b0|i0|c0|p34;)}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "6443",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "6448",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:2700}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:2700}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "644D",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:2700}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;壁灯预留接线盒\\P\\fArial|b0|i0|c0|p34;\\T1;H:2700}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "64B0",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\fArial|b0|i0|c0|p34;\\T1;\\PH:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\fArial|b0|i0|c0|p34;\\T1;\\PH:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "96A9",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;咖啡厅灯光集中控制\\P\\fArial|b0|i0|c0|p34;\\T1;H:1300}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;咖啡厅灯光集中控制\\P\\fArial|b0|i0|c0|p34;\\T1;H:1300}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "9AB7",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留\\fMicrosoft YaHei|b0|i0|c134|p34;\\T1;数据口\\P\\fArial|b0|i0|c0|p34;H:850(\\fSimHei|b0|i0|c134|p49;结合家具\\fArial|b0|i0|c0|p34;)}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留\\fMicrosoft",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "9B51",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留\\fMicrosoft YaHei|b0|i0|c134|p34;\\T1;数据口\\P\\fArial|b0|i0|c0|p34;H:850(\\fSimHei|b0|i0|c134|p49;结合家具\\fArial|b0|i0|c0|p34;)}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留\\fMicrosoft",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "9B56",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留插座\\P\\fArial|b0|i0|c0|p34;\\T1;H:350}",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    },
+    {
+      "id": "9B5B",
+      "entity_type": "MLEADER",
+      "content": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留\\fMicrosoft YaHei|b0|i0|c134|p34;\\T1;数据口\\P\\fArial|b0|i0|c0|p34;H:350}",
+      "code": "{\\fSimHei|b0|i0|c134|p49;\\T0.85;\\C256;预留\\fMicrosoft",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "arrow": [
+        0.0,
+        0.0
+      ],
+      "layer": "0",
+      "global_pct": {
+        "x": 0.0,
+        "y": 100.0
+      },
+      "grid": "A17",
+      "in_quadrants": {
+        "图4左下": {
+          "local_x_pct": 0.0,
+          "local_y_pct": 100.0
+        }
+      }
+    }
+  ],
+  "material_table": [
+    {
+      "code": "\\fArial|b0|i0|c134|p34|;D",
+      "name": "\\fArial|b0|i0|c134|p34|;w \\fArial|b0|i0|c134|p34|;u POWER OUTLET ON DESK \\f微软雅黑|b0|i0|c134|p34|;带 POWER OUTLET WITH USB 桌面插座 FIVE POWER OUTLET 防水电源插座 WATERPROOF POWER OUTLET USB 插座 8键照明控制面板(带语音交互) 声光报警器 手动报警器 疏散指示 EMERGENCY EXIT 距地1.35m墙面嵌入式安装 {\\T0.8;A1.03}"
+    }
+  ],
+  "layers": [
+    {
+      "name": "0",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "DefPoints",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "P-平面活动家具",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "ID-TEXT-HEADING-3",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$D-FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$D-BASE-INTWALL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$D-BASE-WALL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$L-ELEV-MARK",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$消火栓",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$3-地面",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$9-填充",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$1-窗",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$A-Fire box",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": true
+    },
+    {
+      "name": "I-AR$0$A-stairs",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$0-建-楼梯",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$I—平面—装饰面层线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$I—平面—门",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$0M-FIRE",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$P-平面活动家具",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$A-FURN-PRES",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$FF-活动家具",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$ID-TEXT-HEADING-3",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图框填写字体",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "TB_A1$0$上海中建-图名",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-G-ANNO-MARK-DETC",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-G-ANNO-TXTL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-ANNO-TEXT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-SHBD",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-ANNO-DIMS",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$L-ELEV-MARK",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$A-stairs",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$0-建-楼梯",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I—平面—门",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$P-平面活动家具",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$ID-TEXT-HEADING-3",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PL-WALL-FHINISH",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PL-FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PL-IDS-MILL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PL-LIGHT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-GRID",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PL-DOOR",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$A-天花投影线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "ISH-Refe1",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$A-Doors",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$A-LOL061W1",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$I-SCOPE",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-A-ANNO-IDEN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-E-EQMT-COMM",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "_ACM-E-EQMT-SECT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$AXIS_TEXT",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$0-建-轴号",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$GZET_COL_GRID_1-200_轴线",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$GZET_DIM_1-200_平面尺寸标注",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-WALL",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$_ACM-A-WALL-HACH",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-GRID",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "A-GZET_DIM",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$I-stairs",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-RCP-REF",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-AR$0$I—平面—装饰面层线a",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    },
+    {
+      "name": "I-PLAN$0$I-PLAN$0$I-PL-FURN",
+      "visible": true,
+      "on": true,
+      "frozen": false,
+      "locked": false
+    }
+  ]
+}

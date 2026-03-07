@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
-from routers import projects, categories, catalog, drawings, dwg, audit, report
+from routers import projects, categories, catalog, drawings, dwg, audit, report, settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -58,8 +58,12 @@ async def lifespan(app: FastAPI):
                 ProjectCategory(id="cat_5", name="其他", color="#6B7280", sort_order=5),
             ]
             db.add_all(default_categories)
-            db.commit()
-            logger.info("已创建默认分类")
+            try:
+                db.commit()
+                logger.info("已创建默认分类")
+            except Exception:
+                db.rollback()
+                logger.info("默认分类已由其他进程创建，跳过")
     finally:
         db.close()
     
@@ -89,6 +93,7 @@ app.include_router(drawings.router, prefix="/api", tags=["图纸管理"])
 app.include_router(dwg.router, prefix="/api", tags=["DWG管理"])
 app.include_router(audit.router, prefix="/api", tags=["审核管理"])
 app.include_router(report.router, prefix="/api", tags=["报告管理"])
+app.include_router(settings.router, prefix="/api", tags=["系统设置"])
 
 
 @app.get("/")

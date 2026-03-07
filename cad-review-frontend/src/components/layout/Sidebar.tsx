@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
+import { Settings } from 'lucide-react';
 import type { Category } from '@/types';
 
 interface SidebarProps {
@@ -6,6 +7,7 @@ interface SidebarProps {
     categoryCount?: Record<string, number>;
     activeCategoryId?: string | 'all';
     onCategorySelect?: (id: string) => void;
+    onManageCategories?: () => void;
     showCategories?: boolean;
 }
 
@@ -14,6 +16,7 @@ export default function Sidebar({
     categoryCount = {},
     activeCategoryId = 'all',
     onCategorySelect,
+    onManageCategories,
     showCategories = true
 }: SidebarProps) {
     const location = useLocation();
@@ -53,7 +56,7 @@ export default function Sidebar({
             </nav>
 
             {/* Project Categories */}
-            {showCategories && categories && categories.length > 0 && (
+            {showCategories && (
                 <div className="mt-6 px-8 flex flex-col gap-6 flex-1 overflow-y-auto pl-[52px]">
                     <div
                         onClick={() => handleCategoryClick('all')}
@@ -78,7 +81,7 @@ export default function Sidebar({
 
                     <div className="mt-4">
                         <button
-                            onClick={() => alert('管理分类功能开发中...')}
+                            onClick={() => onManageCategories?.()}
                             className="bg-foreground text-background text-[14px] font-medium py-2.5 px-6 rounded-none hover:bg-foreground/90 transition-colors"
                         >
                             管理分类
@@ -86,6 +89,18 @@ export default function Sidebar({
                     </div>
                 </div>
             )}
+
+            <div className="mt-auto px-8">
+                <Link
+                    to="/settings"
+                    className={`flex items-center gap-3 px-4 py-2.5 border border-border rounded-none transition-colors ${
+                        isSettingsActive ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+                    }`}
+                >
+                    <Settings className="h-4 w-4" />
+                    <span className="text-[14px] font-medium">设置</span>
+                </Link>
+            </div>
         </aside>
     );
 }

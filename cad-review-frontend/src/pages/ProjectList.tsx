@@ -5,7 +5,10 @@ import type { Category, Project } from '@/types';
 import AppLayout from '@/components/layout/AppLayout';
 import ProjectTable from './ProjectList/components/ProjectTable';
 import CreateProjectDialog from './ProjectList/components/CreateProjectDialog';
+import EditProjectDialog from './ProjectList/components/EditProjectDialog';
 import DeleteProjectDialog from './ProjectList/components/DeleteProjectDialog';
+import CategoryManagementDialog from './ProjectList/components/CategoryManagementDialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const statusMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'success' | 'warning' | 'destructive' }> = {
   new: { label: '待开始', variant: 'secondary' },
@@ -20,10 +23,13 @@ export default function ProjectList() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
+  const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [categoryCount, setCategoryCount] = useState<Record<string, number>>({});
   const [loadError, setLoadError] = useState('');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
+  const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -31,23 +37,13 @@ export default function ProjectList() {
     loadData();
   }, []);
 
-  // Temporary effect to randomize categories for testing
   useEffect(() => {
-    if (projects.length > 0 && categories.length > 0 && projects.every(p => !p.category)) {
-      console.log('Randomizing project categories for testing...');
-      const updatedProjects = projects.map(p => ({
-        ...p,
-        category: categories[Math.floor(Math.random() * categories.length)].id
-      }));
-      setProjects(updatedProjects);
-
-      const counts: Record<string, number> = { all: updatedProjects.length };
-      categories.forEach(c => {
-        counts[c.id] = updatedProjects.filter(p => p.category === c.id).length;
-      });
-      setCategoryCount(counts);
-    }
-  }, [projects, categories]);
+    const timer = window.setInterval(() => {
+      void loadData();
+    }, 6000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const getErrorMessage = (error: unknown, fallback: string) => {
     if (axios.isAxiosError(error)) {
@@ -80,10 +76,12 @@ export default function ProjectList() {
     }
   };
 
-  const handleDeleteProject = (project: Project, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleDeleteProject = (project: Project) => {
     setProjectToDelete(project);
+  };
+
+  const handleEditProject = (project: Project) => {
+    setProjectToEdit(project);
   };
 
   const confirmDeleteProject = async () => {
@@ -103,8 +101,9 @@ export default function ProjectList() {
   const keyword = searchKeyword.trim().toLowerCase();
   const filteredProjects = projects.filter((project) => {
     const categoryMatched = selectedCategoryId === 'all' || project.category === selectedCategoryId;
+    const statusMatched = selectedStatus === 'all' || project.status === selectedStatus;
     const nameMatched = !keyword || project.name.toLowerCase().includes(keyword);
-    return categoryMatched && nameMatched;
+    return categoryMatched && statusMatched && nameMatched;
   });
 
   return (
@@ -113,6 +112,7 @@ export default function ProjectList() {
       categoryCount={categoryCount}
       activeCategoryId={selectedCategoryId}
       onCategorySelect={setSelectedCategoryId}
+      onManageCategories={() => setIsCategoryDialogOpen(true)}
     >
       {/* Header Sec */}
       <section className="flex items-center justify-between w-full">
@@ -128,7 +128,7 @@ export default function ProjectList() {
       </section>
 
       {/* Filter / Search Sec - As per design, it's a simple display for now. Adding if needed for later functionality */}
-      <section className="flex gap-4 w-full">
+      <section className="flex gap-4 w-full mt-6">
         <div className="flex-1 bg-secondary px-4 py-3 rounded-none flex items-center">
           <input
             type="text"
@@ -138,10 +138,21 @@ export default function ProjectList() {
             className="w-full bg-transparent border-0 p-0 text-[13px] font-sans text-foreground placeholder:text-muted-foreground outline-none"
           />
         </div>
-        <div className="bg-secondary px-4 py-3 rounded-none min-w-[200px] flex items-center">
-          <span className="text-[13px] text-foreground font-sans">
-            状态：{selectedCategoryId === 'all' ? '全部' : categories.find(c => c.id === selectedCategoryId)?.name || '未知'}
-          </span>
+        <div className="bg-secondary px-4 py-3 rounded-none min-w-[200px] flex items-center gap-2">
+          <span className="text-[13px] text-foreground font-sans shrink-0">状态：</span>
+          <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+            <SelectTrigger className="h-auto border-0 bg-transparent p-0 shadow-none focus:ring-0 focus:ring-offset-0 text-[13px] font-sans text-foreground">
+              <SelectValue placeholder="全部" />
+            </SelectTrigger>
+            <SelectContent className="bg-white border-border rounded-none shadow-sm">
+              <SelectItem value="all" className="text-[13px] rounded-none cursor-pointer">全部</SelectItem>
+              {Object.entries(statusMap).map(([value, info]) => (
+                <SelectItem key={value} value={value} className="text-[13px] rounded-none cursor-pointer">
+                  {info.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </section>
 
@@ -151,6 +162,7 @@ export default function ProjectList() {
         loadError={loadError}
         statusMap={statusMap}
         onDelete={handleDeleteProject}
+        onEdit={handleEditProject}
         onCreateClick={() => setIsCreateOpen(true)}
       />
 
@@ -161,12 +173,29 @@ export default function ProjectList() {
         onSuccess={loadData}
       />
 
+      <EditProjectDialog
+        isOpen={Boolean(projectToEdit)}
+        onOpenChange={(open) => !open && setProjectToEdit(null)}
+        project={projectToEdit}
+        categories={categories}
+        onSuccess={loadData}
+      />
+
       <DeleteProjectDialog
         open={Boolean(projectToDelete)}
         projectName={projectToDelete?.name || ''}
         deleting={isDeleting}
         onOpenChange={(open) => !open && setProjectToDelete(null)}
         onConfirm={confirmDeleteProject}
+      />
+
+      <CategoryManagementDialog
+        isOpen={isCategoryDialogOpen}
+        onOpenChange={setIsCategoryDialogOpen}
+        categories={categories}
+        activeCategoryId={selectedCategoryId}
+        onActiveCategoryInvalidated={() => setSelectedCategoryId('all')}
+        onSuccess={loadData}
       />
     </AppLayout>
   );

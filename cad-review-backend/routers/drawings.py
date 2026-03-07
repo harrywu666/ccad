@@ -3,6 +3,7 @@
 提供PDF上传、PNG转换、图名图号识别、匹配接口
 """
 
+import json
 import os
 import asyncio
 import logging
@@ -10,21 +11,27 @@ import time
 import re
 from threading import Lock
 from difflib import SequenceMatcher
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from pathlib import Path, PurePosixPath
+from typing import Any, Dict, List, Literal, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from database import get_db
-from models import Project, Catalog, Drawing
+from models import Project, Catalog, Drawing, DrawingAnnotation
 from services.storage_path_service import resolve_project_dir
+
+
+def _safe_filename(raw: str) -> str:
+    """提取纯文件名，防止路径穿越攻击。"""
+    return PurePosixPath(raw).name or "upload"
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 _DRAWINGS_UPLOAD_PROGRESS: Dict[str, Dict[str, Any]] = {}
 _DRAWINGS_PROGRESS_LOCK = Lock()
+_PROGRESS_TTL_SECONDS = 600
 
 
 def _set_drawings_upload_progress(project_id: str, phase: str, progress: int, message: str, success: Optional[bool] = None):
@@ -33,11 +40,16 @@ def _set_drawings_upload_progress(project_id: str, phase: str, progress: int, me
         "progress": max(0, min(100, int(progress))),
         "message": message,
         "updated_at": datetime.now().isoformat(),
+        "_ts": time.monotonic(),
     }
     if success is not None:
         payload["success"] = success
     with _DRAWINGS_PROGRESS_LOCK:
         _DRAWINGS_UPLOAD_PROGRESS[project_id] = payload
+        stale = [k for k, v in _DRAWINGS_UPLOAD_PROGRESS.items()
+                 if time.monotonic() - v.get("_ts", 0) > _PROGRESS_TTL_SECONDS and k != project_id]
+        for k in stale:
+            del _DRAWINGS_UPLOAD_PROGRESS[k]
 
 
 @router.get("/projects/{project_id}/drawings/upload-progress")
@@ -245,9 +257,11 @@ async def upload_drawings(project_id: str, file: UploadFile = File(...), db: Ses
     pdf_dir = project_dir / "pngs" / f"v{current_version}"
     pdf_dir.mkdir(parents=True, exist_ok=True)
     
-    pdf_path = pdf_dir / file.filename
+    pdf_path = pdf_dir / _safe_filename(file.filename or "upload.pdf")
+    content = await file.read()
+    if len(content) > 500 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="PDF 文件不能超过 500MB")
     with open(pdf_path, "wb") as f:
-        content = await file.read()
         f.write(content)
     _set_drawings_upload_progress(project_id, "processing", 10, "文件上传完成，读取页数中")
     
@@ -580,3 +594,187 @@ def delete_drawings(project_id: str, db: Session = Depends(get_db)):
     increment_cache_version(project_id, db)
     
     return {"success": True, "message": "图纸已删除"}
+
+
+# ---------------------------------------------------------------------------
+# 图纸标注 API
+# ---------------------------------------------------------------------------
+
+class AnnotationObjectIn(BaseModel):
+    """单个标注对象"""
+    type: Literal["stroke", "text"]
+    color: Optional[str] = None
+    stroke_width: Optional[int] = None
+    path: Optional[str] = None
+    text: Optional[str] = None
+    x: Optional[float] = None
+    y: Optional[float] = None
+    font_size: Optional[float] = None
+    scale_x: Optional[float] = None
+    scale_y: Optional[float] = None
+
+
+class AnnotationBoardIn(BaseModel):
+    """标注画板请求体"""
+    drawing_data_version: int
+    schema_version: int
+    objects: List[AnnotationObjectIn]
+
+
+def _get_active_drawing(project_id: str, drawing_id: str, db: Session) -> Drawing:
+    """获取有效图纸（未被删除），不存在则抛 404。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    drawing = db.query(Drawing).filter(
+        Drawing.id == drawing_id,
+        Drawing.project_id == project_id,
+        Drawing.replaced_at == None,
+    ).first()
+    if not drawing:
+        raise HTTPException(status_code=404, detail="图纸不存在")
+    return drawing
+
+
+@router.get("/projects/{project_id}/annotations-by-sheet")
+def get_annotations_by_sheet(
+    project_id: str,
+    sheet_no: str,
+    audit_version: int,
+    db: Session = Depends(get_db),
+):
+    """通过图号 + 审图版本查找标注（用于跨版本叠加显示）。
+
+    同一图号在不同版本可能对应不同的 drawing_id（因重新上传），
+    因此搜索范围包括已替换的旧图纸。
+    """
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    drawing_ids = [
+        row[0] for row in
+        db.query(Drawing.id)
+        .filter(Drawing.project_id == project_id, Drawing.sheet_no == sheet_no)
+        .all()
+    ]
+
+    if not drawing_ids:
+        return {"schema_version": 1, "objects": [], "audit_version": audit_version}
+
+    record = db.query(DrawingAnnotation).filter(
+        DrawingAnnotation.drawing_id.in_(drawing_ids),
+        DrawingAnnotation.project_id == project_id,
+        DrawingAnnotation.audit_version == audit_version,
+    ).first()
+
+    if record and record.annotation_board:
+        try:
+            board = json.loads(record.annotation_board)
+            board["audit_version"] = audit_version
+            return board
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return {"schema_version": 1, "objects": [], "audit_version": audit_version}
+
+
+@router.get("/projects/{project_id}/drawings/{drawing_id}/annotations")
+def get_annotations(
+    project_id: str,
+    drawing_id: str,
+    audit_version: int,
+    db: Session = Depends(get_db),
+):
+    """获取图纸标注画板（按审图版本隔离）。"""
+    drawing = _get_active_drawing(project_id, drawing_id, db)
+
+    record = db.query(DrawingAnnotation).filter(
+        DrawingAnnotation.drawing_id == drawing.id,
+        DrawingAnnotation.project_id == project_id,
+        DrawingAnnotation.audit_version == audit_version,
+    ).first()
+
+    if record and record.annotation_board:
+        try:
+            board = json.loads(record.annotation_board)
+            board["drawing_id"] = drawing.id
+            board["drawing_data_version"] = drawing.data_version
+            board["audit_version"] = audit_version
+            return board
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return {
+        "drawing_id": drawing.id,
+        "drawing_data_version": drawing.data_version,
+        "audit_version": audit_version,
+        "schema_version": 1,
+        "objects": [],
+    }
+
+
+@router.put("/projects/{project_id}/drawings/{drawing_id}/annotations")
+def put_annotations(
+    project_id: str,
+    drawing_id: str,
+    audit_version: int,
+    payload: AnnotationBoardIn,
+    db: Session = Depends(get_db),
+):
+    """保存（覆盖）图纸标注画板（按审图版本隔离）。"""
+    drawing = _get_active_drawing(project_id, drawing_id, db)
+
+    if payload.drawing_data_version != drawing.data_version:
+        raise HTTPException(
+            status_code=409,
+            detail=f"图纸数据版本不匹配（期望 {drawing.data_version}，收到 {payload.drawing_data_version}）",
+        )
+
+    board_data = {
+        "schema_version": payload.schema_version,
+        "objects": [obj.model_dump(exclude_none=True) for obj in payload.objects],
+    }
+    board_json = json.dumps(board_data, ensure_ascii=False)
+
+    record = db.query(DrawingAnnotation).filter(
+        DrawingAnnotation.drawing_id == drawing.id,
+        DrawingAnnotation.audit_version == audit_version,
+    ).first()
+
+    if record:
+        record.annotation_board = board_json
+        record.updated_at = datetime.now()
+    else:
+        import uuid
+        record = DrawingAnnotation(
+            id=str(uuid.uuid4()),
+            drawing_id=drawing.id,
+            project_id=project_id,
+            audit_version=audit_version,
+            annotation_board=board_json,
+            updated_at=datetime.now(),
+        )
+        db.add(record)
+
+    db.commit()
+    return {"success": True}
+
+
+@router.delete("/projects/{project_id}/drawings/{drawing_id}/annotations")
+def delete_annotations(
+    project_id: str,
+    drawing_id: str,
+    audit_version: int,
+    db: Session = Depends(get_db),
+):
+    """清空图纸标注（按审图版本隔离）。"""
+    _get_active_drawing(project_id, drawing_id, db)
+
+    db.query(DrawingAnnotation).filter(
+        DrawingAnnotation.drawing_id == drawing_id,
+        DrawingAnnotation.project_id == project_id,
+        DrawingAnnotation.audit_version == audit_version,
+    ).delete()
+    db.commit()
+    return {"success": True}
