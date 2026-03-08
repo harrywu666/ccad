@@ -15,6 +15,8 @@ export interface AnnotatedDrawingPreviewCanvasProps {
   previewDrawing: PreviewDrawing;
   auditVersion: number;
   availableVersions: number[];
+  overlayVersions: number[];
+  onToggleOverlayVersion: (version: number) => void;
 }
 
 export interface StageView {

@@ -1,8 +1,8 @@
 /**
- * 画布浮动控件：工具栏（左上）、缩放控件（右下）、版本叠加选择器。
+ * 画布浮动控件：工具栏（左上）、缩放控件（右下）。
  */
 
-import { ChevronDown, Eye, EyeOff, Layers, Minus, Pencil, Plus, Trash2, Type, Undo2 } from 'lucide-react';
+import { ChevronDown, Layers, Minus, Pencil, Plus, Trash2, Type, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -168,65 +168,20 @@ export function DrawingCanvasFloatingControls({
           >
             <Plus className="h-3.5 w-3.5" />
           </Button>
-        </div>
 
-        {/* 版本叠加选择器 */}
-        {otherVersions.length > 0 && otherVersions.length <= 2 ? (
-          <div className="pointer-events-auto flex items-center gap-1 border border-border bg-white/95 p-1 shadow-sm">
-            {otherVersions.map((v) => {
-              const active = overlayVersions.includes(v);
-              return (
-                <Button
-                  key={v}
-                  variant={active ? 'default' : 'outline'}
-                  size="sm"
-                  className={`rounded-none h-7 px-2 text-[11px] shadow-none gap-1 ${active ? 'bg-blue-500 hover:bg-blue-600 border-blue-500' : ''}`}
-                  onClick={() => onToggleOverlayVersion(v)}
-                  title={active ? `隐藏 v${v} 标记` : `显示 v${v} 标记`}
-                >
-                  {active ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
-                  v{v}
-                </Button>
-              );
-            })}
-          </div>
-        ) : null}
-        {otherVersions.length > 2 ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="pointer-events-auto rounded-none h-7 px-2 text-[11px] shadow-none gap-1 border border-border bg-white/95"
-              >
-                <Layers className="h-3 w-3" />
-                叠加标记
-                {overlayVersions.length > 0 ? (
-                  <span className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] text-white">
-                    {overlayVersions.length}
-                  </span>
-                ) : null}
-                <ChevronDown className="h-3 w-3" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="min-w-[140px]">
-              <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-                显示其他版本标记
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {otherVersions.map((v) => (
-                <DropdownMenuCheckboxItem
-                  key={v}
-                  checked={overlayVersions.includes(v)}
-                  onCheckedChange={() => onToggleOverlayVersion(v)}
-                  className="text-xs"
-                >
-                  v{v} 标记
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
+          {otherVersions.length > 0 ? (
+            <>
+              <span className="mx-0.5 h-4 w-px bg-border" />
+              <DrawingOverlayVersionControl
+                auditVersion={auditVersion}
+                availableVersions={availableVersions}
+                overlayVersions={overlayVersions}
+                onToggleOverlayVersion={onToggleOverlayVersion}
+                inToolbar
+              />
+            </>
+          ) : null}
+        </div>
       </div>
 
       {/* 缩放控件 - 右下角 */}
@@ -254,5 +209,62 @@ export function DrawingCanvasFloatingControls({
         </div>
       </div>
     </>
+  );
+}
+
+interface DrawingOverlayVersionControlProps {
+  auditVersion: number;
+  availableVersions: number[];
+  overlayVersions: number[];
+  onToggleOverlayVersion: (version: number) => void;
+  inToolbar?: boolean;
+}
+
+export function DrawingOverlayVersionControl({
+  auditVersion,
+  availableVersions,
+  overlayVersions,
+  onToggleOverlayVersion,
+  inToolbar = false,
+}: DrawingOverlayVersionControlProps) {
+  const otherVersions = availableVersions.filter((v) => v !== auditVersion);
+
+  if (otherVersions.length === 0) return null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className={`rounded-none h-7 px-2 text-[12px] shadow-none gap-1 border border-border ${inToolbar ? 'bg-transparent' : 'bg-white'}`}
+        >
+          <Layers className="h-3.5 w-3.5" />
+          叠加标记
+          {overlayVersions.length > 0 ? (
+            <span className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] text-white">
+              {overlayVersions.length}
+            </span>
+          ) : null}
+          <ChevronDown className="h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[140px]">
+        <DropdownMenuLabel className="text-[11px] text-muted-foreground">
+          显示其他版本标记
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {otherVersions.map((v) => (
+          <DropdownMenuCheckboxItem
+            key={v}
+            checked={overlayVersions.includes(v)}
+            onCheckedChange={() => onToggleOverlayVersion(v)}
+            className="text-xs"
+          >
+            v{v} 标记
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

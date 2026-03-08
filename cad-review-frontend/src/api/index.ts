@@ -10,8 +10,11 @@ import type {
   JsonData,
   AuditResult,
   AuditStatus,
+  AuditFeedbackStatus,
   ThreeLineMatch,
+  AuditResultPreview,
 } from '@/types';
+import type { SkillPackItem, SkillPackListResponse, SkillTypesResponse } from '@/types/api';
 
 const API_BASE = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:7002').replace(/\/$/, '');
 
@@ -62,6 +65,39 @@ export const updateAIPromptSettings = (
   api.put<{ success: boolean }>('/api/settings/ai-prompts', { stages }).then(res => res.data);
 export const resetAIPromptStage = (stageKey: string) =>
   api.post<{ success: boolean }>(`/api/settings/ai-prompts/${stageKey}/reset`).then(res => res.data);
+export const getSkillTypes = () =>
+  api.get<SkillTypesResponse>('/api/settings/skill-types').then(res => res.data);
+export const getSkillPacks = (skillType?: string) =>
+  api.get<SkillPackListResponse>('/api/settings/skill-packs', {
+    params: skillType ? { skill_type: skillType } : undefined,
+  }).then(res => res.data);
+export const createSkillPack = (payload: {
+  skill_type: string;
+  title: string;
+  content: string;
+  priority?: number;
+  stage_keys?: string[];
+}) =>
+  api.post<{ item: SkillPackItem }>('/api/settings/skill-packs', payload).then(res => res.data);
+export const updateSkillPack = (
+  id: string,
+  payload: {
+    title?: string;
+    content?: string;
+    priority?: number;
+    stage_keys?: string[];
+  },
+) => api.put<{ item: SkillPackItem }>(`/api/settings/skill-packs/${id}`, payload).then(res => res.data);
+export const deleteSkillPack = (id: string) =>
+  api.delete<{ success: boolean }>(`/api/settings/skill-packs/${id}`).then(res => res.data);
+export const toggleSkillPack = (id: string, isActive: boolean) =>
+  api.post<{ item: SkillPackItem }>(`/api/settings/skill-packs/${id}/toggle`, {
+    is_active: isActive,
+  }).then(res => res.data);
+export const generateSkillPacks = (skillType: string) =>
+  api.post<{ items: SkillPackItem[]; generated: number }>('/api/settings/skill-packs/generate', {
+    skill_type: skillType,
+  }).then(res => res.data);
 
 // Catalog
 export const getCatalog = (projectId: string) =>
@@ -163,25 +199,34 @@ export const getAuditResults = (
   params?: { version?: number; type?: string; view?: 'grouped' | 'raw' },
 ) =>
   api.get<AuditResult[]>(`/api/projects/${projectId}/audit/results`, { params }).then(res => res.data);
+export const getAuditResultPreview = (projectId: string, resultId: string) =>
+  api.get<AuditResultPreview>(`/api/projects/${projectId}/audit/results/${resultId}/preview`).then(res => res.data);
 export const getAuditHistory = (projectId: string) =>
   api.get<any[]>(`/api/projects/${projectId}/audit/history`).then(res => res.data);
+
+export interface AuditResultUpdatePayload {
+  is_resolved?: boolean;
+  feedback_status?: AuditFeedbackStatus;
+  feedback_note?: string;
+}
+
 export const updateAuditResult = (
   projectId: string,
   resultId: string,
-  payload: { is_resolved: boolean },
+  payload: AuditResultUpdatePayload,
 ) =>
   api.patch<AuditResult>(`/api/projects/${projectId}/audit/results/${resultId}`, payload).then(res => res.data);
 export const batchUpdateAuditResults = (
   projectId: string,
   resultIds: string[],
-  payload: { is_resolved: boolean },
+  payload: AuditResultUpdatePayload,
 ) =>
   api.patch<{ success: boolean }>(`/api/projects/${projectId}/audit/results/batch`, {
     result_ids: resultIds,
     ...payload,
   }).then(res => res.data);
-export const startAudit = (projectId: string) =>
-  api.post<{ success: boolean; audit_version: number }>(`/api/projects/${projectId}/audit/start`).then(res => res.data);
+export const startAudit = (projectId: string, payload?: { allow_incomplete?: boolean }) =>
+  api.post<{ success: boolean; audit_version: number }>(`/api/projects/${projectId}/audit/start`, payload ?? {}).then(res => res.data);
 export const runAudit = (projectId: string) =>
   api.post<{ success: boolean; audit_version: number; total_issues: number }>(`/api/projects/${projectId}/audit/run`)
     .then(res => res.data);
@@ -194,6 +239,88 @@ export const deleteAuditVersion = (projectId: string, version: number) =>
   api.delete<{ success: boolean; deleted: { results: number; runs: number; tasks: number } }>(
     `/api/projects/${projectId}/audit/version/${version}`,
   ).then(res => res.data);
+
+// Feedback Samples
+export type CurationStatus = 'new' | 'accepted' | 'rejected';
+
+export interface FeedbackSample {
+  id: string;
+  project_id: string;
+  audit_result_id: string;
+  audit_version: number;
+  issue_type: string;
+  severity: string | null;
+  sheet_no_a: string | null;
+  sheet_no_b: string | null;
+  location: string | null;
+  description: string | null;
+  value_a: string | null;
+  value_b: string | null;
+  user_note: string | null;
+  curation_status: CurationStatus;
+  created_at: string | null;
+  curated_at: string | null;
+}
+
+export const getFeedbackSamples = (
+  projectId: string,
+  params?: { status?: CurationStatus; issue_type?: string },
+) =>
+  api.get<FeedbackSample[]>(`/api/projects/${projectId}/feedback-samples`, { params }).then(res => res.data);
+
+export const updateSampleCuration = (
+  projectId: string,
+  sampleId: string,
+  curationStatus: CurationStatus,
+) =>
+  api.patch<{ success: boolean }>(`/api/projects/${projectId}/feedback-samples/${sampleId}`, {
+    curation_status: curationStatus,
+  }).then(res => res.data);
+
+export const batchUpdateSampleCuration = (
+  projectId: string,
+  sampleIds: string[],
+  curationStatus: CurationStatus,
+) =>
+  api.patch<{ success: boolean; updated: number }>(`/api/projects/${projectId}/feedback-samples/batch`, {
+    sample_ids: sampleIds,
+    curation_status: curationStatus,
+  }).then(res => res.data);
+
+export const getExportSamplesUrl = (
+  projectId: string,
+  status: CurationStatus = 'accepted',
+) => `${API_BASE}/api/projects/${projectId}/feedback-samples/export?status=${status}`;
+
+export interface FeedbackStats {
+  new: number;
+  accepted: number;
+  rejected: number;
+  total: number;
+}
+
+export interface FeedbackSampleWithProject extends FeedbackSample {
+  project_name: string;
+}
+
+export interface ProjectWithSamples {
+  id: string;
+  name: string;
+  sample_count: number;
+}
+
+export const getGlobalFeedbackStats = (projectId?: string) =>
+  api.get<FeedbackStats>('/api/feedback-samples/stats', {
+    params: projectId ? { project_id: projectId } : undefined,
+  }).then(res => res.data);
+
+export const getGlobalFeedbackSamples = (
+  params?: { project_id?: string; status?: CurationStatus; issue_type?: string },
+) =>
+  api.get<FeedbackSampleWithProject[]>('/api/feedback-samples/all', { params }).then(res => res.data);
+
+export const getProjectsWithSamples = () =>
+  api.get<ProjectWithSamples[]>('/api/feedback-samples/projects').then(res => res.data);
 
 // Report
 export const downloadPdfReport = (projectId: string, version?: number) => {

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
@@ -10,8 +12,36 @@ from typing import Any, Dict, List, Optional
 from domain.sheet_normalization import normalize_sheet_no
 from domain.text_cleaning import strip_mtext_formatting
 from models import AuditResult, JsonData
+from services.ai_prompt_service import resolve_stage_system_prompt_with_skills
 from services.audit.common import build_anchor, to_evidence_json
+from services.audit.prompt_builder import build_material_review_prompt, compact_material_rows
 from services.coordinate_service import enrich_json_with_coordinates
+from services.kimi_service import call_kimi
+
+logger = logging.getLogger(__name__)
+
+
+async def _run_material_ai_review(
+    *,
+    sheet_no: str,
+    material_table: List[Dict[str, Any]],
+    material_used: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    result = await call_kimi(
+        system_prompt=resolve_stage_system_prompt_with_skills(
+            "material_consistency_review",
+            "material",
+        ),
+        user_prompt=build_material_review_prompt(
+            sheet_no,
+            compact_material_rows(material_table),
+            compact_material_rows(material_used),
+        ),
+        temperature=0.0,
+    )
+    if not isinstance(result, list):
+        return []
+    return [item for item in result if isinstance(item, dict)]
 
 
 # 功能说明：执行材料审核主函数，检查材料表中材料定义和使用的一致性
@@ -39,6 +69,7 @@ def audit_materials(
     )
 
     issues: List[AuditResult] = []
+    seen_keys: set[tuple[str, str, str]] = set()
 
     # 功能说明：标准化材料编号（去除空格和特殊字符，转大写）
     def norm_code(value: Optional[str]) -> str:
@@ -67,6 +98,18 @@ def audit_materials(
         if not any(ch.isdigit() for ch in code_key):
             return False
         return re.match(r"^[A-Z]*\d+[A-Z0-9]*$", code_key) is not None
+
+    def append_issue(issue: AuditResult) -> None:
+        key = (
+            str(issue.sheet_no_a or "").strip(),
+            str(issue.location or "").strip(),
+            str(issue.description or "").strip(),
+        )
+        if key in seen_keys:
+            return
+        seen_keys.add(key)
+        db.add(issue)
+        issues.append(issue)
 
     for json_data in json_list:
         if allowed_sheet_keys is not None:
@@ -146,8 +189,7 @@ def audit_materials(
                     unlocated_reason=None if anchor else "material_used_without_location",
                 ),
             )
-            db.add(issue)
-            issues.append(issue)
+            append_issue(issue)
 
         for code_key, table_item in table_map.items():
             if code_key in used_map:
@@ -165,8 +207,7 @@ def audit_materials(
                 ),
                 evidence_json=to_evidence_json([], unlocated_reason="material_table_only_no_anchor"),
             )
-            db.add(issue)
-            issues.append(issue)
+            append_issue(issue)
 
         for code_key, used_item in used_map.items():
             table_item = table_map.get(code_key)
@@ -198,8 +239,7 @@ def audit_materials(
                     unlocated_reason=None if anchor else "material_name_conflict_unlocated",
                 ),
             )
-            db.add(issue)
-            issues.append(issue)
+            append_issue(issue)
 
         for used_key, used_item in used_map.items():
             used_name = norm_name(used_item.get("name"))
@@ -232,9 +272,46 @@ def audit_materials(
                         unlocated_reason=None if anchor else "material_similarity_unlocated",
                     ),
                 )
-                db.add(issue)
-                issues.append(issue)
+                append_issue(issue)
                 break
+
+        try:
+            ai_items = asyncio.run(
+                _run_material_ai_review(
+                    sheet_no=json_data.sheet_no or "",
+                    material_table=raw_table,
+                    material_used=raw_used,
+                )
+            )
+        except Exception as exc:
+            logger.warning("材料 AI 审核降级为规则模式：sheet=%s error=%s", json_data.sheet_no, exc)
+            ai_items = []
+
+        for item in ai_items:
+            severity = str(item.get("severity") or "warning").strip() or "warning"
+            location = str(item.get("location") or f"材料{item.get('material_code') or '?'}").strip()
+            description = str(item.get("description") or "").strip()
+            if not description:
+                continue
+            evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+            code_key = norm_code(
+                str(item.get("material_code") or evidence.get("code") or "").strip()
+            )
+            anchor = material_anchor_by_code.get(code_key)
+            issue = AuditResult(
+                project_id=project_id,
+                audit_version=audit_version,
+                type="material",
+                severity=severity,
+                sheet_no_a=json_data.sheet_no,
+                location=location,
+                description=description,
+                evidence_json=to_evidence_json(
+                    [anchor] if anchor else [],
+                    unlocated_reason=None if anchor else "material_ai_issue_unlocated",
+                ),
+            )
+            append_issue(issue)
 
     db.commit()
     return issues

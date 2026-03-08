@@ -1,4 +1,5 @@
 import { Eye, FileImage, X } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import AnnotatedDrawingPreviewCanvas from './annotated-canvas';
 import type { PreviewDrawing } from '../../hooks/useDrawingPreview';
@@ -10,6 +11,7 @@ interface InlineDrawingPreviewPanelProps {
   previewSessionKey: string;
   title: string;
   description: string;
+  missingReason?: string | null;
   drawingA: PreviewDrawing | null;
   drawingB?: PreviewDrawing | null;
   activeView: 'a' | 'b';
@@ -24,24 +26,50 @@ export default function InlineDrawingPreviewPanel({
   previewSessionKey,
   title,
   description,
+  missingReason = null,
   drawingA,
   drawingB = null,
   activeView,
   onViewChange,
   onClose,
 }: InlineDrawingPreviewPanelProps) {
+  const [overlayVersions, setOverlayVersions] = useState<number[]>([]);
   const activeDrawing = activeView === 'b' ? drawingB : drawingA;
 
   const displayDrawing = activeDrawing;
 
   const hasDrawingA = Boolean(drawingA);
   const hasDrawingB = Boolean(drawingB);
+  const anchorHint = (() => {
+    if (!displayDrawing) return null;
+    if (displayDrawing.focusAnchorStatus === 'pdf_visual_mismatch') {
+      return '当前PDF页面未检测到对应可见标记，DWG结构数据和PDF出图内容可能不一致。';
+    }
+    if (displayDrawing.focusAnchorStatus === 'pdf_low_confidence') {
+      return '当前已标出一个自动估计位置，但这张PDF页和DWG布局的配准置信度较低，位置可能仍有偏差。';
+    }
+    if (displayDrawing.focusAnchorStatus === 'layout_fallback' || displayDrawing.focusAnchorStatus === 'layout_only') {
+      return '当前定位仍来自布局坐标回退，和PDF页面可能存在偏差。';
+    }
+    return null;
+  })();
+
+  const toggleOverlayVersion = (version: number) => {
+    setOverlayVersions((prev) =>
+      prev.includes(version) ? prev.filter((v) => v !== version) : [...prev, version],
+    );
+  };
 
   return (
     <aside className="self-start xl:sticky xl:top-24 h-[calc(100vh-132px)] min-h-[760px] max-h-[1100px] border border-border bg-white flex flex-col">
       <div className="px-5 py-3 border-b border-border flex items-center justify-between gap-3">
-        <div className="text-[13px] font-semibold text-foreground min-w-0 truncate">
-          {displayDrawing ? `${displayDrawing.sheetNo} · ${displayDrawing.sheetName}` : '这条问题没找到对应图纸，暂时看不了'}
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold text-foreground truncate">
+            {displayDrawing ? `${displayDrawing.sheetNo} · ${displayDrawing.sheetName}` : '这条问题没找到对应图纸，暂时看不了'}
+          </div>
+          {description ? (
+            <div className="mt-1 text-[12px] text-muted-foreground truncate">{description}</div>
+          ) : null}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <Button
@@ -81,6 +109,8 @@ export default function InlineDrawingPreviewPanel({
             previewDrawing={displayDrawing}
             auditVersion={auditVersion}
             availableVersions={availableVersions}
+            overlayVersions={overlayVersions}
+            onToggleOverlayVersion={toggleOverlayVersion}
           />
         ) : (
           <div className="h-full bg-secondary/20 p-6 flex items-center justify-center">
@@ -101,6 +131,24 @@ export default function InlineDrawingPreviewPanel({
         <div className="border-t border-border px-6 py-4 text-[12px] text-muted-foreground flex items-center gap-2">
           <Eye className="w-4 h-4" />
           这条问题没有找到对应图纸，暂时只能先看文字描述。
+        </div>
+      ) : null}
+
+      {displayDrawing && missingReason === 'missing_target_drawing' ? (
+        <div className="border-t border-border px-6 py-4 text-[12px] text-muted-foreground flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Eye className="w-4 h-4 shrink-0" />
+            <span className="truncate">目标图不存在，当前已自动定位到源图里的出错索引位置。</span>
+          </div>
+        </div>
+      ) : null}
+
+      {displayDrawing && anchorHint ? (
+        <div className="border-t border-border px-6 py-4 text-[12px] text-amber-700 bg-amber-50/70 flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Eye className="w-4 h-4 shrink-0" />
+            <span className="truncate">{anchorHint}</span>
+          </div>
         </div>
       ) : null}
     </aside>

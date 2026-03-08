@@ -5,6 +5,16 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import * as api from '@/api';
 import type { Project, Category, CatalogItem, Drawing, JsonData, AuditResult, AuditStatus, ThreeLineMatch, ThreeLineItem, MatchFilter } from '@/types';
 import type { AuditHistoryItem } from '@/types/api';
@@ -60,6 +70,7 @@ export default function ProjectDetail() {
   const [pdfUploadProgressText, setPdfUploadProgressText] = useState('上传进度');
   const [dwgUploadProgressText, setDwgUploadProgressText] = useState('上传进度');
   const [startingAudit, setStartingAudit] = useState(false);
+  const [isIncompleteAuditConfirmOpen, setIsIncompleteAuditConfirmOpen] = useState(false);
   const [isAuditInlinePreviewOpen, setIsAuditInlinePreviewOpen] = useState(false);
   const [isAuditProgressDialogOpen, setIsAuditProgressDialogOpen] = useState(false);
   const [isAuditProgressMinimized, setIsAuditProgressMinimized] = useState(false);
@@ -365,15 +376,20 @@ export default function ProjectDetail() {
     }
   };
 
-  const handleStartAudit = async () => {
+  const handleStartAudit = async (allowIncomplete: boolean = false) => {
     if (!id) return;
+    if (!allowIncomplete && matchStats.missing > 0) {
+      setIsIncompleteAuditConfirmOpen(true);
+      return;
+    }
     try {
+      setIsIncompleteAuditConfirmOpen(false);
       setStartingAudit(true);
       setAwaitingAuditStatusSync(true);
       setIsAuditProgressDismissed(false);
       setIsAuditProgressMinimized(false);
       setIsAuditProgressDialogOpen(true);
-      await api.startAudit(id);
+      await api.startAudit(id, allowIncomplete ? { allow_incomplete: true } : undefined);
       await loadData();
       setCurrentStep(2);
     } catch (err: any) {
@@ -573,7 +589,8 @@ export default function ProjectDetail() {
     ready: matchItems.filter(i => i.status === 'ready').length,
     missing: matchItems.filter(i => i.status !== 'ready').length,
     missing_png: matchItems.filter(i => i.status === 'missing_png').length,
-    missing_json: matchItems.filter(i => i.status === 'missing_json').length
+    missing_json: matchItems.filter(i => i.status === 'missing_json').length,
+    missing_all: matchItems.filter(i => i.status === 'missing_all').length,
   };
   const shouldShowCatalogUploadCard = showCatalogUploadCard || catalog.length === 0;
 
@@ -966,6 +983,49 @@ export default function ProjectDetail() {
           }}
         />
       ) : null}
+
+      <AlertDialog
+        open={isIncompleteAuditConfirmOpen}
+        onOpenChange={(nextOpen) => {
+          if (!startingAudit) setIsIncompleteAuditConfirmOpen(nextOpen);
+        }}
+      >
+        <AlertDialogContent className="max-w-[560px] rounded-none border border-border bg-white p-0 shadow-lg">
+          <AlertDialogHeader className="items-start gap-4 px-7 pt-7 text-left">
+            <AlertDialogTitle className="text-[22px] font-semibold leading-none text-zinc-900">
+              存在缺项，确认继续审核？
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-[14px] leading-6 text-zinc-600">
+              当前图纸三线匹配未完成。若带缺项继续审核，涉及缺页或缺数据的图纸可能出现漏检、误报，相关定位结果也可能不完整。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="px-7 pb-2 text-[14px] leading-7 text-zinc-700">
+            <div>总数：<span className="font-medium text-zinc-900">{matchStats.total}</span></div>
+            <div>就绪：<span className="font-medium text-zinc-900">{matchStats.ready}</span></div>
+            <div>缺图纸：<span className="font-medium text-zinc-900">{matchStats.missing_png}</span></div>
+            <div>缺数据：<span className="font-medium text-zinc-900">{matchStats.missing_json}</span></div>
+            <div>都缺：<span className="font-medium text-zinc-900">{matchStats.missing_all}</span></div>
+          </div>
+          <AlertDialogFooter className="mt-5 flex-row justify-end gap-3 border-t border-zinc-100 px-7 py-5">
+            <AlertDialogCancel
+              disabled={startingAudit}
+              className="h-10 rounded-none border-border bg-white px-6 text-[15px] font-medium text-zinc-700 hover:bg-secondary"
+            >
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                void handleStartAudit(true);
+              }}
+              disabled={startingAudit}
+              className="h-10 rounded-none bg-primary px-6 text-[15px] font-medium text-white hover:bg-primary/90"
+            >
+              {startingAudit ? '处理中...' : '仍要带缺项启动'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </AppLayout>
   );

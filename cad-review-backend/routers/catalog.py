@@ -9,7 +9,7 @@ from pathlib import PurePosixPath
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from database import get_db
 from models import Project, Catalog
 from services.storage_path_service import resolve_project_dir
@@ -23,6 +23,8 @@ router = APIRouter()
 
 class CatalogItemResponse(BaseModel):
     """目录条目响应模型"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     project_id: str
     sheet_no: Optional[str] = None
@@ -31,10 +33,6 @@ class CatalogItemResponse(BaseModel):
     date: Optional[str] = None
     status: str
     sort_order: int
-
-    class Config:
-        from_attributes = True
-
 
 class CatalogUpdateRequest(BaseModel):
     """目录更新请求模型"""

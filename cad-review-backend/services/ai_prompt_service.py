@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from database import SessionLocal
 from models import AIPromptSetting
+from services.skill_pack_service import format_skill_rules_block, load_active_skill_rules
 
 PLACEHOLDER_PATTERN = re.compile(r"{{\s*([a-zA-Z0-9_]+)\s*}}")
 
@@ -270,6 +271,31 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
             "b_semantic_json",
         ),
     ),
+    # ── 材料一致性审核 ────────────────────────────────────────
+    PromptStageDefinition(
+        stage_key="material_consistency_review",
+        title="材料一致性审核",
+        description="根据材料表与图纸材料标注，识别语义冲突、别名误配与上下文不一致。",
+        call_site="材料审核时，系统会对每张图的材料表和材料标注跑这一段。",
+        default_system_prompt=(
+            "你是施工图材料一致性审核专家。\n"
+            "你需要结合材料编号、材料名称和表达上下文，识别真正需要人工复核的问题。\n\n"
+            "输出规则：\n"
+            "1. 只返回 JSON 数组，不要解释\n"
+            "2. 没有问题返回 []\n"
+            "3. 明显同义词、简称、常见省略表达，不要误报\n"
+            "4. 只有在材料名称语义冲突、编号可能错配、或表中定义与图中使用关系异常时才输出\n"
+        ),
+        default_user_prompt=(
+            "请审核图纸 {{sheet_no}} 的材料一致性。\n\n"
+            "材料表：{{material_table_json}}\n\n"
+            "图纸材料标注：{{material_used_json}}\n\n"
+            "请只输出需要人工复核的问题，格式："
+            '[{"severity":"warning","location":"","material_code":"","confidence":0.0,'
+            '"description":"","evidence":{"code":"","grid":"","why":""}}]'
+        ),
+        placeholders=("sheet_no", "material_table_json", "material_used_json"),
+    ),
 ]
 
 PROMPT_STAGE_MAP: Dict[str, PromptStageDefinition] = {
@@ -449,3 +475,36 @@ def resolve_stage_system_prompt(stage_key: str) -> str:
     finally:
         session.close()
     return _render_template(system_prompt, {})
+
+
+def resolve_stage_system_prompt_with_skills(
+    stage_key: str,
+    skill_type: str,
+) -> str:
+    """解析指定阶段系统提示词，并追加启用的技能包规则。"""
+    session = SessionLocal()
+    try:
+        definition = get_prompt_stage_definition(stage_key)
+        row = (
+            session.query(AIPromptSetting)
+            .filter(AIPromptSetting.stage_key == stage_key)
+            .first()
+        )
+        system_prompt = (
+            row.system_prompt_override
+            if row and row.system_prompt_override is not None
+            else definition.default_system_prompt
+        )
+        rules = load_active_skill_rules(
+            session,
+            skill_type=skill_type,
+            stage_key=stage_key,
+        )
+    finally:
+        session.close()
+
+    rendered_system = _render_template(system_prompt, {})
+    rules_block = format_skill_rules_block(rules)
+    if not rules_block:
+        return rendered_system
+    return f"{rendered_system}\n\n{rules_block}"

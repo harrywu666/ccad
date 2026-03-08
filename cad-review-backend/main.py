@@ -5,12 +5,23 @@ FastAPI 主入口文件
 
 import os
 import logging
+from importlib import import_module
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
-from routers import projects, categories, catalog, drawings, dwg, audit, report, settings
+
+audit = import_module("routers.audit")
+catalog = import_module("routers.catalog")
+categories = import_module("routers.categories")
+drawings = import_module("routers.drawings")
+dwg = import_module("routers.dwg")
+feedback = import_module("routers.feedback")
+projects = import_module("routers.projects")
+report = import_module("routers.report")
+settings = import_module("routers.settings")
+skill_pack = import_module("routers.skill_pack")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -94,6 +105,8 @@ app.include_router(dwg.router, prefix="/api", tags=["DWG管理"])
 app.include_router(audit.router, prefix="/api", tags=["审核管理"])
 app.include_router(report.router, prefix="/api", tags=["报告管理"])
 app.include_router(settings.router, prefix="/api", tags=["系统设置"])
+app.include_router(skill_pack.router, prefix="/api", tags=["审查技能包"])
+app.include_router(feedback.router, prefix="/api", tags=["误报样本"])
 
 
 @app.get("/")

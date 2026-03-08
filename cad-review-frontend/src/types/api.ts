@@ -83,3 +83,40 @@ export interface AIPromptStage {
 export interface AIPromptStagesResponse {
   stages: AIPromptStage[];
 }
+
+export interface SkillPackStageOption {
+  stage_key: string;
+  title: string;
+  description: string;
+}
+
+export interface SkillTypeItem {
+  skill_type: string;
+  label: string;
+  execution_mode: 'code' | 'ai' | 'hybrid';
+  default_stage_keys: string[];
+  allowed_stages: SkillPackStageOption[];
+}
+
+export interface SkillTypesResponse {
+  items: SkillTypeItem[];
+}
+
+export interface SkillPackItem {
+  id: string;
+  skill_type: string;
+  title: string;
+  content: string;
+  source: 'manual' | 'auto';
+  execution_mode: 'code' | 'ai' | 'hybrid';
+  stage_keys: string[];
+  source_sample_ids: string[];
+  is_active: boolean;
+  priority: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface SkillPackListResponse {
+  items: SkillPackItem[];
+}

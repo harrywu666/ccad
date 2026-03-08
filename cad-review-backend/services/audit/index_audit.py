@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from domain.sheet_normalization import normalize_index_no, normalize_sheet_no
 from models import AuditResult, JsonData
 from services.audit.common import build_anchor, to_evidence_json
-from services.coordinate_service import enrich_json_with_coordinates
+from services.audit.issue_preview import ensure_issue_drawing_matches
+from services.layout_json_service import load_enriched_layout_json
+from services.skill_pack_service import (
+    build_index_alias_map,
+    canonicalize_index_key,
+    canonicalize_sheet_key,
+    load_active_skill_rules,
+)
 
 
 # 功能说明：从属性列表中按标签键提取值
@@ -20,6 +26,35 @@ def _pick_attr_value(attrs: list[dict[str, Any]], keys: tuple[str, ...]) -> str:
         if tag in key_set:
             return str(attr.get("value") or "").strip()
     return ""
+
+
+def _collect_target_reference_labels(
+    data: Dict[str, Any],
+    alias_map: Dict[str, str],
+) -> set[str]:
+    labels: set[str] = set()
+
+    for idx in data.get("indexes", []) or []:
+        label_key = canonicalize_index_key(str(idx.get("index_no") or "").strip(), alias_map)
+        if label_key:
+            labels.add(label_key)
+
+    for title in data.get("title_blocks", []) or []:
+        attrs = title.get("attrs") or []
+        raw_label = (
+            str(title.get("title_label") or "").strip()
+            or _pick_attr_value(attrs, ("_ACM-TITLELABEL", "TITLELABEL", "TITLE_LABEL"))
+        )
+        label_key = canonicalize_index_key(raw_label, alias_map)
+        if label_key:
+            labels.add(label_key)
+
+    for detail in data.get("detail_titles", []) or []:
+        label_key = canonicalize_index_key(str(detail.get("label") or "").strip(), alias_map)
+        if label_key:
+            labels.add(label_key)
+
+    return labels
 
 
 # 功能说明：创建索引审核结果对象
@@ -53,10 +88,13 @@ def audit_indexes(
     db,
     source_sheet_filters: Optional[List[str]] = None,
 ) -> List[AuditResult]:
+    alias_map = build_index_alias_map(load_active_skill_rules(db, skill_type="index"))
     allowed_source_keys: Optional[set[str]] = None
     if source_sheet_filters:
         allowed_source_keys = {
-            normalize_sheet_no(item) for item in source_sheet_filters if normalize_sheet_no(item)
+            canonicalize_sheet_key(item, alias_map)
+            for item in source_sheet_filters
+            if canonicalize_sheet_key(item, alias_map)
         }
         if not allowed_source_keys:
             return []
@@ -82,17 +120,14 @@ def audit_indexes(
         if not json_path:
             continue
 
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
+        data = load_enriched_layout_json(json_path)
+        if not data:
             continue
-        data = enrich_json_with_coordinates(data)
 
         raw_sheet_no = (json_data.sheet_no or data.get("sheet_no") or "").strip()
         if not raw_sheet_no:
             continue
-        src_key = normalize_sheet_no(raw_sheet_no)
+        src_key = canonicalize_sheet_key(raw_sheet_no, alias_map)
         if not src_key:
             continue
         sheet_map.setdefault(src_key, raw_sheet_no)
@@ -101,8 +136,8 @@ def audit_indexes(
         for idx in indexes:
             raw_index_no = str(idx.get("index_no", "") or "").strip()
             raw_target_sheet = str(idx.get("target_sheet", "") or "").strip()
-            idx_key = normalize_index_no(raw_index_no)
-            tgt_key = normalize_sheet_no(raw_target_sheet)
+            idx_key = canonicalize_index_key(raw_index_no, alias_map)
+            tgt_key = canonicalize_sheet_key(raw_target_sheet, alias_map)
             source_anchor = build_anchor(
                 role="source",
                 sheet_no=raw_sheet_no,
@@ -134,17 +169,7 @@ def audit_indexes(
             elif idx_key:
                 orphan_candidates.append(row)
 
-        title_blocks = data.get("title_blocks", []) or []
-        for title in title_blocks:
-            attrs = title.get("attrs") or []
-            raw_label = (
-                str(title.get("title_label") or "").strip()
-                or _pick_attr_value(attrs, ("_ACM-TITLELABEL", "TITLELABEL", "TITLE_LABEL"))
-            )
-            label_key = normalize_index_no(raw_label)
-            if not label_key:
-                continue
-            sheet_detail_label_defs[src_key].add(label_key)
+        sheet_detail_label_defs[src_key].update(_collect_target_reference_labels(data, alias_map))
 
     issues: List[AuditResult] = []
     existing_sheets = set(sheet_map.keys())
@@ -181,6 +206,8 @@ def audit_indexes(
                 ),
             )
             db.add(issue)
+            db.flush()
+            ensure_issue_drawing_matches(issue, db)
             issues.append(issue)
 
     for rel in forward_links:
@@ -211,6 +238,8 @@ def audit_indexes(
                 ),
             )
             db.add(issue)
+            db.flush()
+            ensure_issue_drawing_matches(issue, db)
             issues.append(issue)
 
     for rel in forward_links:
@@ -249,6 +278,8 @@ def audit_indexes(
             ),
         )
         db.add(issue)
+        db.flush()
+        ensure_issue_drawing_matches(issue, db)
         issues.append(issue)
 
     for orphan in orphan_candidates:
@@ -273,6 +304,8 @@ def audit_indexes(
             ),
         )
         db.add(issue)
+        db.flush()
+        ensure_issue_drawing_matches(issue, db)
         issues.append(issue)
 
     db.commit()

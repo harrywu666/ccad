@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from domain.sheet_normalization import normalize_index_no, normalize_sheet_no
 from models import AuditResult, Drawing, JsonData, Project
-from services.ai_prompt_service import resolve_stage_system_prompt
+from services.ai_prompt_service import resolve_stage_system_prompt_with_skills
 from services.audit.common import build_anchor, to_evidence_json
 from services.audit.image_pipeline import pdf_page_to_5images
 from services.audit.persistence import add_and_commit
@@ -383,7 +383,10 @@ async def _execute_sheet_jobs(
             0.20,
         )
         semantic_result = await call_kimi(
-            system_prompt=resolve_stage_system_prompt("dimension_single_sheet"),
+            system_prompt=resolve_stage_system_prompt_with_skills(
+                "dimension_single_sheet",
+                "dimension",
+            ),
             user_prompt=job["prompt"],
             images=[
                 images["full"],
@@ -493,7 +496,10 @@ async def _execute_pair_jobs(
         job: Dict[str, Any],
     ) -> Tuple[Tuple[str, str], List[Dict[str, Any]]]:
         compare_result = await call_kimi(
-            system_prompt=resolve_stage_system_prompt("dimension_pair_compare"),
+            system_prompt=resolve_stage_system_prompt_with_skills(
+                "dimension_pair_compare",
+                "dimension",
+            ),
             user_prompt=build_pair_compare_prompt(
                 a_sheet_no=job["a_sheet_no"],
                 a_sheet_name=job["a_sheet_name"],

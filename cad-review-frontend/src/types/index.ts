@@ -51,6 +51,63 @@ export interface Drawing {
   status: string;
 }
 
+export interface IssueFocusAnchor {
+  role?: string | null;
+  grid?: string | null;
+  global_pct?: {
+    x: number;
+    y: number;
+  } | null;
+  origin?: string | null;
+  confidence?: number | null;
+  anchor_type?: string | null;
+  registration_method?: string | null;
+  highlight_region?: IssueHighlightRegion | null;
+}
+
+export interface IssueHighlightRegion {
+  shape?: 'cloud_rect' | null;
+  bbox_pct?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
+  origin?: string | null;
+}
+
+export interface AuditIssuePreviewDrawingAsset {
+  drawing_id: string;
+  drawing_data_version: number | null;
+  sheet_no: string | null;
+  sheet_name: string | null;
+  page_index: number | null;
+  match_status: string;
+  anchor: IssueFocusAnchor | null;
+  layout_anchor?: IssueFocusAnchor | null;
+  pdf_anchor?: IssueFocusAnchor | null;
+  highlight_region?: IssueHighlightRegion | null;
+  anchor_status?: 'pdf_ready' | 'pdf_low_confidence' | 'pdf_visual_mismatch' | 'layout_fallback' | 'layout_only' | 'missing' | null;
+  registration_confidence?: number | null;
+  index_no: string | null;
+}
+
+export interface AuditResultPreview {
+  issue: {
+    id: string;
+    audit_version: number;
+    type: string | null;
+    severity: string | null;
+    sheet_no_a: string | null;
+    sheet_no_b: string | null;
+    location: string | null;
+    description: string | null;
+  };
+  source: AuditIssuePreviewDrawingAsset | null;
+  target: AuditIssuePreviewDrawingAsset | null;
+  missing_reason: string | null;
+}
+
 export interface JsonData {
   id: string;
   project_id: string;
@@ -62,6 +119,8 @@ export interface JsonData {
   summary: string | null;
   status: string;
 }
+
+export type AuditFeedbackStatus = 'none' | 'incorrect';
 
 export interface AuditResult {
   id: string;
@@ -80,6 +139,9 @@ export interface AuditResult {
   occurrence_count: number;
   is_resolved: boolean;
   resolved_at: string | null;
+  feedback_status: AuditFeedbackStatus;
+  feedback_at: string | null;
+  feedback_note: string | null;
   is_grouped: boolean;
   group_id: string | null;
   issue_ids: string[];
@@ -108,6 +170,7 @@ export interface ThreeLineAsset {
   page_index?: number | null;
   json_path?: string | null;
   summary?: string | null;
+  is_placeholder?: boolean | null;
   created_at?: string | null;
 }
 

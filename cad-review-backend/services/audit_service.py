@@ -50,6 +50,18 @@ def _pick_latest_json(rows: List[JsonData]) -> Optional[JsonData]:
     )
 
 
+def _is_placeholder_json(row: Optional[JsonData]) -> bool:
+    if not row:
+        return False
+    summary = str(row.summary or "").strip()
+    if summary.startswith("占位JSON"):
+        return True
+    json_path = str(row.json_path or "").strip()
+    if not json_path:
+        return False
+    return Path(json_path).name.startswith("placeholder_")
+
+
 def _derive_project_status(summary: Dict[str, int]) -> str:
     total = summary["total"]
     ready = summary["ready"]
@@ -181,7 +193,8 @@ def match_three_lines(project_id: str, db) -> Dict[str, Any]:
         json_data = _pick_latest_json(json_map.get(catalog.id, []))
 
         has_png = bool(drawing and drawing.png_path)
-        has_json = bool(json_data and json_data.json_path)
+        is_placeholder_json = _is_placeholder_json(json_data)
+        has_json = bool(json_data and json_data.json_path and not is_placeholder_json)
 
         if has_png and has_json:
             line_status = "ready"
@@ -221,6 +234,7 @@ def match_three_lines(project_id: str, db) -> Dict[str, Any]:
                     "data_version": json_data.data_version,
                     "status": json_data.status,
                     "summary": json_data.summary,
+                    "is_placeholder": is_placeholder_json,
                     "created_at": (
                         json_data.created_at.isoformat() if isinstance(json_data.created_at, datetime) else None
                     ),

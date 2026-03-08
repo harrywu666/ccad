@@ -2,6 +2,8 @@
 
 # Local tool state
 .trae/
+.cursor/
+.tmp_test3_jsons/
 
 # Backend
 cad-review-backend/.env
@@ -9,6 +11,8 @@ cad-review-backend/venv/
 cad-review-backend/__pycache__/
 cad-review-backend/.pytest_cache/
 cad-review-backend/**/*.pyc
+*.db
+*.sqlite
 
 # Frontend
 cad-review-frontend/node_modules/
@@ -18,4 +22,5 @@ cad-review-frontend/.env.*
 
 # Local project runtime data (do not commit)
 projecs/
+projects/
 ui.pen

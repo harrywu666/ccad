@@ -95,6 +95,10 @@ export default function CatalogTable({
     const splitIndex = Math.ceil(currentRows.length / 2);
     const leftRows = currentRows.slice(0, splitIndex);
     const rightRows = currentRows.slice(splitIndex);
+    const pairedRows = Array.from({ length: Math.max(leftRows.length, rightRows.length) }, (_, index) => ({
+        left: leftRows[index],
+        right: rightRows[index],
+    }));
 
     useEffect(() => {
         latestWidthsRef.current = columnWidths;
@@ -259,56 +263,71 @@ export default function CatalogTable({
             <Card className="border-border shadow-none rounded-none flex-1 overflow-hidden flex flex-col min-h-[400px]">
                 <ScrollArea className="flex-1">
                     {doubleColumnView && !isEditing && currentRows.length > 0 ? (
-                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-0 p-0">
-                            {[leftRows, rightRows].map((columnRows, colIndex) => (
-                                <table
-                                    key={colIndex}
-                                    className={`w-full table-fixed text-[13px] font-sans text-left ${colIndex === 1 ? 'xl:border-l xl:border-border' : ''}`}
-                                >
-                                    <colgroup>
-                                        <col style={{ width: `${SEQ_COLUMN_WIDTH}px` }} />
-                                        <col style={{ width: `${columnWidths.sheetNo}px` }} />
-                                        <col />
-                                    </colgroup>
-                                    <thead className="bg-zinc-100 sticky top-0 border-b border-border z-10">
-                                        <tr>
-                                            <th className="relative px-6 py-4 font-semibold text-muted-foreground text-center">序号</th>
-                                            <th className="relative px-6 py-4 font-semibold text-muted-foreground">
-                                                图号
-                                                <ColumnResizeHandle
-                                                    label="拖拽调整图号列宽"
-                                                    onMouseDown={beginResize}
-                                                />
-                                            </th>
-                                            <th className="px-6 py-4 font-semibold text-muted-foreground">图名</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-border bg-white">
-                                        {columnRows.map((item, index) => {
-                                            const globalIndex = colIndex === 0 ? index : splitIndex + index;
-                                            return (
-                                                <tr
-                                                    key={item.id || `read-${colIndex}-${index}`}
-                                                    className="cursor-pointer transition-[background-color,box-shadow] duration-200 hover:bg-secondary/50 hover:shadow-[inset_3px_0_0_0_hsl(var(--primary))]"
-                                                >
-                                                    <td className="px-6 py-0 font-mono text-muted-foreground align-middle">
-                                                        <div className="h-full min-h-[56px] flex items-center justify-center">
-                                                            {globalIndex + 1}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-3">
-                                                        <span className="font-medium text-foreground">{item.sheet_no || '-'}</span>
-                                                    </td>
-                                                    <td className="px-6 py-3">
-                                                        <span className="text-foreground">{item.sheet_name || '-'}</span>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            ))}
-                        </div>
+                        <table className="w-full table-fixed text-[13px] font-sans text-left">
+                            <colgroup>
+                                <col style={{ width: `${SEQ_COLUMN_WIDTH}px` }} />
+                                <col style={{ width: `${columnWidths.sheetNo}px` }} />
+                                <col />
+                                <col style={{ width: `${SEQ_COLUMN_WIDTH}px` }} />
+                                <col style={{ width: `${columnWidths.sheetNo}px` }} />
+                                <col />
+                            </colgroup>
+                            <thead className="bg-zinc-100 sticky top-0 border-b border-border z-10">
+                                <tr>
+                                    <th className="relative px-6 py-4 font-semibold text-muted-foreground text-center">序号</th>
+                                    <th className="relative px-6 py-4 font-semibold text-muted-foreground">
+                                        图号
+                                        <ColumnResizeHandle
+                                            label="拖拽调整图号列宽"
+                                            onMouseDown={beginResize}
+                                        />
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-muted-foreground">图名</th>
+                                    <th className="relative border-l border-border px-6 py-4 font-semibold text-muted-foreground text-center">序号</th>
+                                    <th className="relative px-6 py-4 font-semibold text-muted-foreground">图号</th>
+                                    <th className="px-6 py-4 font-semibold text-muted-foreground">图名</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border bg-white">
+                                {pairedRows.map(({ left, right }, index) => (
+                                    <tr
+                                        key={`${left?.id || `left-${index}`}-${right?.id || `right-${index}`}`}
+                                        className="cursor-pointer transition-[background-color,box-shadow] duration-200 hover:bg-secondary/50 hover:shadow-[inset_3px_0_0_0_hsl(var(--primary))]"
+                                    >
+                                        <td className="px-6 py-0 font-mono text-muted-foreground align-middle">
+                                            <div className="flex min-h-[56px] items-center justify-center">
+                                                {left ? index + 1 : ''}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-0 align-middle">
+                                            <div className="flex min-h-[56px] items-center py-3">
+                                                <span className="font-medium text-foreground">{left?.sheet_no || ''}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-0 align-middle">
+                                            <div className="flex min-h-[56px] items-center py-3">
+                                                <span className="text-foreground">{left?.sheet_name || ''}</span>
+                                            </div>
+                                        </td>
+                                        <td className="border-l border-border px-6 py-0 font-mono text-muted-foreground align-middle">
+                                            <div className="flex min-h-[56px] items-center justify-center">
+                                                {right ? splitIndex + index + 1 : ''}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-0 align-middle">
+                                            <div className="flex min-h-[56px] items-center py-3">
+                                                <span className="font-medium text-foreground">{right?.sheet_no || ''}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-0 align-middle">
+                                            <div className="flex min-h-[56px] items-center py-3">
+                                                <span className="text-foreground">{right?.sheet_name || ''}</span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     ) : (
                         <table className="w-full table-fixed text-[13px] font-sans text-left">
                             <colgroup>

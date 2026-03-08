@@ -50,6 +50,8 @@ class Project(Base):
     sheet_contexts = relationship("SheetContext", back_populates="project", cascade="all, delete-orphan")
     sheet_edges = relationship("SheetEdge", back_populates="project", cascade="all, delete-orphan")
     audit_tasks = relationship("AuditTask", back_populates="project", cascade="all, delete-orphan")
+    feedback_samples = relationship("FeedbackSample", back_populates="project", cascade="all, delete-orphan")
+    layout_registrations = relationship("DrawingLayoutRegistration", back_populates="project", cascade="all, delete-orphan")
 
 
 class AIPromptSetting(Base):
@@ -59,6 +61,24 @@ class AIPromptSetting(Base):
     stage_key = Column(String, primary_key=True)
     system_prompt_override = Column(Text, nullable=True)
     user_prompt_override = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class AuditSkillEntry(Base):
+    """全局审查技能包规则表"""
+    __tablename__ = "audit_skill_entries"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    skill_type = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    source = Column(String, default="manual")
+    execution_mode = Column(String, default="ai")
+    stage_keys = Column(Text, nullable=True)
+    source_sample_ids = Column(Text, nullable=True)
+    is_active = Column(Integer, default=1)
+    priority = Column(Integer, default=100)
+    created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
@@ -133,6 +153,9 @@ class AuditResult(Base):
     evidence_json = Column(Text, nullable=True)
     is_resolved = Column(Integer, default=0)
     resolved_at = Column(DateTime, nullable=True)
+    feedback_status = Column(String, default="none")
+    feedback_at = Column(DateTime, nullable=True)
+    feedback_note = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
     project = relationship("Project", back_populates="audit_results")
@@ -217,6 +240,61 @@ class DrawingAnnotation(Base):
     project = relationship("Project")
 
 
+class AuditIssueDrawing(Base):
+    """审核问题与具体图纸定位记录表"""
+    __tablename__ = "audit_issue_drawings"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    audit_result_id = Column(String, ForeignKey("audit_results.id"), nullable=False)
+    audit_version = Column(Integer, nullable=False)
+    match_side = Column(String, nullable=False)  # source/target
+    drawing_id = Column(String, ForeignKey("drawings.id"), nullable=True)
+    drawing_data_version = Column(Integer, nullable=True)
+    sheet_no = Column(String, nullable=True)
+    sheet_name = Column(String, nullable=True)
+    index_no = Column(String, nullable=True)
+    anchor_json = Column(Text, nullable=True)
+    match_status = Column(String, default="matched")  # matched/missing_drawing/missing_anchor
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint("audit_result_id", "match_side", name="uq_audit_issue_result_side"),
+    )
+
+    project = relationship("Project")
+    audit_result = relationship("AuditResult")
+    drawing = relationship("Drawing")
+
+
+class DrawingLayoutRegistration(Base):
+    """DWG layout 与 PDF 页面坐标配准记录表"""
+    __tablename__ = "drawing_layout_registrations"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    drawing_id = Column(String, ForeignKey("drawings.id"), nullable=False)
+    drawing_data_version = Column(Integer, nullable=True)
+    sheet_no = Column(String, nullable=True)
+    layout_name = Column(String, nullable=False)
+    pdf_page_index = Column(Integer, nullable=True)
+    layout_page_range_json = Column(Text, nullable=True)
+    pdf_page_size_json = Column(Text, nullable=True)
+    transform_json = Column(Text, nullable=True)
+    registration_method = Column(String, default="layout_page_direct")
+    registration_confidence = Column(Float, default=1.0)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint("drawing_id", "layout_name", "pdf_page_index", name="uq_drawing_layout_pdf_page"),
+    )
+
+    project = relationship("Project", back_populates="layout_registrations")
+    drawing = relationship("Drawing")
+
+
 class AuditTask(Base):
     """审核任务规划表"""
     __tablename__ = "audit_tasks"
@@ -235,3 +313,29 @@ class AuditTask(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     project = relationship("Project", back_populates="audit_tasks")
+
+
+class FeedbackSample(Base):
+    """误报反馈样本表——独立于 AuditResult 的训练数据存储层"""
+    __tablename__ = "feedback_samples"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    audit_result_id = Column(String, nullable=False)
+    audit_version = Column(Integer, nullable=False)
+    issue_type = Column(String, nullable=False)
+    severity = Column(String, nullable=True)
+    sheet_no_a = Column(String, nullable=True)
+    sheet_no_b = Column(String, nullable=True)
+    location = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+    evidence_json = Column(Text, nullable=True)
+    value_a = Column(String, nullable=True)
+    value_b = Column(String, nullable=True)
+    user_note = Column(Text, nullable=True)
+    snapshot_json = Column(Text, nullable=True)
+    curation_status = Column(String, default="new")
+    created_at = Column(DateTime, default=datetime.now)
+    curated_at = Column(DateTime, nullable=True)
+
+    project = relationship("Project", back_populates="feedback_samples")

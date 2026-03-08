@@ -7,7 +7,7 @@ import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from database import get_db
 from models import ProjectCategory
 
@@ -16,13 +16,12 @@ router = APIRouter()
 
 class CategoryResponse(BaseModel):
     """分类响应模型"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     name: str
     color: str
     sort_order: int
-
-    class Config:
-        from_attributes = True
 
 
 class CategoryCreate(BaseModel):

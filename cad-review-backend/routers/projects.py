@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from database import get_db
 from models import Project, ProjectCategory
 from services.cache_service import recalculate_project_status
@@ -24,6 +24,8 @@ router = APIRouter()
 
 class ProjectResponse(BaseModel):
     """项目响应模型"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     name: str
     category: Optional[str] = None
@@ -33,10 +35,6 @@ class ProjectResponse(BaseModel):
     created_at: datetime
     status: str
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 class ProjectCreate(BaseModel):
     """项目创建模型"""

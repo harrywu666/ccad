@@ -44,6 +44,20 @@ type DeleteConfirmAction =
     | { type: 'batch_pdf'; drawingIds: string[]; count: number }
     | { type: 'batch_dwg'; jsonIds: string[]; count: number };
 
+type DisplayRow =
+    | {
+        rowType: 'catalog';
+        key: string;
+        order: number;
+        item: ThreeLineItem;
+    }
+    | {
+        rowType: 'drawing';
+        key: string;
+        order: number;
+        drawing: Drawing;
+    };
+
 export default function MatchTable({
     items,
     filter,
@@ -58,26 +72,55 @@ export default function MatchTable({
     onBatchDeleteJson,
     stats
 }: MatchTableProps) {
-    const [editingCatalogId, setEditingCatalogId] = useState<string | null>(null);
-    const [selectedDrawingId, setSelectedDrawingId] = useState<string>('');
-    const [savingCatalogId, setSavingCatalogId] = useState<string | null>(null);
+    const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
+    const [selectedCatalogId, setSelectedCatalogId] = useState<string>('');
+    const [savingRowKey, setSavingRowKey] = useState<string | null>(null);
     const [isBatchMode, setIsBatchMode] = useState(false);
     const [selectedCatalogIds, setSelectedCatalogIds] = useState<Set<string>>(new Set());
     const [deletingKey, setDeletingKey] = useState<string | null>(null);
     const [batchDeletingType, setBatchDeletingType] = useState<'pdf' | 'dwg' | null>(null);
     const [deleteConfirmAction, setDeleteConfirmAction] = useState<DeleteConfirmAction | null>(null);
 
-    const drawingOptions = useMemo(() => unmatchedDrawings.map((drawing, idx) => ({
-        value: drawing.id,
-        label: `${idx + 1}. ${drawing.sheet_no || '未识别图号'} - ${drawing.sheet_name || '未识别图名'}${drawing.page_index !== null && drawing.page_index !== undefined ? ` (第${drawing.page_index + 1}页)` : ''}`
-    })), [unmatchedDrawings]);
+    const unmatchedCatalogOptions = useMemo(
+        () => items
+            .filter(item => !item.drawing?.id)
+            .map((item, idx) => ({
+                value: item.catalog_id,
+                sheetNo: item.sheet_no,
+                sheetName: item.sheet_name,
+                label: `${idx + 1}. ${item.sheet_no || '未识别图号'} - ${item.sheet_name || '未识别图名'}`,
+            })),
+        [items]
+    );
+
+    const displayRows = useMemo<DisplayRow[]>(() => {
+        const rows: DisplayRow[] = items.map((item, index) => ({
+            rowType: 'catalog',
+            key: item.catalog_id,
+            order: index + 1,
+            item,
+        }));
+
+        if (filter === 'all' || filter === 'missing') {
+            rows.push(
+                ...unmatchedDrawings.map((drawing, index) => ({
+                    rowType: 'drawing' as const,
+                    key: `__unmatched_drawing__:${drawing.id}`,
+                    order: items.length + index + 1,
+                    drawing,
+                }))
+            );
+        }
+
+        return rows;
+    }, [filter, items, unmatchedDrawings]);
 
     useEffect(() => {
         setSelectedCatalogIds(prev => {
-            const valid = new Set(items.map(i => i.catalog_id));
+            const valid = new Set(displayRows.map(row => row.key));
             return new Set([...prev].filter(id => valid.has(id)));
         });
-    }, [items]);
+    }, [displayRows]);
 
     useEffect(() => {
         if (!isBatchMode && selectedCatalogIds.size > 0) {
@@ -85,44 +128,53 @@ export default function MatchTable({
         }
     }, [isBatchMode, selectedCatalogIds]);
 
-    const selectedItems = useMemo(
+    const selectedCatalogRows = useMemo(
         () => items.filter(item => selectedCatalogIds.has(item.catalog_id)),
         [items, selectedCatalogIds]
     );
+    const selectedDrawingRows = useMemo(
+        () => unmatchedDrawings.filter(drawing => selectedCatalogIds.has(`__unmatched_drawing__:${drawing.id}`)),
+        [unmatchedDrawings, selectedCatalogIds]
+    );
     const selectedDrawingIds = useMemo(
-        () => Array.from(new Set(selectedItems.map(item => item.drawing?.id).filter(Boolean) as string[])),
-        [selectedItems]
+        () => Array.from(new Set([
+            ...selectedCatalogRows.map(item => item.drawing?.id).filter(Boolean) as string[],
+            ...selectedDrawingRows.map(row => row.id),
+        ])),
+        [selectedCatalogRows, selectedDrawingRows]
     );
     const selectedJsonIds = useMemo(
-        () => Array.from(new Set(selectedItems.map(item => item.json?.id).filter(Boolean) as string[])),
-        [selectedItems]
+        () => Array.from(new Set(selectedCatalogRows.map(item => item.json?.id).filter(Boolean) as string[])),
+        [selectedCatalogRows]
     );
-    const allChecked = items.length > 0 && selectedCatalogIds.size === items.length;
+    const allChecked = displayRows.length > 0 && selectedCatalogIds.size === displayRows.length;
 
-    const startEditCatalogMatch = (catalogId: string) => {
-        setEditingCatalogId(catalogId);
-        setSelectedDrawingId('');
+    const startEditCatalogMatch = (rowKey: string) => {
+        setEditingRowKey(rowKey);
+        setSelectedCatalogId('');
     };
 
     const cancelEditCatalogMatch = () => {
-        setEditingCatalogId(null);
-        setSelectedDrawingId('');
-        setSavingCatalogId(null);
+        setEditingRowKey(null);
+        setSelectedCatalogId('');
+        setSavingRowKey(null);
     };
 
-    const saveCatalogMatch = async (item: ThreeLineItem) => {
-        if (!selectedDrawingId) return;
+    const saveCatalogMatch = async (drawing: Drawing) => {
+        if (!selectedCatalogId) return;
+        const selectedCatalog = unmatchedCatalogOptions.find(option => option.value === selectedCatalogId);
+        if (!selectedCatalog) return;
         try {
-            setSavingCatalogId(item.catalog_id);
+            setSavingRowKey(`__unmatched_drawing__:${drawing.id}`);
             await onManualCatalogMatch({
-                catalogId: item.catalog_id,
-                drawingId: selectedDrawingId,
-                sheetNo: item.sheet_no,
-                sheetName: item.sheet_name,
+                catalogId: selectedCatalog.value,
+                drawingId: drawing.id,
+                sheetNo: selectedCatalog.sheetNo,
+                sheetName: selectedCatalog.sheetName,
             });
             cancelEditCatalogMatch();
         } catch {
-            setSavingCatalogId(null);
+            setSavingRowKey(null);
         }
     };
 
@@ -137,7 +189,7 @@ export default function MatchTable({
 
     const toggleSelectAll = (checked: boolean) => {
         if (checked) {
-            setSelectedCatalogIds(new Set(items.map(item => item.catalog_id)));
+            setSelectedCatalogIds(new Set(displayRows.map(row => row.key)));
         } else {
             setSelectedCatalogIds(new Set());
         }
@@ -240,6 +292,24 @@ export default function MatchTable({
         onPreviewDrawing(item);
     };
 
+    const buildPreviewItemForDrawing = (drawing: Drawing, order: number): ThreeLineItem => ({
+        catalog_id: `__unmatched_drawing__:${drawing.id}`,
+        sheet_no: drawing.sheet_no,
+        sheet_name: drawing.sheet_name,
+        sort_order: order,
+        status: 'missing_png',
+        drawing: {
+            id: drawing.id,
+            sheet_no: drawing.sheet_no,
+            sheet_name: drawing.sheet_name,
+            data_version: drawing.data_version,
+            status: drawing.status,
+            png_path: drawing.png_path,
+            page_index: drawing.page_index,
+        },
+        json: null,
+    });
+
     const deleteDialogCopy = useMemo(() => {
         if (!deleteConfirmAction) return null;
         if (deleteConfirmAction.type === 'single_pdf') {
@@ -286,7 +356,9 @@ export default function MatchTable({
         <div className="w-full flex flex-col gap-6 bg-secondary/30 p-5 border border-border">
             <div className="flex items-center justify-between gap-4">
                 <div>
-                    <h2 className="text-[18px] font-semibold font-sans text-foreground mb-1">匹配明细 (总计 {stats.total} 条)</h2>
+                    <h2 className="text-[18px] font-semibold font-sans text-foreground mb-1">
+                        匹配明细 (目录 {stats.total} 条{unmatchedDrawings.length ? ` / 未匹配PDF ${unmatchedDrawings.length} 条` : ''})
+                    </h2>
                     <p className="text-[13px] text-muted-foreground font-sans flex gap-4">
                         <span><span className="text-success font-medium">齐备:</span> {stats.ready}</span>
                         <span><span className="text-primary font-medium">缺项:</span> {stats.missing}</span>
@@ -376,173 +448,263 @@ export default function MatchTable({
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border bg-white">
-                            {items.length === 0 ? (
+                            {displayRows.length === 0 ? (
                                 <tr>
                                     <td colSpan={isBatchMode ? 8 : 7} className="px-6 py-12 text-center text-muted-foreground">
                                         暂无匹配数据，请先锁定目录。
                                     </td>
                                 </tr>
                             ) : (
-                                items.map((item, index) => (
+                                displayRows.map((row) => (
                                     <tr
-                                        key={item.catalog_id || index}
-                                        onClick={(event) => handleRowClick(event, item)}
-                                        className={`transition-[background-color,box-shadow] duration-200 hover:bg-secondary/50 hover:shadow-[inset_3px_0_0_0_hsl(var(--primary))] ${item.drawing?.png_path ? 'cursor-pointer' : 'cursor-default'}`}
+                                        key={row.key}
+                                        onClick={(event) => {
+                                            if (row.rowType === 'catalog') {
+                                                handleRowClick(event, row.item);
+                                                return;
+                                            }
+                                            handleRowClick(event, buildPreviewItemForDrawing(row.drawing, row.order));
+                                        }}
+                                        className={`transition-[background-color,box-shadow] duration-200 hover:bg-secondary/50 hover:shadow-[inset_3px_0_0_0_hsl(var(--primary))] ${row.rowType === 'catalog' ? (row.item.drawing?.png_path ? 'cursor-pointer' : 'cursor-default') : (row.drawing.png_path ? 'cursor-pointer' : 'cursor-default')}`}
                                     >
                                         {(() => {
+                                            if (row.rowType === 'drawing') {
+                                                const isEditing = editingRowKey === row.key;
+                                                return (
+                                                    <>
+                                                        {isBatchMode && (
+                                                            <td className="px-4 py-3 align-middle text-center">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="h-4 w-4 align-middle accent-primary"
+                                                                    checked={selectedCatalogIds.has(row.key)}
+                                                                    onChange={(e) => toggleSelectRow(row.key, e.target.checked)}
+                                                                />
+                                                            </td>
+                                                        )}
+                                                        <td className="px-6 py-0 font-mono text-muted-foreground align-middle text-center">
+                                                            <div className="h-full min-h-[56px] flex items-center justify-center">
+                                                                {row.order}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-3 font-medium text-foreground align-middle">{row.drawing.sheet_no || '未识别图号'}</td>
+                                                        <td className="px-6 py-3 text-foreground align-middle">
+                                                            {row.drawing.sheet_name || '未识别图名'}
+                                                            {row.drawing.page_index !== null && row.drawing.page_index !== undefined ? ` (第${row.drawing.page_index + 1}页)` : ''}
+                                                        </td>
+                                                        <td className="px-6 py-3 align-middle text-center">
+                                                            <div className="flex items-center justify-center min-h-8 gap-2">
+                                                                {isEditing ? (
+                                                                    <div className="flex items-center gap-2">
+                                                                        <Select value={selectedCatalogId} onValueChange={setSelectedCatalogId}>
+                                                                            <SelectTrigger className="w-[260px] h-8 rounded-none bg-white border-border shadow-none text-[12px]">
+                                                                                <SelectValue placeholder={unmatchedCatalogOptions.length ? '选择目录匹配到图纸' : '暂无可匹配目录'} />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent className="rounded-none border-border shadow-md">
+                                                                                {unmatchedCatalogOptions.map(opt => (
+                                                                                    <SelectItem key={opt.value} value={opt.value} className="text-[12px] rounded-none">
+                                                                                        {opt.label}
+                                                                                    </SelectItem>
+                                                                                ))}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                        <Button
+                                                                            size="sm"
+                                                                            className="h-8 rounded-none text-[12px] px-3"
+                                                                            disabled={!selectedCatalogId || !unmatchedCatalogOptions.length || savingRowKey === row.key}
+                                                                            onClick={() => saveCatalogMatch(row.drawing)}
+                                                                        >
+                                                                            {savingRowKey === row.key ? '保存中...' : '保存'}
+                                                                        </Button>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            className="h-8 rounded-none text-[12px] px-2"
+                                                                            onClick={cancelEditCatalogMatch}
+                                                                        >
+                                                                            取消
+                                                                        </Button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="h-8 w-8 rounded-none"
+                                                                            onClick={() => startEditCatalogMatch(row.key)}
+                                                                            title="手动选择目录"
+                                                                        >
+                                                                            <Pencil className="w-3.5 h-3.5" />
+                                                                        </Button>
+                                                                        <span className="inline-flex items-center px-2 py-0.5 border border-amber-300 bg-amber-50 text-amber-700 text-[12px] font-medium font-sans">
+                                                                            未匹配目录
+                                                                        </span>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-3 align-middle text-center">
+                                                            <span className="inline-flex items-center px-2 py-0.5 border border-success/30 bg-success/10 text-success text-[12px] font-sans">
+                                                                已解析
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-3 align-middle text-center">
+                                                            <span className="inline-flex items-center px-2 py-0.5 border border-muted/30 bg-secondary text-muted-foreground text-[12px] font-sans">
+                                                                —
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-3 align-middle text-center">
+                                                            <div className="flex items-center justify-center min-h-8 gap-2">
+                                                                <DropdownMenu>
+                                                                    <DropdownMenuTrigger asChild>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="h-10 w-10 rounded-lg border-0 bg-transparent p-0 shadow-none hover:bg-secondary data-[state=open]:bg-secondary focus-visible:ring-0"
+                                                                        >
+                                                                            <MoreVertical className="w-4 h-4" />
+                                                                        </Button>
+                                                                    </DropdownMenuTrigger>
+                                                                    <DropdownMenuContent align="end" className="w-44 rounded-none">
+                                                                        <DropdownMenuItem
+                                                                            disabled={!row.drawing.png_path}
+                                                                            onClick={() => onPreviewDrawing(buildPreviewItemForDrawing(row.drawing, row.order))}
+                                                                        >
+                                                                            <Eye className="w-4 h-4" />
+                                                                            查看图纸
+                                                                        </DropdownMenuItem>
+                                                                        <DropdownMenuSeparator />
+                                                                        <DropdownMenuItem
+                                                                            variant="destructive"
+                                                                            disabled={!row.drawing.id || deletingKey !== null}
+                                                                            onClick={() => handleDeleteDrawing(
+                                                                                row.drawing.id,
+                                                                                `${row.drawing.sheet_no || '未识别图号'} - ${row.drawing.sheet_name || '未识别图名'}`
+                                                                            )}
+                                                                        >
+                                                                            <Trash2 className="w-4 h-4" />
+                                                                            {deletingKey === `pdf-${row.drawing.id}` ? '删除中...' : '删除PDF'}
+                                                                        </DropdownMenuItem>
+                                                                    </DropdownMenuContent>
+                                                                </DropdownMenu>
+                                                            </div>
+                                                        </td>
+                                                    </>
+                                                );
+                                            }
+
+                                            const item = row.item;
                                             const matched = Boolean(item.drawing?.id);
                                             const canShowUnmatched = hasUploadedDrawings && !matched;
-                                            const isEditing = editingCatalogId === item.catalog_id;
                                             return (
                                                 <>
-                                        {isBatchMode && (
-                                            <td className="px-4 py-3 align-middle text-center">
-                                                <input
-                                                    type="checkbox"
-                                                    className="h-4 w-4 align-middle accent-primary"
-                                                    checked={selectedCatalogIds.has(item.catalog_id)}
-                                                    onChange={(e) => toggleSelectRow(item.catalog_id, e.target.checked)}
-                                                />
-                                            </td>
-                                        )}
-                                        <td className="px-6 py-0 font-mono text-muted-foreground align-middle text-center">
-                                            <div className="h-full min-h-[56px] flex items-center justify-center">
-                                                {index + 1}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-3 font-medium text-foreground align-middle">{item.sheet_no || '-'}</td>
-                                        <td className="px-6 py-3 text-foreground align-middle">{item.sheet_name || '-'}</td>
-                                        <td className="px-6 py-3 align-middle text-center">
-                                            <div className="flex items-center justify-center min-h-8 gap-2">
-                                                {canShowUnmatched && !isEditing && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-8 w-8 rounded-none"
-                                                        onClick={() => startEditCatalogMatch(item.catalog_id)}
-                                                        title="修改匹配"
-                                                    >
-                                                        <Pencil className="w-3.5 h-3.5" />
-                                                    </Button>
-                                                )}
-
-                                                {isEditing ? (
-                                                    <div className="flex items-center gap-2">
-                                                        <Select value={selectedDrawingId} onValueChange={setSelectedDrawingId}>
-                                                            <SelectTrigger className="w-[260px] h-8 rounded-none bg-white border-border shadow-none text-[12px]">
-                                                                <SelectValue placeholder={drawingOptions.length ? '选择图纸匹配到目录' : '暂无可匹配图纸'} />
-                                                            </SelectTrigger>
-                                                            <SelectContent className="rounded-none border-border shadow-md">
-                                                                {drawingOptions.map(opt => (
-                                                                    <SelectItem key={opt.value} value={opt.value} className="text-[12px] rounded-none">
-                                                                        {opt.label}
-                                                                    </SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                        <Button
-                                                            size="sm"
-                                                            className="h-8 rounded-none text-[12px] px-3"
-                                                            disabled={!selectedDrawingId || !drawingOptions.length || savingCatalogId === item.catalog_id}
-                                                            onClick={() => saveCatalogMatch(item)}
-                                                        >
-                                                            {savingCatalogId === item.catalog_id ? '保存中...' : '保存'}
-                                                        </Button>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            className="h-8 rounded-none text-[12px] px-2"
-                                                            onClick={cancelEditCatalogMatch}
-                                                        >
-                                                            取消
-                                                        </Button>
-                                                    </div>
-                                                ) : (
-                                                    matched ? (
-                                                        <span className="inline-flex items-center px-2 py-0.5 border border-success/30 bg-success/10 text-success text-[12px] font-sans">
-                                                            已匹配
-                                                        </span>
-                                                    ) : canShowUnmatched ? (
-                                                        <span className="inline-flex items-center px-2 py-0.5 border border-amber-300 bg-amber-50 text-amber-700 text-[12px] font-medium font-sans">
-                                                            未匹配
-                                                        </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center px-2 py-0.5 border border-muted/30 bg-secondary text-muted-foreground text-[12px] font-sans">
-                                                            —
-                                                        </span>
-                                                    )
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-3 align-middle text-center">
-                                            {item.drawing?.png_path ? (
-                                                <span className="inline-flex items-center px-2 py-0.5 border border-success/30 bg-success/10 text-success text-[12px] font-sans">
-                                                    已解析
-                                                </span>
-                                            ) : (
-                                                <span className="inline-flex items-center px-2 py-0.5 border border-muted/30 bg-secondary text-muted-foreground text-[12px] font-sans">
-                                                    —
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-3 align-middle text-center">
-                                            {item.json?.json_path ? (
-                                                <span className="inline-flex items-center px-2 py-0.5 border border-success/30 bg-success/10 text-success text-[12px] font-sans">
-                                                    已提取
-                                                </span>
-                                            ) : (
-                                                <span className="inline-flex items-center px-2 py-0.5 border border-muted/30 bg-secondary text-muted-foreground text-[12px] font-sans">
-                                                    —
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-3 align-middle text-center">
-                                            <div className="flex items-center justify-center min-h-8 gap-2">
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-10 w-10 rounded-lg border-0 bg-transparent p-0 shadow-none hover:bg-secondary data-[state=open]:bg-secondary focus-visible:ring-0"
-                                                        >
-                                                            <MoreVertical className="w-4 h-4" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end" className="w-44 rounded-none">
-                                                        <DropdownMenuItem
-                                                            disabled={!item.drawing?.png_path}
-                                                            onClick={() => onPreviewDrawing(item)}
-                                                        >
-                                                            <Eye className="w-4 h-4" />
-                                                            查看图纸
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem
-                                                            variant="destructive"
-                                                            disabled={!item.drawing?.id || deletingKey !== null}
-                                                            onClick={() => item.drawing?.id && handleDeleteDrawing(
-                                                                item.drawing.id,
-                                                                `${item.sheet_no || '未识别图号'} - ${item.sheet_name || '未识别图名'}`
+                                                    {isBatchMode && (
+                                                        <td className="px-4 py-3 align-middle text-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="h-4 w-4 align-middle accent-primary"
+                                                                checked={selectedCatalogIds.has(row.key)}
+                                                                onChange={(e) => toggleSelectRow(row.key, e.target.checked)}
+                                                            />
+                                                        </td>
+                                                    )}
+                                                    <td className="px-6 py-0 font-mono text-muted-foreground align-middle text-center">
+                                                        <div className="h-full min-h-[56px] flex items-center justify-center">
+                                                            {row.order}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-3 font-medium text-foreground align-middle">{item.sheet_no || '-'}</td>
+                                                    <td className="px-6 py-3 text-foreground align-middle">{item.sheet_name || '-'}</td>
+                                                    <td className="px-6 py-3 align-middle text-center">
+                                                        <div className="flex items-center justify-center min-h-8 gap-2">
+                                                            {matched ? (
+                                                                <span className="inline-flex items-center px-2 py-0.5 border border-success/30 bg-success/10 text-success text-[12px] font-sans">
+                                                                    已匹配
+                                                                </span>
+                                                            ) : canShowUnmatched ? (
+                                                                <span className="inline-flex items-center px-2 py-0.5 border border-amber-300 bg-amber-50 text-amber-700 text-[12px] font-medium font-sans">
+                                                                    未匹配
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center px-2 py-0.5 border border-muted/30 bg-secondary text-muted-foreground text-[12px] font-sans">
+                                                                    —
+                                                                </span>
                                                             )}
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                            {item.drawing?.id && deletingKey === `pdf-${item.drawing.id}` ? '删除中...' : '删除PDF'}
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                            variant="destructive"
-                                                            disabled={!item.json?.id || deletingKey !== null}
-                                                            onClick={() => item.json?.id && handleDeleteJson(
-                                                                item.json.id,
-                                                                `${item.sheet_no || '未识别图号'} - ${item.sheet_name || '未识别图名'}`
-                                                            )}
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                            {item.json?.id && deletingKey === `dwg-${item.json.id}` ? '删除中...' : '删除DWG'}
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </div>
-                                        </td>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-3 align-middle text-center">
+                                                        {item.drawing?.png_path ? (
+                                                            <span className="inline-flex items-center px-2 py-0.5 border border-success/30 bg-success/10 text-success text-[12px] font-sans">
+                                                                已解析
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center px-2 py-0.5 border border-muted/30 bg-secondary text-muted-foreground text-[12px] font-sans">
+                                                                —
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-3 align-middle text-center">
+                                                        {item.json?.json_path && !item.json.is_placeholder && item.json.status === 'matched' ? (
+                                                            <span className="inline-flex items-center px-2 py-0.5 border border-success/30 bg-success/10 text-success text-[12px] font-sans">
+                                                                已提取
+                                                            </span>
+                                                        ) : item.json?.is_placeholder ? (
+                                                            <span className="inline-flex items-center px-2 py-0.5 border border-amber-300 bg-amber-50 text-amber-700 text-[12px] font-medium font-sans">
+                                                                占位
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center px-2 py-0.5 border border-muted/30 bg-secondary text-muted-foreground text-[12px] font-sans">
+                                                                —
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-3 align-middle text-center">
+                                                        <div className="flex items-center justify-center min-h-8 gap-2">
+                                                            <DropdownMenu>
+                                                                <DropdownMenuTrigger asChild>
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="h-10 w-10 rounded-lg border-0 bg-transparent p-0 shadow-none hover:bg-secondary data-[state=open]:bg-secondary focus-visible:ring-0"
+                                                                    >
+                                                                        <MoreVertical className="w-4 h-4" />
+                                                                    </Button>
+                                                                </DropdownMenuTrigger>
+                                                                <DropdownMenuContent align="end" className="w-44 rounded-none">
+                                                                    <DropdownMenuItem
+                                                                        disabled={!item.drawing?.png_path}
+                                                                        onClick={() => onPreviewDrawing(item)}
+                                                                    >
+                                                                        <Eye className="w-4 h-4" />
+                                                                        查看图纸
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuSeparator />
+                                                                    <DropdownMenuItem
+                                                                        variant="destructive"
+                                                                        disabled={!item.drawing?.id || deletingKey !== null}
+                                                                        onClick={() => item.drawing?.id && handleDeleteDrawing(
+                                                                            item.drawing.id,
+                                                                            `${item.sheet_no || '未识别图号'} - ${item.sheet_name || '未识别图名'}`
+                                                                        )}
+                                                                    >
+                                                                        <Trash2 className="w-4 h-4" />
+                                                                        {item.drawing?.id && deletingKey === `pdf-${item.drawing.id}` ? '删除中...' : '删除PDF'}
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuItem
+                                                                        variant="destructive"
+                                                                        disabled={!item.json?.id || deletingKey !== null}
+                                                                        onClick={() => item.json?.id && handleDeleteJson(
+                                                                            item.json.id,
+                                                                            `${item.sheet_no || '未识别图号'} - ${item.sheet_name || '未识别图名'}`
+                                                                        )}
+                                                                    >
+                                                                        <Trash2 className="w-4 h-4" />
+                                                                        {item.json?.id && deletingKey === `dwg-${item.json.id}` ? '删除中...' : '删除DWG'}
+                                                                    </DropdownMenuItem>
+                                                                </DropdownMenuContent>
+                                                            </DropdownMenu>
+                                                        </div>
+                                                    </td>
                                                 </>
                                             );
                                         })()}

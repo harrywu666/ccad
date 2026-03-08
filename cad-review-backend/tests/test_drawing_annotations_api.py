@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import importlib
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -46,25 +48,33 @@ def _load_test_app(monkeypatch, tmp_path):
 
 
 # 功能说明：初始化测试数据，创建项目和图纸记录
-def _seed_project_and_drawing(session_local, models):
+def _seed_project_and_drawing(session_local, models, *, drawing_id: str = "drawing-1", replaced: bool = False, png_path: str | None = None):
     db = session_local()
     try:
         project = models.Project(id="proj-1", name="Test Project")
+        image_path = png_path or str(BACKEND_DIR / "tests" / "fixtures" / "dummy.png")
         drawing = models.Drawing(
-            id="drawing-1",
+            id=drawing_id,
             project_id="proj-1",
             sheet_no="A1.01",
             sheet_name="首层平面图",
-            png_path=str(BACKEND_DIR / "tests" / "fixtures" / "dummy.png"),
+            png_path=image_path,
             page_index=0,
             data_version=2,
             status="matched",
+            replaced_at=datetime.now() if replaced else None,
         )
         db.add(project)
         db.add(drawing)
         db.commit()
     finally:
         db.close()
+
+
+def _create_dummy_png(tmp_path: Path, name: str = "dummy.png") -> str:
+    path = tmp_path / name
+    Image.new("RGB", (200, 120), color="white").save(path)
+    return str(path)
 
 
 # 功能说明：测试当标注不存在时，获取标注接口返回空画板
@@ -195,3 +205,45 @@ def test_put_rejects_mismatched_drawing_data_version(monkeypatch, tmp_path):
     )
 
     assert response.status_code == 409
+
+
+def test_get_annotations_allows_replaced_drawing(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    _seed_project_and_drawing(
+        session_local,
+        models,
+        drawing_id="drawing-history",
+        replaced=True,
+        png_path=_create_dummy_png(tmp_path, "history.png"),
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/projects/proj-1/drawings/drawing-history/annotations")
+
+    assert response.status_code == 200
+    assert response.json()["drawing_id"] == "drawing-history"
+
+
+def test_get_image_allows_replaced_drawing(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    storage_path_service = importlib.import_module("services.storage_path_service")
+    db = session_local()
+    try:
+        project = models.Project(id="proj-1", name="Test Project")
+        project_dir = storage_path_service.resolve_project_dir(project, ensure=True)
+        png_path = _create_dummy_png(project_dir, "history-image.png")
+    finally:
+        db.close()
+    _seed_project_and_drawing(
+        session_local,
+        models,
+        drawing_id="drawing-history",
+        replaced=True,
+        png_path=png_path,
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/projects/proj-1/drawings/drawing-history/image")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"

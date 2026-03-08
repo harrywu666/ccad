@@ -14,10 +14,10 @@ from difflib import SequenceMatcher
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Literal, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 from database import get_db
 from models import Project, Catalog, Drawing, DrawingAnnotation
 from services.storage_path_service import resolve_project_dir
@@ -161,6 +161,8 @@ def _pick_catalog_by_algorithm(
 
 class DrawingResponse(BaseModel):
     """图纸响应模型"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     project_id: str
     catalog_id: Optional[str] = None
@@ -170,10 +172,6 @@ class DrawingResponse(BaseModel):
     page_index: Optional[int] = None
     data_version: int
     status: str
-
-    class Config:
-        from_attributes = True
-
 
 class DrawingUpdateRequest(BaseModel):
     """图纸匹配更新请求"""
@@ -208,11 +206,7 @@ def get_drawing_image(project_id: str, drawing_id: str, db: Session = Depends(ge
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    drawing = db.query(Drawing).filter(
-        Drawing.id == drawing_id,
-        Drawing.project_id == project_id,
-        Drawing.replaced_at == None
-    ).first()
+    drawing = _get_drawing(project_id, drawing_id, db, allow_replaced=True)
     if not drawing or not drawing.png_path:
         raise HTTPException(status_code=404, detail="图纸PNG不存在")
 
@@ -621,16 +615,18 @@ class AnnotationBoardIn(BaseModel):
     objects: List[AnnotationObjectIn]
 
 
-def _get_active_drawing(project_id: str, drawing_id: str, db: Session) -> Drawing:
-    """获取有效图纸（未被删除），不存在则抛 404。"""
+def _get_drawing(project_id: str, drawing_id: str, db: Session, *, allow_replaced: bool = False) -> Drawing:
+    """获取图纸；allow_replaced=True 时允许访问历史版本图纸。"""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
-    drawing = db.query(Drawing).filter(
+    query = db.query(Drawing).filter(
         Drawing.id == drawing_id,
         Drawing.project_id == project_id,
-        Drawing.replaced_at == None,
-    ).first()
+    )
+    if not allow_replaced:
+        query = query.filter(Drawing.replaced_at == None)
+    drawing = query.first()
     if not drawing:
         raise HTTPException(status_code=404, detail="图纸不存在")
     return drawing
@@ -683,11 +679,11 @@ def get_annotations_by_sheet(
 def get_annotations(
     project_id: str,
     drawing_id: str,
-    audit_version: int,
+    audit_version: int = Query(1),
     db: Session = Depends(get_db),
 ):
     """获取图纸标注画板（按审图版本隔离）。"""
-    drawing = _get_active_drawing(project_id, drawing_id, db)
+    drawing = _get_drawing(project_id, drawing_id, db, allow_replaced=True)
 
     record = db.query(DrawingAnnotation).filter(
         DrawingAnnotation.drawing_id == drawing.id,
@@ -700,7 +696,6 @@ def get_annotations(
             board = json.loads(record.annotation_board)
             board["drawing_id"] = drawing.id
             board["drawing_data_version"] = drawing.data_version
-            board["audit_version"] = audit_version
             return board
         except (json.JSONDecodeError, TypeError):
             pass
@@ -708,7 +703,6 @@ def get_annotations(
     return {
         "drawing_id": drawing.id,
         "drawing_data_version": drawing.data_version,
-        "audit_version": audit_version,
         "schema_version": 1,
         "objects": [],
     }
@@ -718,12 +712,12 @@ def get_annotations(
 def put_annotations(
     project_id: str,
     drawing_id: str,
-    audit_version: int,
-    payload: AnnotationBoardIn,
+    audit_version: int = Query(1),
+    payload: AnnotationBoardIn = Body(...),
     db: Session = Depends(get_db),
 ):
     """保存（覆盖）图纸标注画板（按审图版本隔离）。"""
-    drawing = _get_active_drawing(project_id, drawing_id, db)
+    drawing = _get_drawing(project_id, drawing_id, db, allow_replaced=True)
 
     if payload.drawing_data_version != drawing.data_version:
         raise HTTPException(
@@ -765,11 +759,11 @@ def put_annotations(
 def delete_annotations(
     project_id: str,
     drawing_id: str,
-    audit_version: int,
+    audit_version: int = Query(1),
     db: Session = Depends(get_db),
 ):
     """清空图纸标注（按审图版本隔离）。"""
-    _get_active_drawing(project_id, drawing_id, db)
+    _get_drawing(project_id, drawing_id, db, allow_replaced=True)
 
     db.query(DrawingAnnotation).filter(
         DrawingAnnotation.drawing_id == drawing_id,

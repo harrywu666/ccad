@@ -14,4 +14,18 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('@radix-ui')) return 'radix'
+          if (id.includes('/konva/') || id.includes('/react-konva/')) return 'canvas'
+          if (id.includes('/axios/')) return 'http'
+          if (id.includes('/framer-motion/')) return 'motion'
+          return 'vendor'
+        },
+      },
+    },
+  },
 })

@@ -7,7 +7,7 @@ import logging
 import re
 import shutil
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List
 
 from fastapi import UploadFile
@@ -15,9 +15,14 @@ from fastapi import UploadFile
 from domain.match_scoring import pick_catalog_candidate
 from models import Catalog, JsonData
 from services.cache_service import increment_cache_version, recalculate_project_status
+from services.drawing_ingest.layout_units import expand_layout_json_units
 from services.storage_path_service import resolve_project_dir
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_filename(raw: str) -> str:
+    return PurePosixPath(raw).name or "upload"
 
 
 async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], db, set_progress) -> Dict[str, Any]:  # noqa: ANN001
@@ -55,7 +60,7 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
             logger.warning("跳过非DWG文件: %s", file_name)
             continue
 
-        dwg_path = dwg_dir / file_name
+        dwg_path = dwg_dir / _safe_filename(file_name)
         with open(dwg_path, "wb") as stream:
             content = await file.read()
             stream.write(content)
@@ -77,10 +82,15 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
     logger.info("批量DWG提取完成: files=%s", len(dwg_file_infos))
     set_progress(project_id, "processing", 45, "布局解析完成，开始目录匹配")
 
-    expected_layouts = sum(
-        len(extracted_by_file.get(str(Path(item["path"]).resolve()), []))
-        for item in dwg_file_infos
-    )
+    expected_layouts = 0
+    expanded_by_file: Dict[str, List[Dict[str, Any]]] = {}
+    for item in dwg_file_infos:
+        path_key = str(Path(item["path"]).resolve())
+        units: List[Dict[str, Any]] = []
+        for json_info in extracted_by_file.get(path_key, []):
+            units.extend(expand_layout_json_units(json_info))
+        expanded_by_file[path_key] = units
+        expected_layouts += len(units)
     processed_layouts = 0
 
     for dwg_item in dwg_file_infos:
@@ -88,7 +98,7 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
         dwg_path = dwg_item["path"]
 
         logger.info("处理DWG提取结果: %s", str(dwg_path))
-        layout_jsons = extracted_by_file.get(str(Path(dwg_path).resolve()), [])
+        layout_jsons = expanded_by_file.get(str(Path(dwg_path).resolve()), [])
         logger.info("DWG提取完成: file=%s layouts=%s", file_name, len(layout_jsons))
 
         for json_info in layout_jsons:
@@ -99,6 +109,8 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
             sheet_no = str(json_info.get("sheet_no", "")).strip()
             sheet_name = str(json_info.get("sheet_name", "")).strip()
             json_path = str(json_info.get("json_path", "")).strip()
+            fragment_id = str(json_info.get("fragment_id", "")).strip()
+            is_fragment_unit = bool(json_info.get("is_fragment_unit"))
             viewports = json_info.get("viewports", []) or []
             dimensions = json_info.get("dimensions", []) or []
             pseudo_texts = json_info.get("pseudo_texts", []) or []
@@ -164,26 +176,28 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
             else:
                 existing_versions = []
 
+            summary = (
+                f"DWG:{file_name} 布局:{layout_name} "
+                f"{f'分图:{fragment_id} ' if fragment_id else ''}"
+                f"视口:{len(viewports)} 标注:{len(dimensions)} 伪标注:{len(pseudo_texts)} "
+                f"索引:{len(indexes)} 标题栏:{len(title_blocks)} 材料:{len(materials)} "
+                f"材料表:{len(material_table)} 图层:{len(layers)}"
+            )
+            normalized_base = re.sub(
+                r'[\\/:*?"<>|]+',
+                "_",
+                f"{Path(file_name).stem}_{layout_name or sheet_no or 'layout'}_{fragment_id or 'layout'}",
+            ).strip("_") or "layout"
+            source_json_path = Path(json_path) if json_path and not is_fragment_unit else None
+            versioned_json_path = json_dir / f"{normalized_base}_v1.json"
+
             next_version = 1
             for old in existing_versions:
                 next_version = max(next_version, (old.data_version or 0) + 1)
                 if old.is_latest == 1:
                     old.is_latest = 0
 
-            summary = (
-                f"DWG:{file_name} 布局:{layout_name} "
-                f"视口:{len(viewports)} 标注:{len(dimensions)} 伪标注:{len(pseudo_texts)} "
-                f"索引:{len(indexes)} 标题栏:{len(title_blocks)} 材料:{len(materials)} "
-                f"材料表:{len(material_table)} 图层:{len(layers)}"
-            )
-
-            normalized_base = re.sub(
-                r'[\\/:*?"<>|]+',
-                "_",
-                f"{Path(file_name).stem}_{layout_name or sheet_no or 'layout'}",
-            ).strip("_") or "layout"
-            versioned_json_path = json_dir / f"{normalized_base}_v{next_version}.json"
-            source_json_path = Path(json_path) if json_path else None
+                versioned_json_path = json_dir / f"{normalized_base}_v{next_version}.json"
 
             try:
                 if source_json_path and source_json_path.exists():

@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Group, Image as KonvaImage, Layer, Line, Stage, Text as KonvaText, Transformer } from 'react-konva';
+import { Circle, Group, Image as KonvaImage, Layer, Line, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type { Text as KonvaTextNode } from 'konva/lib/shapes/Text';
 import type { Transformer as KonvaTransformerNode } from 'konva/lib/shapes/Transformer';
@@ -34,13 +34,57 @@ import {
 } from './constants';
 import { useAnnotationBoard } from './useAnnotationBoard';
 import { useCanvasViewport } from './useCanvasViewport';
+import { useIssueFocus } from './useIssueFocus';
 import { useOverlayAnnotations } from './useOverlayAnnotations';
+
+const buildCloudRectPoints = (x: number, y: number, width: number, height: number) => {
+  const bumpsX = Math.max(3, Math.round(width / 48));
+  const bumpsY = Math.max(3, Math.round(height / 48));
+  const points: number[] = [];
+
+  const push = (px: number, py: number) => {
+    points.push(px, py);
+  };
+
+  push(x, y + height * 0.12);
+  for (let idx = 0; idx < bumpsX; idx += 1) {
+    const startX = x + (width / bumpsX) * idx;
+    const endX = x + (width / bumpsX) * (idx + 1);
+    const midX = (startX + endX) / 2;
+    push(midX, y - height * 0.08);
+    push(endX, y + height * 0.12);
+  }
+  for (let idx = 0; idx < bumpsY; idx += 1) {
+    const startY = y + (height / bumpsY) * idx;
+    const endY = y + (height / bumpsY) * (idx + 1);
+    const midY = (startY + endY) / 2;
+    push(x + width + width * 0.08, midY);
+    push(x + width - width * 0.12, endY);
+  }
+  for (let idx = 0; idx < bumpsX; idx += 1) {
+    const startX = x + width - (width / bumpsX) * idx;
+    const endX = x + width - (width / bumpsX) * (idx + 1);
+    const midX = (startX + endX) / 2;
+    push(midX, y + height + height * 0.08);
+    push(endX, y + height - height * 0.12);
+  }
+  for (let idx = 0; idx < bumpsY; idx += 1) {
+    const startY = y + height - (height / bumpsY) * idx;
+    const endY = y + height - (height / bumpsY) * (idx + 1);
+    const midY = (startY + endY) / 2;
+    push(x - width * 0.08, midY);
+    push(x + width * 0.12, endY);
+  }
+  return points;
+};
 
 export default function AnnotatedDrawingPreviewCanvas({
   projectId,
   previewDrawing,
   auditVersion,
   availableVersions,
+  overlayVersions,
+  onToggleOverlayVersion,
 }: AnnotatedDrawingPreviewCanvasProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<import('konva/lib/Stage').Stage | null>(null);
@@ -91,19 +135,70 @@ export default function AnnotatedDrawingPreviewCanvas({
     handleZoomByFactor,
   } = useCanvasViewport({ viewportRef, stageRef, imageAsset, imageStatus });
 
-  const [overlayVersions, setOverlayVersions] = useState<number[]>([]);
-
   const overlayLayers = useOverlayAnnotations({
     projectId,
     sheetNo: previewDrawing.sheetNo,
     overlayVersions,
   });
 
-  const toggleOverlayVersion = useCallback((version: number) => {
-    setOverlayVersions((prev) =>
-      prev.includes(version) ? prev.filter((v) => v !== version) : [...prev, version],
-    );
-  }, []);
+  useIssueFocus({
+    drawingId: previewDrawing.drawingId,
+    focusAnchor: previewDrawing.focusAnchor,
+    focusHighlightRegion: previewDrawing.focusHighlightRegion,
+    focusAnchorStatus: previewDrawing.focusAnchorStatus,
+    imageAsset,
+    imageStatus,
+    stageSize,
+    setView,
+  });
+
+  const issueHighlight = useMemo(() => {
+    if (!imageAsset) return null;
+    const region = previewDrawing.focusHighlightRegion?.bbox_pct;
+    if (previewDrawing.focusHighlightRegion && !region) {
+      return null;
+    }
+    if (
+      region
+      && typeof region.x === 'number'
+      && typeof region.y === 'number'
+      && typeof region.width === 'number'
+      && typeof region.height === 'number'
+      && region.width > 0
+      && region.height > 0
+      && previewDrawing.focusAnchorStatus !== 'pdf_visual_mismatch'
+    ) {
+      return {
+        kind: 'region' as const,
+        variant: previewDrawing.focusAnchorStatus === 'pdf_low_confidence' ? 'estimated' as const : 'exact' as const,
+        x: imageAsset.width * (region.x / 100),
+        y: imageAsset.height * (region.y / 100),
+        width: imageAsset.width * (region.width / 100),
+        height: imageAsset.height * (region.height / 100),
+      };
+    }
+
+    const point = previewDrawing.focusAnchor?.global_pct;
+    if (!imageAsset || !point || typeof point.x !== 'number' || typeof point.y !== 'number') {
+      return null;
+    }
+    if (previewDrawing.focusAnchorStatus === 'pdf_visual_mismatch') {
+      return null;
+    }
+    if (
+      typeof previewDrawing.focusAnchor?.confidence === 'number'
+      && previewDrawing.focusAnchor.confidence < 0.6
+      && previewDrawing.focusAnchorStatus !== 'pdf_low_confidence'
+    ) {
+      return null;
+    }
+    return {
+      kind: 'point' as const,
+      x: imageAsset.width * (point.x / 100),
+      y: imageAsset.height * (point.y / 100),
+      variant: previewDrawing.focusAnchorStatus === 'pdf_low_confidence' ? 'estimated' as const : 'exact' as const,
+    };
+  }, [imageAsset, previewDrawing.focusAnchor, previewDrawing.focusAnchorStatus, previewDrawing.focusHighlightRegion]);
 
   // ── 切换图纸时重置编辑状态 ──
   useEffect(() => {
@@ -435,6 +530,58 @@ export default function AnnotatedDrawingPreviewCanvas({
                 />
               ) : null}
 
+              {issueHighlight ? (
+                <Group listening={false}>
+                  {issueHighlight.kind === 'region' ? (
+                    <Line
+                      points={buildCloudRectPoints(issueHighlight.x, issueHighlight.y, issueHighlight.width, issueHighlight.height)}
+                      stroke={issueHighlight.variant === 'estimated' ? '#d97706' : '#ef4444'}
+                      strokeWidth={3}
+                      closed
+                      tension={0.28}
+                      dash={issueHighlight.variant === 'estimated' ? [8, 5] : undefined}
+                      listening={false}
+                    />
+                  ) : (
+                    <>
+                      <Circle
+                        x={issueHighlight.x}
+                        y={issueHighlight.y}
+                        radius={18}
+                        fill={issueHighlight.variant === 'estimated' ? 'rgba(217, 119, 6, 0.12)' : 'rgba(239, 68, 68, 0.15)'}
+                        stroke={issueHighlight.variant === 'estimated' ? '#d97706' : '#ef4444'}
+                        strokeWidth={2}
+                        dash={issueHighlight.variant === 'estimated' ? [6, 4] : undefined}
+                      />
+                      <Line
+                        points={[issueHighlight.x - 26, issueHighlight.y, issueHighlight.x + 26, issueHighlight.y]}
+                        stroke={issueHighlight.variant === 'estimated' ? '#d97706' : '#ef4444'}
+                        strokeWidth={2}
+                        dash={issueHighlight.variant === 'estimated' ? [6, 4] : undefined}
+                        listening={false}
+                      />
+                      <Line
+                        points={[issueHighlight.x, issueHighlight.y - 26, issueHighlight.x, issueHighlight.y + 26]}
+                        stroke={issueHighlight.variant === 'estimated' ? '#d97706' : '#ef4444'}
+                        strokeWidth={2}
+                        dash={issueHighlight.variant === 'estimated' ? [6, 4] : undefined}
+                        listening={false}
+                      />
+                    </>
+                  )}
+                  {issueHighlight.variant === 'estimated' ? (
+                    <KonvaText
+                      x={(issueHighlight.kind === 'region' ? issueHighlight.x + issueHighlight.width : issueHighlight.x) + 18}
+                      y={(issueHighlight.kind === 'region' ? issueHighlight.y : issueHighlight.y) - 34}
+                      text="估计位置"
+                      fontSize={18}
+                      fill="#b45309"
+                      listening={false}
+                    />
+                  ) : null}
+                </Group>
+              ) : null}
+
               {/* 叠加层：其他版本标注（蓝色 80% 透明度，只读） */}
               {overlayLayers.map((layer) => (
                 <Group key={`overlay-${layer.version}`} opacity={0.8}>
@@ -615,7 +762,7 @@ export default function AnnotatedDrawingPreviewCanvas({
           onTextUp={() => cycleTextSize('up')}
           onZoomOut={() => handleZoomByFactor(0.9)}
           onZoomIn={() => handleZoomByFactor(1.1)}
-          onToggleOverlayVersion={toggleOverlayVersion}
+          onToggleOverlayVersion={onToggleOverlayVersion}
         />
 
         <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>

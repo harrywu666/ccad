@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type WheelEvent } from 'react';
+import type { IssueFocusAnchor, IssueHighlightRegion } from '@/types';
 
 export interface PreviewDrawing {
   drawingId: string;
@@ -7,6 +8,10 @@ export interface PreviewDrawing {
   sheetName: string;
   pageIndex: number | null;
   imageUrl: string;
+  focusAnchor?: IssueFocusAnchor | null;
+  focusHighlightRegion?: IssueHighlightRegion | null;
+  focusAnchorStatus?: 'pdf_ready' | 'pdf_low_confidence' | 'pdf_visual_mismatch' | 'layout_fallback' | 'layout_only' | 'missing' | null;
+  focusRegistrationConfidence?: number | null;
 }
 
 const clampPreviewScale = (value: number) => Math.min(5, Math.max(0.3, value));

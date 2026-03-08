@@ -325,7 +325,7 @@ def _task_group_source_sheets(tasks: List[AuditTask]) -> List[str]:
     return sheets
 
 
-def execute_audit_pipeline(project_id: str, audit_version: int) -> None:
+def execute_audit_pipeline(project_id: str, audit_version: int, *, allow_incomplete: bool = False) -> None:
     """后台线程执行审核流程（按 audit_tasks 驱动）"""
     try:
         _update_run_progress(
@@ -340,12 +340,30 @@ def execute_audit_pipeline(project_id: str, audit_version: int) -> None:
         try:
             match_result = match_three_lines(project_id, db)
             summary = match_result["summary"]
-            if summary["total"] == 0 or summary["ready"] != summary["total"]:
+            if summary["total"] == 0:
                 raise RuntimeError(
                     "三线匹配未完成："
                     f"总数{summary['total']}，就绪{summary['ready']}，"
                     f"缺PNG{summary['missing_png']}，缺JSON{summary['missing_json']}，"
                     f"都缺{summary['missing_all']}"
+                )
+            if summary["ready"] != summary["total"] and not allow_incomplete:
+                raise RuntimeError(
+                    "三线匹配未完成："
+                    f"总数{summary['total']}，就绪{summary['ready']}，"
+                    f"缺PNG{summary['missing_png']}，缺JSON{summary['missing_json']}，"
+                    f"都缺{summary['missing_all']}"
+                )
+            if summary["ready"] != summary["total"] and allow_incomplete:
+                logger.warning(
+                    "project=%s audit_version=%s starting audit with incomplete three-line match: total=%s ready=%s missing_png=%s missing_json=%s missing_all=%s",
+                    project_id,
+                    audit_version,
+                    summary["total"],
+                    summary["ready"],
+                    summary["missing_png"],
+                    summary["missing_json"],
+                    summary["missing_all"],
                 )
         finally:
             db.close()
@@ -592,11 +610,12 @@ def execute_audit_pipeline(project_id: str, audit_version: int) -> None:
         _clear_running(project_id)
 
 
-def start_audit_async(project_id: str, audit_version: int) -> None:
+def start_audit_async(project_id: str, audit_version: int, *, allow_incomplete: bool = False) -> None:
     """启动后台审核线程（调用方需已持有 _set_running 锁）。"""
     worker = threading.Thread(
         target=execute_audit_pipeline,
         args=(project_id, audit_version),
+        kwargs={"allow_incomplete": allow_incomplete},
         daemon=True,
     )
     worker.start()

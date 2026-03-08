@@ -32,6 +32,56 @@ def cad_to_global_pct(cad_x: float, cad_y: float, model_range: Dict[str, List[fl
     return pct_x, pct_y
 
 
+def _bbox_to_highlight_region(
+    bbox: Dict[str, List[float]],
+    range_obj: Dict[str, List[float]],
+) -> Optional[Dict[str, object]]:
+    mn = bbox.get("min")
+    mx = bbox.get("max")
+    if not isinstance(mn, (list, tuple)) or not isinstance(mx, (list, tuple)) or len(mn) < 2 or len(mx) < 2:
+        return None
+    try:
+        x0 = float(mn[0])
+        y0 = float(mn[1])
+        x1 = float(mx[0])
+        y1 = float(mx[1])
+    except (TypeError, ValueError):
+        return None
+    if x1 < x0 or y1 < y0:
+        return None
+
+    raw_width = max(x1 - x0, 0.0)
+    raw_height = max(y1 - y0, 0.0)
+    base = max(raw_width, raw_height, 18.0)
+    side = base * 1.38
+    center_x = (x0 + x1) / 2.0
+    center_y = (y0 + y1) / 2.0
+    square_x0 = center_x - side / 2.0
+    square_y0 = center_y - side / 2.0
+    square_x1 = center_x + side / 2.0
+    square_y1 = center_y + side / 2.0
+
+    left_pct, bottom_pct = cad_to_global_pct(square_x0, square_y0, range_obj)
+    right_pct, top_pct = cad_to_global_pct(square_x1, square_y1, range_obj)
+    x_pct = max(0.0, min(left_pct, right_pct))
+    y_pct = max(0.0, min(top_pct, bottom_pct))
+    width_pct = min(100.0 - x_pct, abs(right_pct - left_pct))
+    height_pct = min(100.0 - y_pct, abs(bottom_pct - top_pct))
+    if width_pct <= 0.0 or height_pct <= 0.0:
+        return None
+
+    return {
+        "shape": "cloud_rect",
+        "bbox_pct": {
+            "x": round(x_pct, 1),
+            "y": round(y_pct, 1),
+            "width": round(width_pct, 1),
+            "height": round(height_pct, 1),
+        },
+        "origin": "dwg_block_bbox",
+    }
+
+
 def _collect_points(layout_json: Dict) -> List[Tuple[float, float]]:
     points: List[Tuple[float, float]] = []
 
@@ -50,6 +100,76 @@ def _collect_points(layout_json: Dict) -> List[Tuple[float, float]]:
     _append_from(layout_json.get("dimensions", []) or [], "text_position")
     _append_from(layout_json.get("indexes", []) or [], "position")
     _append_from(layout_json.get("materials", []) or [], "position")
+    return points
+
+
+def _append_point(points: List[Tuple[float, float]], pos: object) -> None:
+    if not isinstance(pos, (list, tuple)) or len(pos) < 2:
+        return
+    try:
+        x = float(pos[0])
+        y = float(pos[1])
+    except (TypeError, ValueError):
+        return
+    points.append((x, y))
+
+
+def _collect_layout_space_points(layout_json: Dict) -> List[Tuple[float, float]]:
+    points: List[Tuple[float, float]] = []
+
+    for item in layout_json.get("indexes", []) or []:
+        if str(item.get("source") or "").strip() == "layout_space":
+            _append_point(points, item.get("position"))
+
+    for item in layout_json.get("materials", []) or []:
+        if str(item.get("source") or "").strip() == "layout_space":
+            _append_point(points, item.get("position"))
+
+    for item in layout_json.get("dimensions", []) or []:
+        if str(item.get("source") or "").strip() == "layout_space":
+            _append_point(points, item.get("text_position"))
+
+    viewports = layout_json.get("viewports", []) or []
+    viewport_points: List[Tuple[float, float]] = []
+    for viewport in viewports:
+        pos = viewport.get("position")
+        width = viewport.get("width")
+        height = viewport.get("height")
+        if not isinstance(pos, (list, tuple)) or len(pos) < 2:
+            continue
+        try:
+            cx = float(pos[0])
+            cy = float(pos[1])
+            vw = float(width)
+            vh = float(height)
+        except (TypeError, ValueError):
+            continue
+        viewport_points.extend([
+            (cx, cy),
+            (cx - vw / 2.0, cy - vh / 2.0),
+            (cx + vw / 2.0, cy + vh / 2.0),
+        ])
+    points.extend(viewport_points)
+
+    if viewport_points:
+        viewport_bbox = _points_bbox(viewport_points)
+        if viewport_bbox is not None:
+            min_x, min_y = viewport_bbox["min"]
+            max_x, max_y = viewport_bbox["max"]
+            pad_x = max(20.0, (max_x - min_x) * 0.15)
+            pad_y = max(20.0, (max_y - min_y) * 0.15)
+            for title in layout_json.get("title_blocks", []) or []:
+                pos = title.get("position")
+                if not isinstance(pos, (list, tuple)) or len(pos) < 2:
+                    continue
+                try:
+                    x = float(pos[0])
+                    y = float(pos[1])
+                except (TypeError, ValueError):
+                    continue
+                if (min_x - pad_x) <= x <= (max_x + pad_x) and (min_y - pad_y) <= y <= (max_y + pad_y):
+                    points.append((x, y))
+
     return points
 
 
@@ -124,6 +244,17 @@ def _resolve_mapping_range(layout_json: Dict) -> Optional[Dict[str, List[float]]
     return model_range
 
 
+def _resolve_layout_space_range(layout_json: Dict) -> Optional[Dict[str, List[float]]]:
+    explicit_range = _normalize_range(layout_json.get("layout_page_range"))
+    if explicit_range is None:
+        explicit_range = _normalize_range(layout_json.get("paper_range"))
+    if explicit_range is not None:
+        return explicit_range
+
+    points = _collect_layout_space_points(layout_json)
+    return _points_bbox(points)
+
+
 def global_pct_to_grid(pct_x: float, pct_y: float) -> str:
     """
     全图百分比坐标 -> 棋盘格坐标（A1-X17）
@@ -165,7 +296,7 @@ def global_pct_to_quadrants(pct_x: float, pct_y: float, overlap: float = GRID_OV
     return result
 
 
-def _enrich_point_item(item: Dict, pos_key: str, model_range: Dict[str, List[float]]) -> Dict:
+def _enrich_point_item(item: Dict, pos_key: str, range_obj: Dict[str, List[float]]) -> Dict:
     pos = item.get(pos_key)
     if not isinstance(pos, (list, tuple)) or len(pos) < 2:
         return item
@@ -176,10 +307,15 @@ def _enrich_point_item(item: Dict, pos_key: str, model_range: Dict[str, List[flo
     except (TypeError, ValueError):
         return item
 
-    pct_x, pct_y = cad_to_global_pct(cad_x, cad_y, model_range)
+    pct_x, pct_y = cad_to_global_pct(cad_x, cad_y, range_obj)
     item["global_pct"] = {"x": pct_x, "y": pct_y}
     item["grid"] = global_pct_to_grid(pct_x, pct_y)
     item["in_quadrants"] = global_pct_to_quadrants(pct_x, pct_y)
+    symbol_bbox = item.get("symbol_bbox")
+    if isinstance(symbol_bbox, dict):
+        highlight_region = _bbox_to_highlight_region(symbol_bbox, range_obj)
+        if highlight_region is not None:
+            item["highlight_region"] = highlight_region
     return item
 
 
@@ -190,21 +326,30 @@ def enrich_json_with_coordinates(layout_json: Dict) -> Dict:
     - grid
     - in_quadrants
     """
-    model_range = _resolve_mapping_range(layout_json)
-    if not isinstance(model_range, dict):
+    default_range = _resolve_mapping_range(layout_json)
+    layout_space_range = _resolve_layout_space_range(layout_json)
+    if not isinstance(default_range, dict) and not isinstance(layout_space_range, dict):
         return layout_json
+
+    def pick_range(item: Dict) -> Optional[Dict[str, List[float]]]:
+        if str(item.get("source") or "").strip() == "layout_space" and isinstance(layout_space_range, dict):
+            return layout_space_range
+        return default_range if isinstance(default_range, dict) else layout_space_range
 
     enriched = dict(layout_json)
     enriched["dimensions"] = [
-        _enrich_point_item(dict(item), "text_position", model_range)
+        _enrich_point_item(dict(item), "text_position", chosen_range)
+        if isinstance((chosen_range := pick_range(dict(item))), dict) else dict(item)
         for item in layout_json.get("dimensions", [])
     ]
     enriched["indexes"] = [
-        _enrich_point_item(dict(item), "position", model_range)
+        _enrich_point_item(dict(item), "position", chosen_range)
+        if isinstance((chosen_range := pick_range(dict(item))), dict) else dict(item)
         for item in layout_json.get("indexes", [])
     ]
     enriched["materials"] = [
-        _enrich_point_item(dict(item), "position", model_range)
+        _enrich_point_item(dict(item), "position", chosen_range)
+        if isinstance((chosen_range := pick_range(dict(item))), dict) else dict(item)
         for item in layout_json.get("materials", [])
     ]
     return enriched

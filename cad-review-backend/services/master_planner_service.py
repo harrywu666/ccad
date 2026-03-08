@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import time
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -26,6 +27,17 @@ def _env_bool(name: str, default: bool = True) -> bool:
     if raw is None:
         return default
     return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
 
 
 def _norm_sheet_no(value: Optional[str]) -> str:
@@ -275,16 +287,33 @@ def plan_with_master_llm(
         "contexts": context_items,
         "edges": edge_items,
     }
+    timeout_seconds = _env_float("AUDIT_MASTER_PLANNER_TIMEOUT_SECONDS", 20.0)
 
     try:
         prompts = _resolve_master_planner_prompts(payload)
+        started_at = time.perf_counter()
         result = _run_async(
-            call_kimi(
-                system_prompt=prompts["system_prompt"],
-                user_prompt=prompts["user_prompt"],
-                temperature=0.0,
+            asyncio.wait_for(
+                call_kimi(
+                    system_prompt=prompts["system_prompt"],
+                    user_prompt=prompts["user_prompt"],
+                    temperature=0.0,
+                ),
+                timeout=timeout_seconds,
             )
         )
+        logger.info(
+            "master_planner llm completed project=%s elapsed=%.2fs",
+            project_id,
+            time.perf_counter() - started_at,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "master_planner timeout project=%s timeout=%.2fs",
+            project_id,
+            timeout_seconds,
+        )
+        return {"ok": False, "reason": "llm_timeout"}
     except Exception as exc:  # noqa: BLE001
         logger.warning("master_planner failed project=%s error=%s", project_id, exc)
         return {"ok": False, "reason": f"llm_error:{exc}"}

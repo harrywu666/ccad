@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, ChevronDown, Database, Download, Eye, History, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, CheckCircle2, ChevronDown, Database, Download, Flag, History, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import * as api from '@/api';
-import type { AuditResult, AuditStatus, Drawing } from '@/types';
+import type { AuditFeedbackStatus, AuditIssuePreviewDrawingAsset, AuditResult, AuditStatus, Drawing } from '@/types';
 import type { AuditHistoryItem } from '@/types/api';
 import type { PreviewDrawing } from '../../hooks/useDrawingPreview';
 import InlineDrawingPreviewPanel from './InlineDrawingPreviewPanel';
@@ -35,6 +36,8 @@ type SelectedPreview = {
   issueId: string;
   drawingA: PreviewDrawing | null;
   drawingB: PreviewDrawing | null;
+  missingReason: string | null;
+  description: string;
 };
 
 function getTypeLabel(type: string) {
@@ -48,23 +51,136 @@ function getLocationDisplay(result: AuditResult) {
   return `${locations.slice(0, 4).join('、')} 等${locations.length}处`;
 }
 
-function pickBestDrawing(drawings: Drawing[], sheetNo?: string | null) {
-  const target = (sheetNo || '').trim();
-  if (!target) return null;
+function FeedbackPopover({
+  result,
+  isIncorrect,
+  isPending,
+  onSubmit,
+  onRevoke,
+}: {
+  result: AuditResult;
+  isIncorrect: boolean;
+  isPending: boolean;
+  onSubmit: (note?: string) => void;
+  onRevoke: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const matches = drawings.filter((item) => (item.sheet_no || '').trim() === target);
-  if (matches.length === 0) return null;
+  const handleOpen = (nextOpen: boolean) => {
+    if (isIncorrect) {
+      if (!nextOpen) setOpen(false);
+      return;
+    }
+    setOpen(nextOpen);
+    if (nextOpen) {
+      setNote('');
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  };
 
-  return matches.sort((a, b) => {
-    const statusScore = (value: Drawing) => (value.status === 'matched' ? 1 : 0);
-    const versionScore = (value: Drawing) => Number(value.data_version || 0);
-    const pageScore = (value: Drawing) => Number(value.page_index ?? 99999);
+  const handleSubmit = () => {
+    onSubmit(note.trim() || undefined);
+    setOpen(false);
+    setNote('');
+  };
+
+  if (isIncorrect) {
     return (
-      statusScore(b) - statusScore(a)
-      || versionScore(b) - versionScore(a)
-      || pageScore(a) - pageScore(b)
+      <Popover open={open} onOpenChange={handleOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="rounded-none shadow-none bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive"
+            disabled={isPending}
+            aria-label={`撤销误报反馈：${result.sheet_no_a || '未命名图纸'}`}
+            title={result.feedback_note ? `已反馈误报：${result.feedback_note}` : '已反馈误报，点击可撤销'}
+          >
+            <Flag className="w-4 h-4" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent side="right" align="center" className="w-56 p-3 space-y-2">
+          {result.feedback_note ? (
+            <p className="text-xs text-muted-foreground leading-relaxed">{result.feedback_note}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">已标记为误报</p>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full text-xs"
+            disabled={isPending}
+            onClick={() => {
+              onRevoke();
+              setOpen(false);
+            }}
+          >
+            撤销反馈
+          </Button>
+        </PopoverContent>
+      </Popover>
     );
-  })[0];
+  }
+
+  return (
+    <Popover open={open} onOpenChange={handleOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="rounded-none shadow-none text-muted-foreground hover:bg-secondary hover:text-foreground"
+          disabled={isPending}
+          aria-label={`提交误报反馈：${result.sheet_no_a || '未命名图纸'}`}
+          title="反馈为误报"
+        >
+          <Flag className="w-4 h-4" />
+        </Button>
+      </PopoverTrigger>
+        <PopoverContent side="right" align="center" className="w-64 p-3 space-y-2">
+        <p className="text-xs font-medium text-foreground">反馈为误报</p>
+        <textarea
+          ref={inputRef}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="可选：简述误报原因"
+          rows={2}
+          className="w-full resize-none rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+        />
+        <div className="flex gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="flex-1 text-xs"
+            onClick={() => setOpen(false)}
+          >
+            取消
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            className="flex-1 text-xs"
+            disabled={isPending}
+            onClick={handleSubmit}
+          >
+            确认误报
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export default function ProjectStepAudit({
@@ -75,7 +191,7 @@ export default function ProjectStepAudit({
   auditHistory,
   selectedAuditVersion,
   auditResults,
-  drawings,
+  drawings: _drawings,
   stageTitle,
   onSelectAuditVersion,
   onRequestDeleteVersion,
@@ -86,6 +202,7 @@ export default function ProjectStepAudit({
   const [actionError, setActionError] = useState('');
   const [selectedPreview, setSelectedPreview] = useState<SelectedPreview | null>(null);
   const [previewView, setPreviewView] = useState<'a' | 'b'>('a');
+  const previewRequestRef = useRef(0);
 
   useEffect(() => {
     if (!selectedPreview) return;
@@ -130,28 +247,49 @@ export default function ProjectStepAudit({
     });
   };
 
-  const resolveDrawingPreview = (drawing: Drawing | null): PreviewDrawing | null => {
-    if (!projectId || !drawing?.id || !drawing.png_path) return null;
+  const resolvePreviewDrawing = (asset: AuditIssuePreviewDrawingAsset | null): PreviewDrawing | null => {
+    if (!projectId || !asset?.drawing_id) return null;
     return {
-      drawingId: drawing.id,
-      dataVersion: drawing.data_version ?? 1,
-      sheetNo: drawing.sheet_no || '未命名图号',
-      sheetName: drawing.sheet_name || '未命名图纸',
-      pageIndex: drawing.page_index ?? null,
-      imageUrl: api.getDrawingImageUrl(projectId, drawing.id, projectCacheVersion),
+      drawingId: asset.drawing_id,
+      dataVersion: asset.drawing_data_version ?? 1,
+      sheetNo: asset.sheet_no || '未命名图号',
+      sheetName: asset.sheet_name || '未命名图纸',
+      pageIndex: asset.page_index ?? null,
+      imageUrl: api.getDrawingImageUrl(projectId, asset.drawing_id, projectCacheVersion),
+      focusAnchor: asset.pdf_anchor || asset.anchor || asset.layout_anchor || null,
+      focusHighlightRegion: asset.highlight_region || asset.pdf_anchor?.highlight_region || asset.anchor?.highlight_region || asset.layout_anchor?.highlight_region || null,
+      focusAnchorStatus: asset.anchor_status || null,
+      focusRegistrationConfidence: asset.registration_confidence ?? null,
     };
   };
 
-  const openIssueDrawing = (result: AuditResult) => {
-    const drawingA = resolveDrawingPreview(pickBestDrawing(drawings, result.sheet_no_a));
-    const drawingB = resolveDrawingPreview(pickBestDrawing(drawings, result.sheet_no_b));
-    setPreviewView('a');
-    setSelectedPreview({
-      issueId: result.id,
-      drawingA,
-      drawingB,
-    });
+  const openIssueDrawing = async (result: AuditResult) => {
+    if (!projectId) return;
+    const requestId = previewRequestRef.current + 1;
+    previewRequestRef.current = requestId;
     setActionError('');
+
+    try {
+      const previewId = result.issue_ids && result.issue_ids.length > 0 ? result.issue_ids[0] : result.id;
+      const preview = await api.getAuditResultPreview(projectId, previewId);
+      if (previewRequestRef.current !== requestId) return;
+
+      setPreviewView('a');
+      setSelectedPreview({
+        issueId: result.id,
+        drawingA: resolvePreviewDrawing(preview.source),
+        drawingB: resolvePreviewDrawing(preview.target),
+        missingReason: preview.missing_reason,
+        description:
+          preview.missing_reason === 'missing_target_drawing'
+            ? '目标图不存在，已自动定位到源图中的出错索引。'
+            : (preview.issue.description || result.description || ''),
+      });
+    } catch (error) {
+      console.error('加载问题图纸预览失败', error);
+      if (previewRequestRef.current !== requestId) return;
+      setActionError('这条问题的精确图纸定位加载失败了，请稍后再试。');
+    }
   };
 
   const handleToggleResolved = async (result: AuditResult, nextResolved: boolean) => {
@@ -184,6 +322,57 @@ export default function ProjectStepAudit({
       console.error('更新问题处理状态失败', error);
       onAuditResultsChange(previous);
       setActionError('保存失败，这条问题的处理状态没有改成功。');
+    } finally {
+      setPendingIds((current) => {
+        const next = { ...current };
+        delete next[result.id];
+        return next;
+      });
+    }
+  };
+
+  const handleToggleFeedback = async (
+    result: AuditResult,
+    nextStatus: AuditFeedbackStatus,
+    note?: string,
+  ) => {
+    if (!projectId) return;
+    const previous = auditResults;
+    setActionError('');
+    setPendingIds((current) => ({ ...current, [result.id]: true }));
+    const targetIssueIds = result.issue_ids && result.issue_ids.length > 0 ? result.issue_ids : [result.id];
+    const nextFeedbackAt = nextStatus === 'incorrect' ? new Date().toISOString() : null;
+    const nextNote = nextStatus === 'incorrect' ? (note ?? null) : null;
+
+    const optimistic = auditResults.map((item) => (
+      item.id === result.id
+        ? {
+            ...item,
+            feedback_status: nextStatus,
+            feedback_at: nextFeedbackAt,
+            feedback_note: nextNote,
+          }
+        : item
+    ));
+    onAuditResultsChange(optimistic);
+
+    const payload: api.AuditResultUpdatePayload = { feedback_status: nextStatus };
+    if (nextStatus === 'incorrect' && note) {
+      payload.feedback_note = note;
+    }
+
+    try {
+      if (targetIssueIds.length > 1 || result.is_grouped) {
+        await api.batchUpdateAuditResults(projectId, targetIssueIds, payload);
+        onAuditResultsChange(optimistic);
+      } else {
+        const updated = await api.updateAuditResult(projectId, result.id, payload);
+        onAuditResultsChange(optimistic.map((item) => (item.id === updated.id ? updated : item)));
+      }
+    } catch (error) {
+      console.error('更新误报反馈状态失败', error);
+      onAuditResultsChange(previous);
+      setActionError('保存失败，这条问题的误报反馈没有改成功。');
     } finally {
       setPendingIds((current) => {
         const next = { ...current };
@@ -348,7 +537,7 @@ export default function ProjectStepAudit({
                     <th className="w-[70px] pl-0 pr-2 py-3 text-center text-[12px] font-semibold text-foreground">问题类型</th>
                     <th className="w-[112px] px-2 py-3 text-left text-[12px] font-semibold text-foreground">关联图纸</th>
                     <th className="px-3 py-3 text-left text-[12px] font-semibold text-foreground">问题说明</th>
-                    <th className="w-[80px] px-2 py-3 text-center text-[12px] font-semibold text-foreground whitespace-nowrap">查看图纸</th>
+                    <th className="w-[72px] px-2 py-3 text-center text-[12px] font-semibold text-foreground whitespace-nowrap">误报</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -362,6 +551,7 @@ export default function ProjectStepAudit({
                     const isResolved = Boolean(result.is_resolved);
                     const isPending = Boolean(pendingIds[result.id]);
                     const isActive = selectedPreview?.issueId === result.id;
+                    const isIncorrectFeedback = result.feedback_status === 'incorrect';
 
                     return (
                       <tr
@@ -371,11 +561,11 @@ export default function ProjectStepAudit({
                             ? isActive ? 'bg-success/14' : 'bg-success/8 hover:bg-success/14'
                             : isActive ? 'bg-destructive/10' : 'bg-destructive/5 hover:bg-destructive/10'
                         } cursor-pointer transition-colors`}
-                        onClick={() => openIssueDrawing(result)}
+                        onClick={() => { void openIssueDrawing(result); }}
                         onKeyDown={(event) => {
                           if (event.key === 'Enter' || event.key === ' ') {
                             event.preventDefault();
-                            openIssueDrawing(result);
+                            void openIssueDrawing(result);
                           }
                         }}
                         tabIndex={0}
@@ -418,7 +608,6 @@ export default function ProjectStepAudit({
                             {getLocationDisplay(result) ? (
                               <div className={`text-[12px] ${isActive ? 'font-semibold text-foreground' : 'font-medium text-foreground'}`}>
                                 {getLocationDisplay(result)}
-                                {(result.occurrence_count || 1) > 1 ? ` · 共${result.occurrence_count}处` : ''}
                               </div>
                             ) : null}
                             <div
@@ -433,19 +622,13 @@ export default function ProjectStepAudit({
                           </div>
                         </td>
                         <td className="px-2 py-4 text-center" onClick={(event) => event.stopPropagation()}>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="rounded-none h-8 w-8 p-0 shadow-none"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openIssueDrawing(result);
-                            }}
-                            aria-label={`查看图纸：${result.sheet_no_a || '未命名图纸'}${result.sheet_no_b ? `，对比 ${result.sheet_no_b}` : ''}`}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Button>
+                          <FeedbackPopover
+                            result={result}
+                            isIncorrect={isIncorrectFeedback}
+                            isPending={isPending}
+                            onSubmit={(note) => void handleToggleFeedback(result, 'incorrect', note)}
+                            onRevoke={() => void handleToggleFeedback(result, 'none')}
+                          />
                         </td>
                       </tr>
                     );
@@ -462,7 +645,8 @@ export default function ProjectStepAudit({
               availableVersions={auditHistory.map((h) => h.version)}
               previewSessionKey={selectedPreview.issueId}
               title={selectedIssue ? `${getTypeLabel(selectedIssue.type)} · ${selectedIssue.sheet_no_a || '未命名图号'}` : '关联图纸'}
-              description={selectedIssue?.description || '点左侧“查看图纸”，这里就会显示对应图纸。'}
+              description={selectedPreview.description}
+              missingReason={selectedPreview.missingReason}
               drawingA={selectedPreview.drawingA}
               drawingB={selectedPreview.drawingB}
               activeView={previewView}
