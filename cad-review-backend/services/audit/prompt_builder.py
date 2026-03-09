@@ -21,7 +21,6 @@ def compact_dimensions(dims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "value": item.get("value"),
                 "display_text": item.get("display_text"),
                 "layer": item.get("layer"),
-                "grid": item.get("grid"),
                 "global_pct": {"x": gp.get("x"), "y": gp.get("y")} if gp else None,
                 "in_quadrants": item.get("in_quadrants"),
             }
@@ -37,7 +36,6 @@ def compact_material_rows(rows: List[Dict[str, Any]], *, limit: int = 80) -> Lis
             {
                 "code": item.get("code"),
                 "name": item.get("name"),
-                "grid": item.get("grid"),
                 "global_pct": {"x": gp.get("x"), "y": gp.get("y")} if gp else None,
             }
         )
@@ -77,6 +75,20 @@ def build_pair_compare_prompt(
             "b_sheet_no": b_sheet_no,
             "b_sheet_name": b_sheet_name,
             "b_semantic_json": json.dumps(b_semantic, ensure_ascii=False),
+        },
+    )
+    return prompts["user_prompt"]
+
+
+def build_visual_only_sheet_prompt(
+    sheet_no: str, sheet_name: str,
+) -> str:
+    """Build prompt for pure-visual dimension analysis (no JSON dimension data)."""
+    prompts = resolve_stage_prompts(
+        "dimension_visual_only",
+        {
+            "sheet_no": sheet_no,
+            "sheet_name": sheet_name,
         },
     )
     return prompts["user_prompt"]
