@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import type { AuditEvent } from "@/types/api";
+import AuditEventList from "./AuditEventList";
 
 type AuditPhaseState = "complete" | "current" | "pending";
 
@@ -31,6 +33,9 @@ interface AuditProgressDialogProps {
   supportingText: string;
   etaText: string;
   phases: AuditPhaseCard[];
+  events: AuditEvent[];
+  eventError?: string;
+  eventLoading?: boolean;
   onMinimize: () => void;
   onRequestClose: (onStep: (step: string) => void) => Promise<void>;
   closeDisabled?: boolean;
@@ -65,6 +70,9 @@ export default function AuditProgressDialog({
   supportingText,
   etaText,
   phases,
+  events,
+  eventError,
+  eventLoading = false,
   onMinimize,
   onRequestClose,
   closeDisabled = false,
@@ -246,6 +254,13 @@ export default function AuditProgressDialog({
             </>
           )}
         </DialogPrimitive.Content>
+        {!shuttingDown ? (
+          <div className="fixed left-[calc(50%+434px)] top-1/2 z-50 hidden -translate-y-1/2 xl:block">
+            <div className="w-[360px]">
+              <AuditEventList events={events} error={eventError} loading={eventLoading} />
+            </div>
+          </div>
+        ) : null}
       </DialogPortal>
     </Dialog>
     </>

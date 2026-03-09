@@ -7,21 +7,41 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from domain.sheet_normalization import normalize_sheet_no
 from models import AuditTask, SheetContext, SheetEdge
+from services.feedback_runtime_service import load_feedback_runtime_profile
 from services.master_planner_service import plan_with_master_llm
+from services.skill_pack_service import load_runtime_skill_profile
 
 logger = logging.getLogger(__name__)
 
 
-def _norm_sheet_no(value: Optional[str]) -> str:
-    if not value:
-        return ""
-    s = str(value).strip().upper()
-    s = re.sub(r"[\s\-_./\\()（）【】\[\]{}:：|]+", "", s)
-    return s
+def _clamp_priority(priority: int) -> int:
+    return max(1, min(5, int(priority)))
+
+
+def _apply_runtime_priority(
+    *,
+    task_type: str,
+    priority: int,
+    skill_profiles: Dict[str, Dict[str, Any]],
+    feedback_profiles: Dict[str, Dict[str, Any]],
+) -> int:
+    adjusted = int(priority)
+    skill_profile = skill_profiles.get(task_type) or {}
+    task_bias = (skill_profile.get("task_bias") or {})
+    if isinstance(task_bias, dict):
+        raw_offset = task_bias.get("priority_offset")
+        if isinstance(raw_offset, (int, float)):
+            adjusted += int(raw_offset)
+
+    feedback_profile = feedback_profiles.get(task_type) or {}
+    fp_rate = float(feedback_profile.get("false_positive_rate") or 0.0)
+    if fp_rate >= 0.5:
+        adjusted += 1
+    return _clamp_priority(adjusted)
 
 
 def _is_plan_sheet(sheet_no: str, sheet_name: str) -> bool:
@@ -60,6 +80,8 @@ def _build_tasks_rule_based(
     contexts: List[SheetContext],
     edges: List[SheetEdge],
     context_by_key: Dict[str, SheetContext],
+    skill_profiles: Dict[str, Dict[str, Any]],
+    feedback_profiles: Dict[str, Dict[str, Any]],
 ) -> Tuple[List[AuditTask], Dict[str, int]]:
     tasks: List[AuditTask] = []
     dedupe_keys = set()
@@ -88,7 +110,12 @@ def _build_tasks_rule_based(
         dedupe_keys.add(dedupe)
 
         is_plan = _is_plan_sheet(sheet_no, ctx.sheet_name or "")
-        priority = 1 if is_plan else 2
+        priority = _apply_runtime_priority(
+            task_type="index",
+            priority=1 if is_plan else 2,
+            skill_profiles=skill_profiles,
+            feedback_profiles=feedback_profiles,
+        )
         task = AuditTask(
             project_id=project_id,
             audit_version=audit_version,
@@ -117,8 +144,8 @@ def _build_tasks_rule_based(
         if not src_no or not tgt_no:
             continue
 
-        src_ctx = context_by_key.get(_norm_sheet_no(src_no))
-        tgt_ctx = context_by_key.get(_norm_sheet_no(tgt_no))
+        src_ctx = context_by_key.get(normalize_sheet_no(src_no))
+        tgt_ctx = context_by_key.get(normalize_sheet_no(tgt_no))
         if not src_ctx or not tgt_ctx:
             continue
 
@@ -136,13 +163,19 @@ def _build_tasks_rule_based(
                 continue
             dedupe_keys.add(dedupe)
 
+            resolved_priority = _apply_runtime_priority(
+                task_type=task_type,
+                priority=priority,
+                skill_profiles=skill_profiles,
+                feedback_profiles=feedback_profiles,
+            )
             task = AuditTask(
                 project_id=project_id,
                 audit_version=audit_version,
                 task_type=task_type,
                 source_sheet_no=src_no,
                 target_sheet_no=tgt_no,
-                priority=priority,
+                priority=resolved_priority,
                 status="pending",
                 trace_json=json.dumps(
                     {
@@ -171,6 +204,8 @@ def _build_tasks_from_master_plan(
     tasks_payload: List[Dict[str, Any]],
     context_by_key: Dict[str, SheetContext],
     planner_warnings: List[str],
+    skill_profiles: Dict[str, Dict[str, Any]],
+    feedback_profiles: Dict[str, Dict[str, Any]],
 ) -> Tuple[List[AuditTask], Dict[str, int]]:
     tasks: List[AuditTask] = []
     dedupe_keys: set[Tuple[str, str, str]] = set()
@@ -186,7 +221,7 @@ def _build_tasks_from_master_plan(
             continue
 
         src_no = str(item.get("source_sheet_no") or "").strip()
-        src_key = _norm_sheet_no(src_no)
+        src_key = normalize_sheet_no(src_no)
         src_ctx = context_by_key.get(src_key)
         if not src_ctx:
             continue
@@ -195,7 +230,7 @@ def _build_tasks_from_master_plan(
         tgt_key = ""
         if task_type in {"dimension", "material"}:
             target_sheet_no = str(item.get("target_sheet_no") or "").strip()
-            tgt_key = _norm_sheet_no(target_sheet_no)
+            tgt_key = normalize_sheet_no(target_sheet_no)
             if not target_sheet_no or not context_by_key.get(tgt_key):
                 continue
 
@@ -216,7 +251,12 @@ def _build_tasks_from_master_plan(
                 priority = 1 if is_plan_sheet else 3
             else:
                 priority = 2 if is_plan_sheet else 4
-        priority = max(1, min(5, priority))
+        priority = _apply_runtime_priority(
+            task_type=task_type,
+            priority=priority,
+            skill_profiles=skill_profiles,
+            feedback_profiles=feedback_profiles,
+        )
 
         trace_payload: Dict[str, Any] = {
             "planner": "master_llm_v1",
@@ -283,9 +323,20 @@ def build_audit_tasks(project_id: str, audit_version: int, db) -> Dict[str, Any]
 
     context_by_key: Dict[str, SheetContext] = {}
     for ctx in contexts:
-        key = _norm_sheet_no(ctx.sheet_no)
+        key = normalize_sheet_no(ctx.sheet_no)
         if key:
             context_by_key[key] = ctx
+
+    skill_profiles = {
+        "index": load_runtime_skill_profile(db, skill_type="index", stage_key="sheet_relationship_discovery"),
+        "dimension": load_runtime_skill_profile(db, skill_type="dimension", stage_key="dimension_pair_compare"),
+        "material": load_runtime_skill_profile(db, skill_type="material", stage_key="material_consistency_review"),
+    }
+    feedback_profiles = {
+        "index": load_feedback_runtime_profile(db, issue_type="index"),
+        "dimension": load_feedback_runtime_profile(db, issue_type="dimension"),
+        "material": load_feedback_runtime_profile(db, issue_type="material"),
+    }
 
     planner_name = "task_planner_v1"
     planner_reason = "rule_based"
@@ -300,17 +351,35 @@ def build_audit_tasks(project_id: str, audit_version: int, db) -> Dict[str, Any]
             llm_plan.get("tasks") or [],
             context_by_key,
             llm_plan.get("warnings") or [],
+            skill_profiles,
+            feedback_profiles,
         )
         planner_warnings = llm_plan.get("warnings") or []
         if not tasks:
             planner_reason = "master_llm_empty_fallback_rule"
-            tasks, summary = _build_tasks_rule_based(project_id, audit_version, contexts, edges, context_by_key)
+            tasks, summary = _build_tasks_rule_based(
+                project_id,
+                audit_version,
+                contexts,
+                edges,
+                context_by_key,
+                skill_profiles,
+                feedback_profiles,
+            )
             planner_name = "task_planner_v1"
         else:
             planner_reason = "master_llm"
     else:
         planner_reason = str(llm_plan.get("reason") or "master_llm_unavailable")
-        tasks, summary = _build_tasks_rule_based(project_id, audit_version, contexts, edges, context_by_key)
+        tasks, summary = _build_tasks_rule_based(
+            project_id,
+            audit_version,
+            contexts,
+            edges,
+            context_by_key,
+            skill_profiles,
+            feedback_profiles,
+        )
         planner_name = "task_planner_v1"
         logger.info(
             "task_planner fallback project=%s reason=%s",

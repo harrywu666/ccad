@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import * as api from '@/api';
 import type { Project, Category, CatalogItem, Drawing, JsonData, AuditResult, AuditStatus, ThreeLineMatch, ThreeLineItem, MatchFilter } from '@/types';
-import type { AuditHistoryItem } from '@/types/api';
+import type { AuditEvent, AuditHistoryItem } from '@/types/api';
 
 // Layout & UI Components
 import AppLayout from '@/components/layout/AppLayout';
@@ -32,7 +32,8 @@ import AuditProgressDialog, { AuditProgressPill } from './ProjectDetail/componen
 const STAGE_FLOW = [
   { match: ['校验三线匹配'], title: '准备检查' },
   { match: ['构建图纸上下文'], title: '提取图纸信息' },
-  { match: ['规划审核任务图'], title: '规划审核路径' },
+  { match: ['AI 分析图纸关系'], title: '分析跨图关系' },
+  { match: ['规划审核任务图'], title: '预规划审核任务' },
   { match: ['索引核对'], title: '索引断链核对' },
   { match: ['尺寸核对'], title: '尺寸比对核查' },
   { match: ['材料核对'], title: '材料表验证' },
@@ -55,6 +56,9 @@ export default function ProjectDetail() {
   const [auditStatus, setAuditStatus] = useState<AuditStatus | null>(null);
   const [auditResults, setAuditResults] = useState<AuditResult[]>([]);
   const [auditHistory, setAuditHistory] = useState<AuditHistoryItem[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditEventsError, setAuditEventsError] = useState('');
+  const [auditEventsLoading, setAuditEventsLoading] = useState(false);
   const [selectedAuditVersion, setSelectedAuditVersion] = useState<number | null>(null);
   const [threeLineMatch, setThreeLineMatch] = useState<ThreeLineMatch | null>(null);
 
@@ -102,6 +106,8 @@ export default function ProjectDetail() {
   const [error, setError] = useState('');
 
   const loadSeqRef = useRef(0);
+  const auditEventsSinceIdRef = useRef<number | null>(null);
+  const auditEventsVersionRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (id) loadData();
@@ -159,6 +165,11 @@ export default function ProjectDetail() {
       setIsAuditProgressDialogOpen(false);
       setIsAuditProgressMinimized(false);
       setIsAuditProgressDismissed(false);
+      setAuditEvents([]);
+      setAuditEventsError('');
+      setAuditEventsLoading(false);
+      auditEventsSinceIdRef.current = null;
+      auditEventsVersionRef.current = null;
       return;
     }
     if (isAuditProgressDismissed || isAuditProgressMinimized) return;
@@ -170,6 +181,63 @@ export default function ProjectDetail() {
       setAwaitingAuditStatusSync(false);
     }
   }, [isAuditRunning, auditRunStatus]);
+
+  useEffect(() => {
+    if (!id || !shouldShowAuditProgress) return;
+
+    const version = auditStatus?.audit_version ?? selectedAuditVersion ?? null;
+    if (version === null || version === undefined) return;
+
+    let stopped = false;
+    let timer: number | undefined;
+
+    const pollAuditEvents = async (initialLoad = false) => {
+      try {
+        if (initialLoad) {
+          setAuditEventsLoading(true);
+        }
+
+        const versionChanged = auditEventsVersionRef.current !== version;
+        const response = await api.getAuditEvents(id, {
+          version,
+          since_id: versionChanged ? undefined : (auditEventsSinceIdRef.current ?? undefined),
+          limit: versionChanged ? 50 : 30,
+        });
+        if (stopped) return;
+
+        auditEventsVersionRef.current = version;
+        auditEventsSinceIdRef.current = response.next_since_id ?? auditEventsSinceIdRef.current;
+        setAuditEventsError('');
+        setAuditEvents((current) => {
+          const base = versionChanged ? [] : current;
+          return [...base, ...response.items].slice(-50);
+        });
+      } catch (error) {
+        if (stopped) return;
+        console.error('获取审图进度日志失败', error);
+        setAuditEventsError('暂时无法更新进度日志');
+      } finally {
+        if (!stopped && initialLoad) {
+          setAuditEventsLoading(false);
+        }
+      }
+    };
+
+    if (auditEventsVersionRef.current !== version) {
+      setAuditEvents([]);
+      auditEventsSinceIdRef.current = null;
+    }
+
+    void pollAuditEvents(true);
+    timer = window.setInterval(() => {
+      void pollAuditEvents(false);
+    }, 2000);
+
+    return () => {
+      stopped = true;
+      if (timer) window.clearInterval(timer);
+    };
+  }, [id, shouldShowAuditProgress, auditStatus?.audit_version, selectedAuditVersion]);
 
   useEffect(() => {
     if (!previewDrawing) return;
@@ -285,31 +353,48 @@ export default function ProjectDetail() {
           if (typeof progress.progress === 'number') setPdfUploadProgress(progress.progress);
           if (progress.message) setPdfUploadProgressText(progress.message);
         } catch {
-          // Ignore temporary polling errors to avoid breaking upload flow
+          // Ignore temporary polling errors
         }
       }, 500);
-      await api.uploadDrawings(id, e.target.files[0]);
+
+      const files = Array.from(e.target.files);
+      const isPngBatch = files.every(f => f.type === 'image/png' || f.name.toLowerCase().endsWith('.png'));
+
+      if (isPngBatch && files.length >= 1) {
+        await api.uploadDrawingsPng(id, files);
+      } else {
+        await api.uploadDrawings(id, files[0]);
+      }
+
       try {
         const finalProgress = await api.getDrawingsUploadProgress(id);
         if (typeof finalProgress.progress === 'number') setPdfUploadProgress(finalProgress.progress);
         if (finalProgress.message) setPdfUploadProgressText(finalProgress.message);
       } catch {
-        setPdfUploadProgress(100);
+        // ignore
       }
+      setPdfUploadProgress(100);
       await loadData();
     } catch (err: any) {
       setError(err?.response?.data?.detail || '上传图纸失败');
     } finally {
-      if (progressPoller) window.clearInterval(progressPoller);
+      if (progressPoller) clearInterval(progressPoller);
       setUploadingPdf(false);
-      setPdfUploadProgress(0);
-      setPdfUploadProgressText('上传进度');
       e.target.value = '';
     }
   };
 
   const handleUploadDwg = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.length || !id) return;
+    // 支持文件夹模式：从选中的所有文件中过滤出 .dwg 文件（含子文件夹）
+    const dwgFiles = Array.from(e.target.files).filter(f =>
+      f.name.toLowerCase().endsWith('.dwg')
+    );
+    if (!dwgFiles.length) {
+      setError('未找到 DWG 文件，请确认所选文件夹中包含 .dwg 文件');
+      e.target.value = '';
+      return;
+    }
     let progressPoller: number | undefined;
     try {
       setUploadingDwg(true);
@@ -324,7 +409,7 @@ export default function ProjectDetail() {
           // Ignore temporary polling errors to avoid breaking upload flow
         }
       }, 500);
-      await api.uploadDwg(id, Array.from(e.target.files));
+      await api.uploadDwg(id, dwgFiles);
       try {
         const finalProgress = await api.getDwgUploadProgress(id);
         if (typeof finalProgress.progress === 'number') setDwgUploadProgress(finalProgress.progress);
@@ -487,6 +572,12 @@ export default function ProjectDetail() {
     }
   };
 
+  const handleManualJsonCatalogBind = async (payload: { jsonId: string; catalogId: string }) => {
+    if (!id) return;
+    await api.bindJsonToCatalog(id, payload.jsonId, payload.catalogId);
+    await loadData();
+  };
+
   const clampPreviewScale = (value: number) => Math.min(5, Math.max(0.3, value));
 
   const zoomPreview = (factor: number, originX = 0, originY = 0) => {
@@ -611,14 +702,27 @@ export default function ProjectDetail() {
     const step = status?.current_step || '';
     const normalizedProgress = Math.max(0, Math.min(100, status?.progress || 0));
 
-    const planningDone = normalizedProgress >= 15 || step.includes('构建图纸上下文') || step.includes('规划审核任务图') || step.includes('索引核对') || step.includes('尺寸核对') || step.includes('材料核对') || step.includes('审核完成');
+    const planningDone =
+      normalizedProgress >= 18 ||
+      step.includes('构建图纸上下文') ||
+      step.includes('AI 分析图纸关系') ||
+      step.includes('规划审核任务图') ||
+      step.includes('索引核对') ||
+      step.includes('尺寸核对') ||
+      step.includes('材料核对') ||
+      step.includes('审核完成');
     const checkingDone = normalizedProgress >= 85 || step.includes('审核完成');
-    const inChecking = !checkingDone && (normalizedProgress >= 15 || step.includes('索引核对') || step.includes('尺寸核对') || step.includes('材料核对'));
+    const inChecking =
+      !checkingDone &&
+      (normalizedProgress >= 18 ||
+        step.includes('索引核对') ||
+        step.includes('尺寸核对') ||
+        step.includes('材料核对'));
 
     return [
       {
         title: '准备数据',
-        description: '核对目录、图纸与 DWG 三线关系',
+        description: '核对三线关系，分析跨图引用，并预规划审核任务',
         state: planningDone ? 'complete' : 'current',
       },
       {
@@ -773,7 +877,7 @@ export default function ProjectDetail() {
                   uploadProgressText={pdfUploadProgressText}
                   buttonClassName="bg-black text-white hover:bg-black/90"
                   onUpload={handleUploadPdf}
-                  accept="image/png,.pdf,.zip"
+                  accept=".pdf,application/pdf,image/png,.png"
                   multiple
                 />
                 <UploadCard
@@ -787,8 +891,7 @@ export default function ProjectDetail() {
                   uploadProgressText={dwgUploadProgressText}
                   buttonClassName="bg-black text-white hover:bg-black/90"
                   onUpload={handleUploadDwg}
-                  accept=".dwg"
-                  multiple
+                  folderMode
                 />
                 <div className="bg-secondary/30 border border-border p-4 flex flex-col gap-3 rounded-none w-full">
                   <div className="text-center">
@@ -821,11 +924,15 @@ export default function ProjectDetail() {
                   onPreviewDrawing={handlePreviewDrawing}
                   hasUploadedDrawings={drawings.length > 0}
                   unmatchedDrawings={unmatchedDrawings}
+                  unmatchedJsons={threeLineMatch?.unmatched_jsons || []}
                   onManualCatalogMatch={handleManualCatalogMatch}
+                  onManualJsonCatalogBind={handleManualJsonCatalogBind}
                   onDeleteDrawing={handleDeleteDrawing}
                   onDeleteJson={handleDeleteJson}
                   onBatchDeleteDrawings={handleBatchDeleteDrawings}
                   onBatchDeleteJson={handleBatchDeleteJson}
+                  projectId={id}
+                  cacheVersion={project?.cache_version}
                   stats={matchStats}
                 />
               </div>
@@ -929,6 +1036,9 @@ export default function ProjectDetail() {
           }
           etaText={getDialogEtaText(auditStatus)}
           phases={[...getDialogPhases(auditStatus)]}
+          events={auditEvents}
+          eventError={auditEventsError}
+          eventLoading={auditEventsLoading}
           onMinimize={() => {
             setIsAuditProgressDialogOpen(false);
             setIsAuditProgressMinimized(true);

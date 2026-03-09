@@ -33,7 +33,7 @@ def _edge(source_sheet_no: str, target_sheet_no: str):
     )
 
 
-def test_plan_with_master_llm_times_out_and_returns_fallback_reason(monkeypatch):
+def test_plan_with_master_llm_ignores_legacy_business_timeout_env(monkeypatch):
     monkeypatch.setenv("AUDIT_MASTER_PLANNER_ENABLED", "1")
     monkeypatch.setenv("AUDIT_MASTER_PLANNER_TIMEOUT_SECONDS", "0.01")
     monkeypatch.setattr(
@@ -44,7 +44,13 @@ def test_plan_with_master_llm_times_out_and_returns_fallback_reason(monkeypatch)
 
     async def _slow_call_kimi(**kwargs):  # noqa: ANN001
         await asyncio.sleep(0.05)
-        return {"tasks": []}
+        return {
+            "tasks": [
+                {"task_type": "index", "source_sheet_no": "A1.01"},
+                {"task_type": "dimension", "source_sheet_no": "A1.01", "target_sheet_no": "A4.01"},
+                {"task_type": "material", "source_sheet_no": "A1.01", "target_sheet_no": "A4.01"},
+            ]
+        }
 
     monkeypatch.setattr(master_planner_service, "call_kimi", _slow_call_kimi)
 
@@ -54,5 +60,52 @@ def test_plan_with_master_llm_times_out_and_returns_fallback_reason(monkeypatch)
         [_edge("A1.01", "A4.01")],
     )
 
-    assert result["ok"] is False
-    assert result["reason"] == "llm_timeout"
+    assert result["ok"] is True
+
+
+def test_plan_with_master_llm_sends_only_relevant_contexts(monkeypatch):
+    monkeypatch.setenv("AUDIT_MASTER_PLANNER_ENABLED", "1")
+    captured_payload = {}
+
+    def _capture_prompts(payload):
+        captured_payload.update(payload)
+        return {"system_prompt": "system", "user_prompt": "user"}
+
+    async def _fake_call_kimi(**kwargs):  # noqa: ANN001
+        return {
+            "tasks": [
+                {
+                    "task_type": "index",
+                    "source_sheet_no": "A1.01",
+                    "priority": 1,
+                },
+                {
+                    "task_type": "dimension",
+                    "source_sheet_no": "A1.01",
+                    "target_sheet_no": "A4.01",
+                    "priority": 1,
+                },
+                {
+                    "task_type": "material",
+                    "source_sheet_no": "A1.01",
+                    "target_sheet_no": "A4.01",
+                    "priority": 2,
+                },
+            ]
+        }
+
+    monkeypatch.setattr(master_planner_service, "_resolve_master_planner_prompts", _capture_prompts)
+    monkeypatch.setattr(master_planner_service, "call_kimi", _fake_call_kimi)
+
+    result = master_planner_service.plan_with_master_llm(
+        "proj-relevant",
+        [
+            _ctx("A1.01", indexes=1),
+            _ctx("A4.01", indexes=0, sheet_name="节点详图"),
+            _ctx("M9.99", indexes=0, sheet_name="无关说明"),
+        ],
+        [_edge("A1.01", "A4.01")],
+    )
+
+    assert result["ok"] is True
+    assert [item["sheet_no"] for item in captured_payload["contexts"]] == ["A1.01", "A4.01"]

@@ -38,6 +38,8 @@ type SelectedPreview = {
   drawingB: PreviewDrawing | null;
   missingReason: string | null;
   description: string;
+  extraSourceAnchors?: any[];
+  extraTargetAnchors?: any[];
 };
 
 function getTypeLabel(type: string) {
@@ -143,6 +145,9 @@ function FeedbackPopover({
       </PopoverTrigger>
         <PopoverContent side="right" align="center" className="w-64 p-3 space-y-2">
         <p className="text-xs font-medium text-foreground">反馈为误报</p>
+        <p className="text-[11px] leading-5 text-muted-foreground">
+          确认后，这条反馈会进入后续审图纠偏样本，帮助系统减少类似误报。
+        </p>
         <textarea
           ref={inputRef}
           value={note}
@@ -270,8 +275,13 @@ export default function ProjectStepAudit({
     setActionError('');
 
     try {
-      const previewId = result.issue_ids && result.issue_ids.length > 0 ? result.issue_ids[0] : result.id;
-      const preview = await api.getAuditResultPreview(projectId, previewId);
+      let preview: Awaited<ReturnType<typeof api.getAuditResultPreview>> & { extra_source_anchors?: any[]; extra_target_anchors?: any[] };
+      if (result.issue_ids && result.issue_ids.length > 1) {
+        preview = await api.batchAuditResultPreview(projectId, result.issue_ids);
+      } else {
+        const previewId = result.issue_ids && result.issue_ids.length > 0 ? result.issue_ids[0] : result.id;
+        preview = await api.getAuditResultPreview(projectId, previewId);
+      }
       if (previewRequestRef.current !== requestId) return;
 
       setPreviewView('a');
@@ -280,6 +290,8 @@ export default function ProjectStepAudit({
         drawingA: resolvePreviewDrawing(preview.source),
         drawingB: resolvePreviewDrawing(preview.target),
         missingReason: preview.missing_reason,
+        extraSourceAnchors: preview.extra_source_anchors || [],
+        extraTargetAnchors: preview.extra_target_anchors || [],
         description:
           preview.missing_reason === 'missing_target_drawing'
             ? '目标图不存在，已自动定位到源图中的出错索引。'
@@ -396,11 +408,24 @@ export default function ProjectStepAudit({
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-[24px] font-semibold flex items-center gap-2">
-              <CheckCircle2 className="h-6 w-6 text-success" />
-              审核报告就绪
+              {auditStatus?.scope_mode === 'partial' ? (
+                <AlertCircle className="h-6 w-6 text-warning" />
+              ) : (
+                <CheckCircle2 className="h-6 w-6 text-success" />
+              )}
+              {auditStatus?.scope_mode === 'partial' ? '审核报告就绪（部分覆盖）' : '审核报告就绪'}
             </h2>
             <p className="text-[14px] text-muted-foreground mt-1 text-balance">
-              全部深度核查完成。左边可以逐条处理问题，右边可以直接看对应图纸。
+              {auditStatus?.scope_mode === 'partial'
+                ? (() => {
+                    try {
+                      const scope = JSON.parse(auditStatus?.scope_summary || '{}');
+                      return `已对 ${scope.ready ?? '?'} / ${scope.total ?? '?'} 张就绪图纸完成深度核查，缺项图纸已跳过。左边可以逐条处理问题，右边可以直接看对应图纸。`;
+                    } catch {
+                      return '部分图纸因缺项跳过，仅对就绪图纸完成深度核查。左边可以逐条处理问题，右边可以直接看对应图纸。';
+                    }
+                  })()
+                : '全部深度核查完成。左边可以逐条处理问题，右边可以直接看对应图纸。'}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -649,6 +674,8 @@ export default function ProjectStepAudit({
               missingReason={selectedPreview.missingReason}
               drawingA={selectedPreview.drawingA}
               drawingB={selectedPreview.drawingB}
+              extraSourceAnchors={selectedPreview.extraSourceAnchors}
+              extraTargetAnchors={selectedPreview.extraTargetAnchors}
               activeView={previewView}
               onViewChange={setPreviewView}
               onClose={() => setSelectedPreview(null)}

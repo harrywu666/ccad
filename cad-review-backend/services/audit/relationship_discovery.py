@@ -1,0 +1,726 @@
+"""AI 驱动的图纸关系发现服务。
+
+通过 AI 视觉理解图纸内容，自动发现跨图引用关系（索引、详图引用等），
+不再完全依赖 DXF JSON 提取的 indexes[].target_sheet 数据。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import time
+from typing import Any, Dict, List, Tuple
+
+from domain.sheet_normalization import normalize_sheet_no
+from models import Catalog, Drawing, JsonData, SheetEdge
+from services.ai_prompt_service import (
+    resolve_stage_prompts,
+    resolve_stage_system_prompt_with_skills,
+)
+from services.audit.image_pipeline import pdf_page_to_5images
+from services.coordinate_service import enrich_json_with_coordinates
+from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidenceRequest
+from services.audit_runtime.evidence_planner import plan_evidence_requests
+from services.audit_runtime.evidence_service import EvidenceService
+from services.audit_runtime.state_transitions import append_run_event
+from services.feedback_runtime_service import load_feedback_runtime_profile
+from services.skill_pack_service import load_runtime_skill_profile
+
+logger = logging.getLogger(__name__)
+
+_DEFAULT_GROUP_SIZE = 4
+
+
+def get_evidence_service():
+    return EvidenceService(renderer=pdf_page_to_5images)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _relationship_render_options() -> Dict[str, float | int]:
+    return {
+        "full_dpi": _env_float("AUDIT_RELATIONSHIP_DISCOVERY_FULL_DPI", 144.0),
+        "detail_dpi": _env_float("AUDIT_RELATIONSHIP_DISCOVERY_DETAIL_DPI", 216.0),
+        "max_width": _env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_WIDTH", 2800),
+    }
+
+
+def _relationship_confidence_floor(
+    *,
+    skill_profile: Dict[str, Any] | None,
+    feedback_profile: Dict[str, Any] | None,
+) -> float:
+    floor = 0.0
+    skill_policy = ((skill_profile or {}).get("judgement_policy") or {}).get("relationship")
+    if isinstance(skill_policy, dict):
+        raw = skill_policy.get("confidence_floor")
+        if isinstance(raw, (int, float)):
+            floor = max(floor, float(raw))
+    feedback_floor = feedback_profile.get("confidence_floor") if isinstance(feedback_profile, dict) else None
+    if isinstance(feedback_floor, (int, float)):
+        floor = max(floor, float(feedback_floor))
+    return floor
+
+
+def apply_relationship_runtime_policy(
+    raw_relationships: List[Dict[str, Any]],
+    *,
+    skill_profile: Dict[str, Any] | None = None,
+    feedback_profile: Dict[str, Any] | None = None,
+) -> List[Dict[str, Any]]:
+    confidence_floor = _relationship_confidence_floor(
+        skill_profile=skill_profile,
+        feedback_profile=feedback_profile,
+    )
+    if confidence_floor <= 0:
+        return list(raw_relationships)
+
+    filtered: List[Dict[str, Any]] = []
+    for rel in raw_relationships:
+        try:
+            confidence = float(rel.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if confidence >= confidence_floor:
+            filtered.append(rel)
+    return filtered
+
+
+def _build_relationship_task_prompt(source_sheet: Dict[str, Any], target_sheet: Dict[str, Any]) -> str:
+    return (
+        f"请判断图纸 {source_sheet['sheet_no']} {source_sheet['sheet_name']} 与 "
+        f"{target_sheet['sheet_no']} {target_sheet['sheet_name']} 是否存在跨图引用关系。\n"
+        "你将收到两张图：第1张为源图全图，第2张为目标图全图。\n"
+        "重点检查源图中是否明确指向目标图的索引、详图、剖面或放大标记。\n"
+        "只返回 JSON 数组，不要解释。\n"
+        '[{"source":"图号","target":"目标图号","relation":"index_ref|detail_ref|section_ref","confidence":0.0,"visual_evidence":"","global_pct":{"x":0,"y":0}}]'
+    )
+
+
+def _build_candidate_relationship_tasks(
+    sheets: List[Dict[str, Any]],
+    valid_sheet_nos: set[str],
+) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    sheet_by_key = {
+        normalize_sheet_no(sheet["sheet_no"]): sheet
+        for sheet in sheets
+        if normalize_sheet_no(sheet["sheet_no"])
+    }
+    tasks: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+    seen: set[Tuple[str, str]] = set()
+
+    for sheet in sheets:
+        src_key = normalize_sheet_no(sheet["sheet_no"])
+        if not src_key:
+            continue
+        for idx in sheet.get("indexes_json") or []:
+            target_sheet = str(idx.get("target_sheet") or "").strip()
+            tgt_key = normalize_sheet_no(target_sheet)
+            if not tgt_key or tgt_key not in valid_sheet_nos:
+                continue
+            target = sheet_by_key.get(tgt_key)
+            if not target:
+                continue
+            pair = (src_key, tgt_key)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            tasks.append((sheet, target))
+    return tasks
+
+
+def _load_ready_sheets(project_id: str, db) -> List[Dict[str, Any]]:
+    """Load all ready sheets with their catalog info, JSON data, and drawing assets."""
+    catalog_items = (
+        db.query(Catalog)
+        .filter(Catalog.project_id == project_id, Catalog.status == "locked")
+        .order_by(Catalog.sort_order.asc())
+        .all()
+    )
+
+    sheets: List[Dict[str, Any]] = []
+    for cat in catalog_items:
+        json_data = (
+            db.query(JsonData)
+            .filter(
+                JsonData.project_id == project_id,
+                JsonData.catalog_id == cat.id,
+                JsonData.is_latest == 1,
+            )
+            .first()
+        )
+        drawing = (
+            db.query(Drawing)
+            .filter(
+                Drawing.project_id == project_id,
+                Drawing.catalog_id == cat.id,
+                Drawing.replaced_at == None,
+            )
+            .first()
+        )
+        if not json_data or not drawing:
+            continue
+
+        sheet_no = cat.sheet_no or json_data.sheet_no or ""
+        if not sheet_no.strip():
+            continue
+
+        # Load JSON payload for index data (as reference)
+        indexes_data: List[Dict[str, Any]] = []
+        if json_data.json_path:
+            try:
+                with open(json_data.json_path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                enriched = enrich_json_with_coordinates(payload)
+                indexes_data = enriched.get("indexes", []) or []
+            except Exception:
+                pass
+
+        # Find PDF path and page index for image rendering
+        pdf_path = getattr(drawing, "pdf_path", None) or ""
+        page_index = getattr(drawing, "page_index", None)
+        if not pdf_path:
+            # Try to find PDF in the PNG directory
+            png_path = getattr(drawing, "png_path", None) or ""
+            if png_path:
+                from pathlib import Path
+                folder = Path(png_path).expanduser().resolve().parent
+                pdfs = sorted(folder.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if pdfs:
+                    pdf_path = str(pdfs[0])
+                    if page_index is None:
+                        page_index = getattr(drawing, "page_index", 0) or 0
+
+        sheets.append({
+            "sheet_no": sheet_no.strip(),
+            "sheet_name": (cat.sheet_name or "").strip(),
+            "catalog_id": cat.id,
+            "pdf_path": pdf_path,
+            "page_index": page_index if page_index is not None else 0,
+            "indexes_json": indexes_data,
+        })
+
+    return sheets
+
+
+def _classify_sheet_type(sheet_no: str, sheet_name: str) -> str:
+    """Classify sheet into a group for batched AI calls."""
+    combined = f"{sheet_no} {sheet_name}".upper()
+    if any(kw in combined for kw in ("平面", "PLAN", "PL-P", "FURNITURE", "LAYOUT", "FLOOR", "CEILING", "天花", "地坪", "布置")):
+        return "plan"
+    if any(kw in combined for kw in ("立面", "ELEV", "EL-", "EL.", "SECTION")):
+        return "elevation"
+    if any(kw in combined for kw in ("详图", "DETAIL", "FU.", "FU-", "CABINET", "BOOTH", "节点")):
+        return "detail"
+    if any(kw in combined for kw in ("材料", "MATERIAL", "说明", "NOTE", "GENERAL", "索引", "INDEX", "目录", "COVER")):
+        return "reference"
+    return "other"
+
+
+def _group_sheets(sheets: List[Dict[str, Any]], group_size: int | None = None) -> List[List[Dict[str, Any]]]:
+    """Group sheets by type, then split into batches of configured size."""
+    resolved_group_size = group_size or _env_int(
+        "AUDIT_RELATIONSHIP_DISCOVERY_GROUP_SIZE",
+        _DEFAULT_GROUP_SIZE,
+    )
+    by_type: Dict[str, List[Dict[str, Any]]] = {}
+    for sheet in sheets:
+        stype = _classify_sheet_type(sheet["sheet_no"], sheet["sheet_name"])
+        by_type.setdefault(stype, []).append(sheet)
+
+    groups: List[List[Dict[str, Any]]] = []
+    for stype in ["plan", "elevation", "detail", "reference", "other"]:
+        type_sheets = by_type.get(stype, [])
+        for i in range(0, len(type_sheets), resolved_group_size):
+            groups.append(type_sheets[i : i + resolved_group_size])
+    return groups
+
+
+def _build_discovery_prompt(
+    group_sheets: List[Dict[str, Any]],
+    all_catalog_entries: List[Dict[str, str]],
+) -> str:
+    """Build the user prompt for relationship discovery."""
+    catalog_text = json.dumps(all_catalog_entries, ensure_ascii=False)
+
+    sheet_descriptions: List[str] = []
+    for i, sheet in enumerate(group_sheets):
+        idx_summary = ""
+        if sheet["indexes_json"]:
+            idx_refs = []
+            for idx in sheet["indexes_json"][:20]:
+                no = idx.get("index_no", "")
+                target = idx.get("target_sheet", "")
+                pct = idx.get("global_pct", {})
+                pct_str = f"x:{pct.get('x',0):.0f}%,y:{pct.get('y',0):.0f}%" if pct else "?"
+                if no or target:
+                    idx_refs.append(f"索引{no}→{target or '?'}(位置:{pct_str})")
+            if idx_refs:
+                idx_summary = f"\n  JSON提取的索引参考（可能不完整）：{'; '.join(idx_refs)}"
+
+        sheet_descriptions.append(
+            f"图{i + 1}: {sheet['sheet_no']} {sheet['sheet_name']}{idx_summary}"
+        )
+
+    return (
+        "请分析以下图纸，找出所有跨图引用关系。\n\n"
+        f"项目完整目录（{len(all_catalog_entries)}张图）：\n{catalog_text}\n\n"
+        f"本批图纸（{len(group_sheets)}张，每张对应5张图片：全图+4象限）：\n"
+        + "\n".join(sheet_descriptions)
+        + "\n\n"
+        "图片排列顺序：按图纸顺序，每张图纸依次为[全图总览, 左上象限(高清+刻度), 右上象限, 左下象限, 右下象限]。\n"
+        "象限图边缘标有百分比刻度（0%~100%），与全图坐标系一致，可直接读取位置。\n\n"
+        "请仔细查看每张图纸中的：\n"
+        "1. 索引符号（圆圈，上方编号、下方目标图号；下方为短横线表示本图索引）\n"
+        "2. 详图标签（圆圈内编号+图号）\n"
+        "3. 剖面/断面符号\n"
+        "4. 放大区域标记\n\n"
+        "输出要求：\n"
+        "- 只输出跨图引用（source 和 target 不同的图）\n"
+        "- 每个引用必须包含百分比坐标 global_pct（x=0最左, x=100最右, y=0最上, y=100最下）\n"
+        "- 本图索引（下方短横线）不输出\n"
+        "- target 图号必须来自项目目录\n\n"
+        "只返回JSON数组，不要解释。格式：\n"
+        '[{"source":"图号","target":"目标图号","relation":"index_ref|detail_ref|section_ref",'
+        '"global_pct":{"x":0,"y":0},"index_label":"索引编号","confidence":0.0,'
+        '"visual_evidence":"描述你看到的符号"}]'
+    )
+
+
+async def _discover_group(
+    group_sheets: List[Dict[str, Any]],
+    all_catalog_entries: List[Dict[str, str]],
+    call_kimi,
+) -> List[Dict[str, Any]]:
+    """Run AI discovery for one group of sheets."""
+    # Render images for all sheets in this group
+    all_images: List[bytes] = []
+    evidence_service = EvidenceService(renderer=pdf_page_to_5images)
+    render_options = _relationship_render_options()
+    for sheet in group_sheets:
+        if not sheet["pdf_path"]:
+            logger.warning("关系发现跳过无PDF图纸: %s", sheet["sheet_no"])
+            continue
+        try:
+            pack = await evidence_service.get_evidence_pack(
+                EvidenceRequest(
+                    pack_type=EvidencePackType.DEEP_PACK,
+                    source_pdf_path=sheet["pdf_path"],
+                    source_page_index=sheet["page_index"],
+                    render_options=render_options,
+                )
+            )
+            all_images.extend([
+                pack.images["source_full"],
+                pack.images["source_top_left"],
+                pack.images["source_top_right"],
+                pack.images["source_bottom_left"],
+                pack.images["source_bottom_right"],
+            ])
+        except Exception as exc:
+            logger.warning("关系发现渲染图片失败: %s (%s)", sheet["sheet_no"], exc)
+
+    if not all_images:
+        return []
+
+    prompts = resolve_stage_prompts(
+        "sheet_relationship_discovery",
+        {
+            "discovery_prompt": _build_discovery_prompt(
+                group_sheets,
+                all_catalog_entries,
+            )
+        },
+    )
+    system_prompt = resolve_stage_system_prompt_with_skills(
+        "sheet_relationship_discovery",
+        "index",
+    )
+    max_tokens = _env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192)
+
+    try:
+        result = await call_kimi(
+            system_prompt=system_prompt,
+            user_prompt=prompts["user_prompt"],
+            images=all_images,
+            temperature=0.0,
+            max_tokens=max_tokens,
+        )
+    except Exception as exc:
+        logger.warning("关系发现 AI 调用失败: %s", exc)
+        return []
+
+    if not isinstance(result, list):
+        logger.warning("关系发现返回格式异常: type=%s", type(result).__name__)
+        return []
+
+    return [item for item in result if isinstance(item, dict)]
+
+
+async def _discover_relationship_task_v2(
+    *,
+    source_sheet: Dict[str, Any],
+    target_sheet: Dict[str, Any],
+    call_kimi,
+    evidence_service,
+    skill_profile: Dict[str, Any],
+    feedback_profile: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    plans = plan_evidence_requests(
+        task_type="relationship",
+        source_sheet_no=source_sheet["sheet_no"],
+        target_sheet_no=target_sheet["sheet_no"],
+        skill_profile=skill_profile,
+        feedback_profile=feedback_profile,
+    )
+    if not plans:
+        return []
+
+    plan = plans[0]
+    pack = await evidence_service.get_evidence_pack(
+        EvidenceRequest(
+            pack_type=plan.pack_type,
+            source_pdf_path=source_sheet["pdf_path"],
+            source_page_index=source_sheet["page_index"],
+            target_pdf_path=target_sheet["pdf_path"],
+            target_page_index=target_sheet["page_index"],
+            render_options=_relationship_render_options(),
+        )
+    )
+    result = await call_kimi(
+        system_prompt=resolve_stage_system_prompt_with_skills(
+            "sheet_relationship_discovery",
+            "index",
+        ),
+        user_prompt=_build_relationship_task_prompt(source_sheet, target_sheet),
+        images=list(pack.images.values()),
+        temperature=0.0,
+        max_tokens=_env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192),
+    )
+    if not isinstance(result, list):
+        return []
+    return apply_relationship_runtime_policy(
+        [item for item in result if isinstance(item, dict)],
+        skill_profile=skill_profile,
+        feedback_profile=feedback_profile,
+    )
+
+
+def _validate_and_normalize(
+    raw_relationships: List[Dict[str, Any]],
+    valid_sheet_nos: set[str],
+) -> List[Dict[str, Any]]:
+    """Validate AI-discovered relationships against known sheet numbers."""
+    validated: List[Dict[str, Any]] = []
+    seen: set[Tuple[str, str]] = set()
+
+    for rel in raw_relationships:
+        source = str(rel.get("source", "")).strip()
+        target = str(rel.get("target", "")).strip()
+        if not source or not target:
+            continue
+
+        src_key = normalize_sheet_no(source)
+        tgt_key = normalize_sheet_no(target)
+        if not src_key or not tgt_key or src_key == tgt_key:
+            continue
+
+        # target must exist in catalog
+        if tgt_key not in valid_sheet_nos:
+            continue
+
+        pair_key = (src_key, tgt_key)
+        if pair_key in seen:
+            continue
+        seen.add(pair_key)
+
+        raw_pct = rel.get("global_pct") if isinstance(rel.get("global_pct"), dict) else {}
+        validated.append({
+            "source": source,
+            "target": target,
+            "source_key": src_key,
+            "target_key": tgt_key,
+            "relation": str(rel.get("relation", "ai_visual")).strip(),
+            "global_pct": {"x": float(raw_pct.get("x", 0)), "y": float(raw_pct.get("y", 0))} if raw_pct else None,
+            "index_label": str(rel.get("index_label", "")).strip(),
+            "confidence": float(rel.get("confidence", 0.5)),
+            "visual_evidence": str(rel.get("visual_evidence", "")).strip(),
+        })
+
+    return validated
+
+
+async def discover_relationships_async(
+    project_id: str,
+    db,
+    call_kimi,
+    *,
+    audit_version: int | None = None,
+    concurrency: int | None = None,
+) -> List[Dict[str, Any]]:
+    """Main entry: AI-driven relationship discovery across all sheets.
+
+    Returns validated list of cross-sheet relationships with coordinates.
+    """
+    sheets = _load_ready_sheets(project_id, db)
+    if not sheets:
+        logger.info("关系发现: 无就绪图纸, project=%s", project_id)
+        return []
+
+    # Build catalog reference for AI
+    all_catalog_entries = [
+        {"图号": s["sheet_no"], "图名": s["sheet_name"]}
+        for s in sheets
+    ]
+    valid_sheet_nos = {normalize_sheet_no(s["sheet_no"]) for s in sheets if normalize_sheet_no(s["sheet_no"])}
+
+    # Group and batch
+    groups = _group_sheets(sheets)
+    resolved_concurrency = concurrency or _env_int(
+        "AUDIT_RELATIONSHIP_DISCOVERY_CONCURRENCY",
+        4,
+    )
+    logger.info(
+        "关系发现开始: project=%s sheets=%s groups=%s concurrency=%s render=%s",
+        project_id, len(sheets), len(groups), resolved_concurrency, _relationship_render_options(),
+    )
+    if audit_version is not None:
+        append_run_event(
+            project_id,
+            audit_version,
+            level="info",
+            step_key="relationship_discovery",
+            message=f"开始分析跨图关系，共 {len(sheets)} 张图纸",
+            meta={"sheet_count": len(sheets), "group_count": len(groups)},
+        )
+
+    # Run all groups with bounded concurrency
+    semaphore = asyncio.Semaphore(resolved_concurrency)
+    heartbeat_seconds = _env_float("AUDIT_RELATIONSHIP_DISCOVERY_HEARTBEAT_SECONDS", 25.0)
+
+    async def _heartbeat(group_index: int, group_count: int, stop_signal: asyncio.Event) -> None:
+        if audit_version is None:
+            return
+        while not stop_signal.is_set():
+            try:
+                await asyncio.wait_for(stop_signal.wait(), timeout=heartbeat_seconds)
+                return
+            except asyncio.TimeoutError:
+                append_run_event(
+                    project_id,
+                    audit_version,
+                    level="warning",
+                    step_key="relationship_discovery",
+                    message=f"第 {group_index} 组图纸分析时间较长，系统仍在继续",
+                    meta={"group_index": group_index, "group_count": group_count},
+                )
+
+    async def _run_group(group_index: int, group: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        async with semaphore:
+            if audit_version is not None:
+                append_run_event(
+                    project_id,
+                    audit_version,
+                    level="info",
+                    step_key="relationship_discovery",
+                    message=f"正在处理第 {group_index} 组图纸，共 {len(groups)} 组",
+                    meta={"group_index": group_index, "group_count": len(groups)},
+                )
+
+            stop_signal = asyncio.Event()
+            heartbeat_task = asyncio.create_task(_heartbeat(group_index, len(groups), stop_signal))
+            started_at = time.monotonic()
+            try:
+                result = await _discover_group(group, all_catalog_entries, call_kimi)
+            except Exception:
+                if audit_version is not None:
+                    append_run_event(
+                        project_id,
+                        audit_version,
+                        level="warning",
+                        step_key="relationship_discovery",
+                        message=f"第 {group_index} 组图纸暂时没有得到可用结果，系统已继续后续分析",
+                        meta={"group_index": group_index, "group_count": len(groups)},
+                    )
+                raise
+            finally:
+                stop_signal.set()
+                await heartbeat_task
+
+            if audit_version is not None:
+                elapsed_seconds = round(time.monotonic() - started_at, 1)
+                relation_count = len(result)
+                message = (
+                    f"第 {group_index} 组图纸关系分析完成，发现 {relation_count} 处关联"
+                    if relation_count > 0
+                    else f"第 {group_index} 组图纸关系分析完成，暂未发现可继续审核的关联"
+                )
+                append_run_event(
+                    project_id,
+                    audit_version,
+                    level="success",
+                    step_key="relationship_discovery",
+                    message=message,
+                    meta={
+                        "group_index": group_index,
+                        "group_count": len(groups),
+                        "relation_count": relation_count,
+                        "elapsed_seconds": elapsed_seconds,
+                    },
+                )
+            return result
+
+    group_results = await asyncio.gather(
+        *[_run_group(index + 1, group) for index, group in enumerate(groups)],
+        return_exceptions=True,
+    )
+
+    all_raw: List[Dict[str, Any]] = []
+    for i, result in enumerate(group_results):
+        if isinstance(result, Exception):
+            logger.warning("关系发现 group %s 失败: %s", i, result)
+            continue
+        all_raw.extend(result)
+
+    validated = _validate_and_normalize(all_raw, valid_sheet_nos)
+    logger.info(
+        "关系发现完成: project=%s raw=%s validated=%s",
+        project_id, len(all_raw), len(validated),
+    )
+    if audit_version is not None:
+        append_run_event(
+            project_id,
+            audit_version,
+            level="success",
+            step_key="relationship_discovery",
+            message=f"跨图关系分析完成，已整理 {len(validated)} 处跨图关联",
+            meta={"validated": len(validated), "raw": len(all_raw)},
+        )
+    return validated
+
+
+async def discover_relationships_v2_async(
+    project_id: str,
+    db,
+    call_kimi,
+    *,
+    audit_version: int | None = None,
+) -> List[Dict[str, Any]]:
+    sheets = _load_ready_sheets(project_id, db)
+    if not sheets:
+        return []
+
+    valid_sheet_nos = {normalize_sheet_no(s["sheet_no"]) for s in sheets if normalize_sheet_no(s["sheet_no"])}
+    candidate_tasks = _build_candidate_relationship_tasks(sheets, valid_sheet_nos)
+    if not candidate_tasks:
+        return await discover_relationships_async(
+            project_id,
+            db,
+            call_kimi,
+            audit_version=audit_version,
+        )
+
+    skill_profile = load_runtime_skill_profile(
+        db,
+        skill_type="index",
+        stage_key="sheet_relationship_discovery",
+    )
+    feedback_profile = load_feedback_runtime_profile(db, issue_type="index")
+    evidence_service = get_evidence_service()
+
+    all_raw: List[Dict[str, Any]] = []
+    for source_sheet, target_sheet in candidate_tasks:
+        if not source_sheet.get("pdf_path") or not target_sheet.get("pdf_path"):
+            continue
+        result = await _discover_relationship_task_v2(
+            source_sheet=source_sheet,
+            target_sheet=target_sheet,
+            call_kimi=call_kimi,
+            evidence_service=evidence_service,
+            skill_profile=skill_profile,
+            feedback_profile=feedback_profile,
+        )
+        all_raw.extend(result)
+
+    validated = _validate_and_normalize(all_raw, valid_sheet_nos)
+    return apply_relationship_runtime_policy(
+        validated,
+        skill_profile=skill_profile,
+        feedback_profile=feedback_profile,
+    )
+
+
+def discover_relationships(project_id: str, db, *, audit_version: int | None = None) -> List[Dict[str, Any]]:
+    """Synchronous wrapper for discover_relationships_async."""
+    from services.kimi_service import call_kimi
+    if audit_version is None:
+        return asyncio.run(discover_relationships_async(project_id, db, call_kimi))
+    return asyncio.run(discover_relationships_async(project_id, db, call_kimi, audit_version=audit_version))
+
+
+def discover_relationships_v2(project_id: str, db, *, audit_version: int | None = None) -> List[Dict[str, Any]]:
+    from services.kimi_service import call_kimi
+    return asyncio.run(
+        discover_relationships_v2_async(
+            project_id,
+            db,
+            call_kimi,
+            audit_version=audit_version,
+        )
+    )
+
+
+def save_ai_edges(project_id: str, relationships: List[Dict[str, Any]], db) -> int:
+    """Save AI-discovered relationships as SheetEdge rows with edge_type='ai_visual'.
+
+    Clears existing ai_visual edges for this project before saving.
+    """
+    db.query(SheetEdge).filter(
+        SheetEdge.project_id == project_id,
+        SheetEdge.edge_type == "ai_visual",
+    ).delete(synchronize_session=False)
+    count = 0
+    for rel in relationships:
+        edge = SheetEdge(
+            project_id=project_id,
+            source_sheet_no=rel["source"],
+            target_sheet_no=rel["target"],
+            edge_type="ai_visual",
+            confidence=rel.get("confidence", 0.5),
+            evidence_json=json.dumps(
+                {
+                    "relation": rel.get("relation", ""),
+                    "global_pct": rel.get("global_pct"),
+                    "index_label": rel.get("index_label", ""),
+                    "visual_evidence": rel.get("visual_evidence", ""),
+                    "source": "ai_relationship_discovery",
+                },
+                ensure_ascii=False,
+            ),
+        )
+        db.add(edge)
+        count += 1
+    db.commit()
+    return count

@@ -14,6 +14,10 @@ import json
 from sqlalchemy import func
 from database import get_db
 from models import Project, FeedbackSample
+from services.feedback_runtime_service import (
+    refresh_runtime_feedback_index,
+    update_feedback_sample_curation,
+)
 
 router = APIRouter()
 
@@ -90,9 +94,9 @@ def update_sample_curation(
     if not sample:
         raise HTTPException(status_code=404, detail="样本不存在")
 
-    sample.curation_status = payload.curation_status
-    sample.curated_at = datetime.now() if payload.curation_status != "new" else None
+    update_feedback_sample_curation(sample, payload.curation_status)
     db.commit()
+    refresh_runtime_feedback_index(project_id=project_id, issue_type=sample.issue_type)
     return {"success": True}
 
 
@@ -113,12 +117,12 @@ def batch_update_curation(
         .all()
     )
     now = datetime.now()
-    curated_at = now if payload.curation_status != "new" else None
     for s in samples:
-        s.curation_status = payload.curation_status
-        s.curated_at = curated_at
+        update_feedback_sample_curation(s, payload.curation_status)
 
     db.commit()
+    for issue_type in {s.issue_type for s in samples if s.issue_type}:
+        refresh_runtime_feedback_index(project_id=project_id, issue_type=issue_type)
     return {"success": True, "updated": len(samples)}
 
 

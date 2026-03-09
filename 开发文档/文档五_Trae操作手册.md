@@ -107,11 +107,11 @@ POST /api/projects/{project_id}/catalog/upload
 这个函数的作用是调用Kimi API识别图纸目录：
 1. 读取image_path指向的图片文件
 2. 转为base64格式
-3. 调用Kimi API（用openai SDK，base_url改为https://api.moonshot.cn/v1）
+3. 调用Kimi Code API（base_url 使用 https://api.kimi.com/coding/v1）
 4. Prompt是："这是一张室内装饰施工图的图纸目录..."（具体内容见文档）
 5. 解析返回的JSON
 6. 返回列表格式的识别结果
-API Key从环境变量KIMI_API_KEY读取
+API Key从环境变量KIMI_CODE_API_KEY读取
 ```
 
 ### 3.3 发挥你的设计师优势

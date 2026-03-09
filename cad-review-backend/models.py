@@ -47,6 +47,7 @@ class Project(Base):
     json_data_list = relationship("JsonData", back_populates="project", cascade="all, delete-orphan")
     audit_results = relationship("AuditResult", back_populates="project", cascade="all, delete-orphan")
     audit_runs = relationship("AuditRun", back_populates="project", cascade="all, delete-orphan")
+    audit_events = relationship("AuditRunEvent", back_populates="project", cascade="all, delete-orphan")
     sheet_contexts = relationship("SheetContext", back_populates="project", cascade="all, delete-orphan")
     sheet_edges = relationship("SheetEdge", back_populates="project", cascade="all, delete-orphan")
     audit_tasks = relationship("AuditTask", back_populates="project", cascade="all, delete-orphan")
@@ -131,6 +132,9 @@ class JsonData(Base):
     summary = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     status = Column(String, default="pending")
+    thumbnail_path = Column(String, nullable=True)
+    layout_name = Column(String, nullable=True)
+    source_dwg = Column(String, nullable=True)
 
     project = relationship("Project", back_populates="json_data_list")
 
@@ -172,6 +176,8 @@ class AuditRun(Base):
     current_step = Column(String, nullable=True)
     progress = Column(Integer, default=0)
     total_issues = Column(Integer, default=0)
+    scope_mode = Column(String, default="full")
+    scope_summary = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     started_at = Column(DateTime, default=datetime.now)
     finished_at = Column(DateTime, nullable=True)
@@ -179,6 +185,22 @@ class AuditRun(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     project = relationship("Project", back_populates="audit_runs")
+
+
+class AuditRunEvent(Base):
+    """审图运行事件表（用于进度日志面板）"""
+    __tablename__ = "audit_run_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    audit_version = Column(Integer, default=1)
+    level = Column(String, default="info")
+    step_key = Column(String, nullable=True)
+    message = Column(Text, nullable=False)
+    meta_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    project = relationship("Project", back_populates="audit_events")
 
 
 class SheetContext(Base):

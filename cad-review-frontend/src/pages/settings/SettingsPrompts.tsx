@@ -202,7 +202,7 @@ export default function SettingsPrompts() {
     <>
       <section className="flex items-start justify-between gap-6">
         <p className="max-w-[780px] text-[15px] leading-7 text-muted-foreground">
-          这里可以直接改系统当前在用的 AI 提示词。你改完点保存，后面新发起的目录识别、图纸识别和审核流程都会立刻用新内容。
+          这里可以直接改系统当前在用的 AI 提示词。你改完点保存，后面新发起的目录识别、图纸识别、AI 图纸关系发现、任务预规划和正式审核流程都会立刻用新内容。
         </p>
         <Button
           type="button"
@@ -219,6 +219,14 @@ export default function SettingsPrompts() {
           {saveMessage}
         </section>
       ) : null}
+
+      <section className="border border-primary/20 bg-primary/5 px-5 py-4 text-[14px] leading-7 text-foreground">
+        预规划相关阶段现在分成两段生效：
+        <span className="font-medium">“图纸关系发现”</span>
+        负责先找跨图引用，
+        <span className="font-medium">“总控任务规划”</span>
+        再基于这些关系生成任务图。设置页里改这两段后，`/audit/tasks/plan` 和正式 `开始审核` 都会使用同一套新提示词。
+      </section>
 
       {error ? (
         <section className="border border-destructive/20 bg-destructive/5 px-5 py-4 text-[14px] text-foreground">

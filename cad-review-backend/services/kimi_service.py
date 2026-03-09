@@ -14,16 +14,72 @@ from typing import Any, Dict, List, Union
 
 logger = logging.getLogger(__name__)
 
-KIMI_API_BASE = "https://api.kimi.com/coding/v1"
-KIMI_MODEL = "k2p5"
+KIMI_CODE_API_BASE = "https://api.kimi.com/coding/v1"
+KIMI_CODE_MODEL = "k2p5"
+KIMI_OFFICIAL_API_BASE = "https://api.moonshot.cn/v1"
+KIMI_OFFICIAL_MODEL = "kimi-k2.5"
 KIMI_UA = "claude-code/1.0"
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _http_timeout_config():
+    import httpx
+
+    connect_timeout = _env_float("KIMI_CONNECT_TIMEOUT_SECONDS", 30.0)
+    read_timeout = _env_float("KIMI_READ_TIMEOUT_SECONDS", 600.0)
+    write_timeout = _env_float("KIMI_WRITE_TIMEOUT_SECONDS", 60.0)
+    pool_timeout = _env_float("KIMI_POOL_TIMEOUT_SECONDS", 30.0)
+    return httpx.Timeout(
+        connect=connect_timeout,
+        read=read_timeout,
+        write=write_timeout,
+        pool=pool_timeout,
+    )
+
+
+def _provider() -> str:
+    raw = (os.getenv("KIMI_PROVIDER", "official") or "official").strip().lower()
+    if raw in {"official", "moonshot", "openai"}:
+        return "official"
+    return "code"
+
+
+def _resolve_api_key() -> str:
+    provider = _provider()
+    if provider == "official":
+        key = (
+            os.getenv("KIMI_OFFICIAL_API_KEY", "").strip()
+            or os.getenv("MOONSHOT_API_KEY", "").strip()
+        )
+        if not key:
+            raise ValueError("未设置 KIMI_OFFICIAL_API_KEY 或 MOONSHOT_API_KEY 环境变量")
+        return key
+
+    key = os.getenv("KIMI_CODE_API_KEY", "").strip()
+    if not key:
+        raise ValueError("未设置 KIMI_CODE_API_KEY 环境变量")
+    return key
 
 
 def _headers() -> dict:
     """构建API请求头"""
-    key = os.getenv("KIMI_CODE_API_KEY", "")
-    if not key:
-        raise ValueError("未设置 KIMI_CODE_API_KEY 环境变量")
+    key = _resolve_api_key()
+    if _provider() == "official":
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+            "User-Agent": KIMI_UA,
+        }
     return {
         "Content-Type": "application/json",
         "x-api-key": key,
@@ -42,6 +98,21 @@ def _mime(data: bytes) -> str:
     if b.startswith("UklGR"):
         return "image/webp"
     return "image/jpeg"
+
+
+def _base64_data_url(data: bytes) -> str:
+    return f"data:{_mime(data)};base64,{base64.b64encode(data).decode()}"
+
+
+def _official_temperature(requested: float) -> float:
+    raw = os.getenv("KIMI_OFFICIAL_TEMPERATURE", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    # kimi-k2.5 官方兼容接口当前仅接受 1
+    return 1.0
 
 
 def _parse_json(text: str) -> Union[dict, list]:
@@ -96,6 +167,7 @@ async def call_kimi(
     user_prompt: str,
     images: List[bytes] = None,
     temperature: float = 0.1,
+    max_tokens: int = 65536,
 ) -> Union[dict, list]:
     """
     统一 Kimi 调用入口（支持纯文本和多图混合）
@@ -111,44 +183,72 @@ async def call_kimi(
     """
     import httpx
     
-    content = []
+    provider = _provider()
+    if provider == "official":
+        content = []
+        for img in (images or []):
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": _base64_data_url(img),
+                },
+            })
+        content.append({"type": "text", "text": user_prompt})
+        payload = {
+            "model": os.getenv("KIMI_OFFICIAL_MODEL", KIMI_OFFICIAL_MODEL),
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content},
+            ],
+            "temperature": _official_temperature(temperature),
+            "max_tokens": max_tokens,
+        }
+        endpoint = f"{os.getenv('KIMI_OFFICIAL_API_BASE', KIMI_OFFICIAL_API_BASE).rstrip('/')}/chat/completions"
+    else:
+        content = []
+        for img in (images or []):
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": _mime(img),
+                    "data": base64.b64encode(img).decode(),
+                },
+            })
+        content.append({"type": "text", "text": user_prompt})
+        payload = {
+            "model": os.getenv("KIMI_CODE_MODEL", KIMI_CODE_MODEL),
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        endpoint = f"{os.getenv('KIMI_CODE_API_BASE', KIMI_CODE_API_BASE).rstrip('/')}/messages"
     
-    for img in (images or []):
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": _mime(img),
-                "data": base64.b64encode(img).decode(),
-            },
-        })
-    
-    content.append({"type": "text", "text": user_prompt})
-    
-    payload = {
-        "model": KIMI_MODEL,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": content}],
-        "temperature": temperature,
-        "max_tokens": 65536,
-    }
-    
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        resp = await client.post(
-            f"{KIMI_API_BASE}/messages",
-            headers=_headers(),
-            json=payload,
-        )
+    try:
+        async with httpx.AsyncClient(timeout=_http_timeout_config(), trust_env=False) as client:
+            resp = await client.post(
+                endpoint,
+                headers=_headers(),
+                json=payload,
+            )
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(f"Kimi API 超时: {exc}") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Kimi API 网络错误: {exc}") from exc
     
     if resp.status_code != 200:
         raise RuntimeError(f"Kimi API 失败 ({resp.status_code}): {resp.text[:300]}")
     
     data = resp.json()
-    raw = "".join(
-        b.get("text", "")
-        for b in data.get("content", [])
-        if b.get("type") == "text"
-    )
+    if provider == "official":
+        raw = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+    else:
+        raw = "".join(
+            b.get("text", "")
+            for b in data.get("content", [])
+            if b.get("type") == "text"
+        )
     logger.info("Kimi 响应长度: %d 字符", len(raw))
     return _parse_json(raw)
 

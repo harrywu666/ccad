@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 from domain.sheet_normalization import normalize_sheet_no
 from database import SessionLocal
-from models import AuditRun, AuditTask, Project
+from models import AuditRun, AuditRunEvent, AuditTask, Project
 
 
 def update_run_progress(
@@ -61,6 +61,31 @@ def set_project_status(project_id: str, status: str) -> None:
         if not project:
             return
         project.status = status
+        db.commit()
+    finally:
+        db.close()
+
+
+def append_run_event(
+    project_id: str,
+    audit_version: int,
+    *,
+    level: str = "info",
+    step_key: Optional[str] = None,
+    message: str,
+    meta: Optional[Dict[str, object]] = None,
+) -> None:
+    db = SessionLocal()
+    try:
+        event = AuditRunEvent(
+            project_id=project_id,
+            audit_version=audit_version,
+            level=(level or "info").strip() or "info",
+            step_key=(step_key or "").strip() or None,
+            message=message.strip(),
+            meta_json=json.dumps(meta, ensure_ascii=False) if meta else None,
+        )
+        db.add(event)
         db.commit()
     finally:
         db.close()

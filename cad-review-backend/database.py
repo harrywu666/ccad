@@ -184,3 +184,17 @@ def _ensure_runtime_columns():
                     UNIQUE(drawing_id, layout_name, pdf_page_index)
                 )
             """))
+
+        if "audit_run_events" not in existing_tables:
+            conn.execute(text("""
+                CREATE TABLE audit_run_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    audit_version INTEGER NOT NULL,
+                    level TEXT DEFAULT 'info',
+                    step_key TEXT,
+                    message TEXT NOT NULL,
+                    meta_json TEXT,
+                    created_at DATETIME
+                )
+            """))

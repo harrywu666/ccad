@@ -242,6 +242,8 @@ def _entry_applies_to_stage(row: AuditSkillEntry, stage_key: Optional[str]) -> b
     keys = _loads_json_array(row.stage_keys)
     if not keys:
         keys = _default_stage_keys(row.skill_type)
+    if not keys:
+        return True
     return stage_key in keys
 
 
@@ -295,6 +297,49 @@ def format_skill_rules_block(rules: List[Dict[str, Any]]) -> str:
             lines.append(f"{idx}. {rule['title']}：{rule['content']}")
         lines.append("")
     return "\n".join(lines).rstrip()
+
+
+def _deep_merge_dict(target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+    for key, value in source.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            _deep_merge_dict(target[key], value)
+        else:
+            target[key] = value
+    return target
+
+
+def _parse_runtime_rule_payload(content: Optional[str]) -> Dict[str, Any]:
+    text = str(content or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def load_runtime_skill_profile(
+    db: Session,
+    *,
+    skill_type: str,
+    stage_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    rules = load_active_skill_rules(db, skill_type=skill_type, stage_key=stage_key)
+    profile: Dict[str, Any] = {
+        "skill_type": skill_type,
+        "task_bias": {},
+        "evidence_bias": {},
+        "judgement_policy": {},
+        "prompt_rules": rules,
+    }
+    for rule in rules:
+        payload = _parse_runtime_rule_payload(rule.get("content"))
+        for key in ("task_bias", "evidence_bias", "judgement_policy"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                _deep_merge_dict(profile[key], value)
+    return profile
 
 
 def build_index_alias_map(rules: List[Dict[str, Any]]) -> Dict[str, str]:

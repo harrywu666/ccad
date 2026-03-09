@@ -12,21 +12,65 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from domain.sheet_normalization import normalize_index_no, normalize_sheet_no
-from models import AuditResult, Drawing, JsonData, Project
+from models import AuditResult, Drawing, JsonData, Project, SheetEdge
 from services.ai_prompt_service import resolve_stage_system_prompt_with_skills
 from services.audit.common import build_anchor, to_evidence_json
-from services.audit.image_pipeline import pdf_page_to_5images
 from services.audit.persistence import add_and_commit
 from services.audit.prompt_builder import (
     build_pair_compare_prompt,
     build_single_sheet_prompt,
+    build_visual_only_sheet_prompt,
     compact_dimensions,
 )
 from services.audit.result_parser import parse_dimension_pair_item
+from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidenceRequest
+from services.audit_runtime.evidence_planner import plan_evidence_requests
+from services.audit_runtime.evidence_service import get_evidence_service
 from services.coordinate_service import cad_to_global_pct, enrich_json_with_coordinates
+from services.feedback_runtime_service import load_feedback_runtime_profile
+from services.skill_pack_service import load_runtime_skill_profile
 from services.storage_path_service import resolve_project_dir
 
 logger = logging.getLogger(__name__)
+
+
+def _dimension_v2_enabled() -> bool:
+    return str(os.getenv("AUDIT_ORCHESTRATOR_V2_ENABLED", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def resolve_dimension_runtime_policy(
+    *,
+    skill_profile: Dict[str, Any] | None = None,
+    feedback_profile: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    floor = 0.0
+    needs_secondary_review = bool((feedback_profile or {}).get("needs_secondary_review"))
+    severity_override = (feedback_profile or {}).get("severity_override")
+
+    skill_policy = ((skill_profile or {}).get("judgement_policy") or {}).get("dimension")
+    if isinstance(skill_policy, dict):
+        raw_floor = skill_policy.get("confidence_floor")
+        if isinstance(raw_floor, (int, float)):
+            floor = max(floor, float(raw_floor))
+        if skill_policy.get("needs_secondary_review") is True:
+            needs_secondary_review = True
+        if skill_policy.get("severity_override"):
+            severity_override = skill_policy.get("severity_override")
+
+    raw_feedback_floor = (feedback_profile or {}).get("confidence_floor")
+    if isinstance(raw_feedback_floor, (int, float)):
+        floor = max(floor, float(raw_feedback_floor))
+
+    return {
+        "confidence_floor": floor,
+        "needs_secondary_review": needs_secondary_review,
+        "severity_override": severity_override,
+    }
 
 
 # 功能说明：读取JSON文件内容
@@ -218,39 +262,50 @@ def _load_drawing_assets(project_id: str, db) -> Dict[str, Dict[str, Any]]:
 def _build_pairs(
     json_by_sheet: Dict[str, Dict[str, Any]],
     pair_filters: Optional[List[Tuple[str, str]]],
+    *,
+    ai_edges: Optional[List[Tuple[str, str]]] = None,
 ) -> List[Dict[str, str]]:
-    pair_keys = set()
+    """构建需要对比的图纸对，合并三个来源：
+    1. pair_filters（task planner 指定的）
+    2. JSON indexes（DXF 提取的跨图引用）
+    3. AI edges（AI 视觉发现的跨图关系）
+    """
+    pair_keys: set[Tuple[str, str]] = set()
     pairs: List[Dict[str, str]] = []
 
-    if pair_filters is not None:
-        requested_pairs = {
-            tuple(sorted([normalize_sheet_no(a), normalize_sheet_no(b)]))
-            for a, b in pair_filters
-            if normalize_sheet_no(a)
-            and normalize_sheet_no(b)
-            and normalize_sheet_no(a) != normalize_sheet_no(b)
-        }
-        for a_key, b_key in sorted(requested_pairs):
-            if a_key not in json_by_sheet or b_key not in json_by_sheet:
-                continue
-            pair_key = tuple(sorted([a_key, b_key]))
-            if pair_key in pair_keys:
-                continue
-            pair_keys.add(pair_key)
-            pairs.append({"a": a_key, "b": b_key})
-        return pairs
+    def _add_pair(a_key: str, b_key: str) -> None:
+        if a_key not in json_by_sheet or b_key not in json_by_sheet:
+            return
+        pk = tuple(sorted([a_key, b_key]))
+        if pk in pair_keys:
+            return
+        pair_keys.add(pk)
+        pairs.append({"a": pk[0], "b": pk[1]})
 
+    # Source 1: task planner explicit pairs
+    if pair_filters is not None:
+        for a_raw, b_raw in pair_filters:
+            a_key = normalize_sheet_no(a_raw)
+            b_key = normalize_sheet_no(b_raw)
+            if a_key and b_key and a_key != b_key:
+                _add_pair(a_key, b_key)
+
+    # Source 2: JSON indexes (DXF extracted cross-sheet references)
     for src_key, src in json_by_sheet.items():
         for idx in src["indexes"]:
             target_raw = str(idx.get("target_sheet", "") or "").strip()
             tgt_key = normalize_sheet_no(target_raw)
-            if not tgt_key or tgt_key not in json_by_sheet or tgt_key == src_key:
-                continue
-            pair_key = tuple(sorted([src_key, tgt_key]))
-            if pair_key in pair_keys:
-                continue
-            pair_keys.add(pair_key)
-            pairs.append({"a": src_key, "b": tgt_key})
+            if tgt_key and tgt_key != src_key:
+                _add_pair(src_key, tgt_key)
+
+    # Source 3: AI visual discovery edges
+    if ai_edges:
+        for a_raw, b_raw in ai_edges:
+            a_key = normalize_sheet_no(a_raw)
+            b_key = normalize_sheet_no(b_raw)
+            if a_key and b_key and a_key != b_key:
+                _add_pair(a_key, b_key)
+
     return pairs
 
 
@@ -280,26 +335,26 @@ def _prepare_sheet_semantic_inputs(
     for sheet_key in sorted(involved):
         sheet = json_by_sheet[sheet_key]
         dims = sheet["dimensions"]
-        if not dims:
-            semantic_cache[sheet_key] = []
-            semantic_hashes[sheet_key] = _sha256_parts([sheet_key, "empty"])
-            continue
+        is_visual_only = not dims
 
-        for dim in dims:
-            if dim.get("global_pct") is None:
-                point = _dimension_global_point(dim, sheet["model_range"])
-                if point:
-                    dim["global_pct"] = point
+        if dims:
+            for dim in dims:
+                if dim.get("global_pct") is None:
+                    point = _dimension_global_point(dim, sheet["model_range"])
+                    if point:
+                        dim["global_pct"] = point
 
-        dimension_lookup: Dict[str, Dict[str, Any]] = {}
-        for dim in dims:
-            dim_id = str(dim.get("id") or "").strip()
-            if not dim_id:
-                continue
-            dim_key = normalize_index_no(dim_id)
-            if dim_key and dim_key not in dimension_lookup:
-                dimension_lookup[dim_key] = dim
-        sheet["dimension_lookup"] = dimension_lookup
+            dimension_lookup: Dict[str, Dict[str, Any]] = {}
+            for dim in dims:
+                dim_id = str(dim.get("id") or "").strip()
+                if not dim_id:
+                    continue
+                dim_key = normalize_index_no(dim_id)
+                if dim_key and dim_key not in dimension_lookup:
+                    dimension_lookup[dim_key] = dim
+            sheet["dimension_lookup"] = dimension_lookup
+        else:
+            sheet["dimension_lookup"] = {}
 
         page_asset = page_assets_by_sheet.get(sheet_key)
         if not page_asset:
@@ -313,16 +368,22 @@ def _prepare_sheet_semantic_inputs(
                 f"尺寸核对缺少PDF页定位：{sheet['sheet_no']} pdf_path={pdf_path} page_index={page_index}"
             )
 
-        dims_compact = compact_dimensions(dims)
-        prompt = build_single_sheet_prompt(
-            sheet_no=sheet["sheet_no"],
-            sheet_name=sheet["sheet_name"],
-            dims_compact=dims_compact,
-        )
+        dims_compact = compact_dimensions(dims) if dims else []
+        if is_visual_only:
+            prompt = build_visual_only_sheet_prompt(
+                sheet_no=sheet["sheet_no"],
+                sheet_name=sheet["sheet_name"],
+            )
+        else:
+            prompt = build_single_sheet_prompt(
+                sheet_no=sheet["sheet_no"],
+                sheet_name=sheet["sheet_name"],
+                dims_compact=dims_compact,
+            )
         sheet_cache_key = _sha256_parts(
             [
                 prompt_version,
-                "sheet_semantic",
+                "sheet_semantic_v2" if is_visual_only else "sheet_semantic",
                 str(audit_version),
                 sheet_key,
                 sheet["sheet_no"] or "",
@@ -349,6 +410,7 @@ def _prepare_sheet_semantic_inputs(
                 "page_index": int(page_index),
                 "prompt": prompt,
                 "cache_key": sheet_cache_key,
+                "visual_only": is_visual_only,
             }
         )
         sheet_cache_miss += 1
@@ -372,29 +434,50 @@ async def _execute_sheet_jobs(
 ) -> List[Tuple[str, List[Dict[str, Any]], str]]:
     if not sheet_jobs:
         return []
+    evidence_service = get_evidence_service()
+    v2_enabled = _dimension_v2_enabled()
+    skill_profile = {"judgement_policy": {}, "evidence_bias": {}, "task_bias": {}}
+    feedback_profile = {"needs_secondary_review": False}
 
     async def _run_sheet_job(
         job: Dict[str, Any],
     ) -> Tuple[str, List[Dict[str, Any]], str]:
-        images = await asyncio.to_thread(
-            pdf_page_to_5images,
-            job["pdf_path"],
-            job["page_index"],
-            0.20,
+        pack_type = EvidencePackType.DEEP_PACK
+        if v2_enabled and not job.get("visual_only"):
+            plans = plan_evidence_requests(
+                task_type="dimension",
+                source_sheet_no=job["sheet_no"],
+                requires_visual=True,
+                skill_profile=skill_profile,
+                feedback_profile=feedback_profile,
+            )
+            if plans:
+                pack_type = plans[0].pack_type
+        pack = await evidence_service.get_evidence_pack(
+            EvidenceRequest(
+                pack_type=pack_type,
+                source_pdf_path=job["pdf_path"],
+                source_page_index=job["page_index"],
+            )
         )
+        stage_key = "dimension_visual_only" if job.get("visual_only") else "dimension_single_sheet"
+        if pack_type == EvidencePackType.DEEP_PACK:
+            images = [
+                pack.images["source_full"],
+                pack.images["source_top_left"],
+                pack.images["source_top_right"],
+                pack.images["source_bottom_left"],
+                pack.images["source_bottom_right"],
+            ]
+        else:
+            images = list(pack.images.values())
         semantic_result = await call_kimi(
             system_prompt=resolve_stage_system_prompt_with_skills(
-                "dimension_single_sheet",
+                stage_key,
                 "dimension",
             ),
             user_prompt=job["prompt"],
-            images=[
-                images["full"],
-                images["top_left"],
-                images["top_right"],
-                images["bottom_left"],
-                images["bottom_right"],
-            ],
+            images=images,
             temperature=0.0,
         )
         if not isinstance(semantic_result, list):
@@ -428,6 +511,7 @@ async def _execute_sheet_jobs(
 def _prepare_pair_compare_inputs(
     pairs: List[Dict[str, str]],
     json_by_sheet: Dict[str, Dict[str, Any]],
+    page_assets_by_sheet: Dict[str, Dict[str, Any]],
     semantic_cache: Dict[str, List[Dict[str, Any]]],
     semantic_hashes: Dict[str, str],
     prompt_version: str,
@@ -450,7 +534,7 @@ def _prepare_pair_compare_inputs(
         pair_cache_key = _sha256_parts(
             [
                 prompt_version,
-                "pair_compare",
+                "pair_compare_v2",
                 str(audit_version),
                 pair["a"],
                 pair["b"],
@@ -464,6 +548,10 @@ def _prepare_pair_compare_inputs(
             pair_cache_hit += 1
             continue
 
+        # Collect PDF info for image rendering during pair comparison
+        a_asset = page_assets_by_sheet.get(pair["a"], {})
+        b_asset = page_assets_by_sheet.get(pair["b"], {})
+
         pair_jobs.append(
             {
                 "a_key": pair["a"],
@@ -474,6 +562,10 @@ def _prepare_pair_compare_inputs(
                 "b_sheet_name": b["sheet_name"],
                 "semantic_a": semantic_a,
                 "semantic_b": semantic_b,
+                "a_pdf_path": str(a_asset.get("pdf_path", "")),
+                "a_page_index": int(a_asset.get("page_index", 0)),
+                "b_pdf_path": str(b_asset.get("pdf_path", "")),
+                "b_page_index": int(b_asset.get("page_index", 0)),
                 "cache_key": pair_cache_key,
             }
         )
@@ -491,10 +583,45 @@ async def _execute_pair_jobs(
 ) -> Dict[Tuple[str, str], List[Dict[str, Any]]]:
     if not pair_jobs:
         return {}
+    evidence_service = get_evidence_service()
+    v2_enabled = _dimension_v2_enabled()
+    skill_profile = {"judgement_policy": {}, "evidence_bias": {}, "task_bias": {}}
+    feedback_profile = {"needs_secondary_review": False}
 
     async def _run_pair_job(
         job: Dict[str, Any],
     ) -> Tuple[Tuple[str, str], List[Dict[str, Any]]]:
+        pair_images: List[bytes] = []
+        if job.get("a_pdf_path") and job.get("b_pdf_path"):
+            try:
+                pack_type = EvidencePackType.PAIRED_OVERVIEW_PACK
+                if v2_enabled:
+                    plans = plan_evidence_requests(
+                        task_type="dimension",
+                        source_sheet_no=job["a_sheet_no"],
+                        target_sheet_no=job["b_sheet_no"],
+                        requires_visual=True,
+                        skill_profile=skill_profile,
+                        feedback_profile=feedback_profile,
+                    )
+                    if plans:
+                        if plans[0].pack_type == EvidencePackType.OVERVIEW_PACK:
+                            pack_type = EvidencePackType.PAIRED_OVERVIEW_PACK
+                        else:
+                            pack_type = plans[0].pack_type
+                pack = await evidence_service.get_evidence_pack(
+                    EvidenceRequest(
+                        pack_type=pack_type,
+                        source_pdf_path=job["a_pdf_path"],
+                        source_page_index=job["a_page_index"],
+                        target_pdf_path=job["b_pdf_path"],
+                        target_page_index=job["b_page_index"],
+                    )
+                )
+                pair_images = list(pack.images.values())
+            except Exception:
+                pair_images = []
+
         compare_result = await call_kimi(
             system_prompt=resolve_stage_system_prompt_with_skills(
                 "dimension_pair_compare",
@@ -508,6 +635,7 @@ async def _execute_pair_jobs(
                 b_sheet_name=job["b_sheet_name"],
                 b_semantic=job["semantic_b"],
             ),
+            images=pair_images if pair_images else None,
             temperature=0.0,
         )
         if not isinstance(compare_result, list):
@@ -548,8 +676,11 @@ def _build_dimension_issues(
     pairs: List[Dict[str, str]],
     pair_compare_results: Dict[Tuple[str, str], List[Dict[str, Any]]],
     json_by_sheet: Dict[str, Dict[str, Any]],
+    runtime_policy: Dict[str, Any] | None = None,
 ) -> List[AuditResult]:
     issues: List[AuditResult] = []
+    confidence_floor = float((runtime_policy or {}).get("confidence_floor") or 0.0)
+    severity_override = str((runtime_policy or {}).get("severity_override") or "").strip().lower() or None
 
     for pair in pairs:
         pair_result = pair_compare_results.get((pair["a"], pair["b"]))
@@ -562,12 +693,16 @@ def _build_dimension_issues(
             value_a = parsed["value_a"]
             value_b = parsed["value_b"]
             desc = str(parsed["description"] or "").strip()
+            source_pct = parsed.get("source_pct")
+            target_pct = parsed.get("target_pct")
             source_grid = str(parsed["source_grid"] or "")
             target_grid = str(parsed["target_grid"] or "")
             source_dim_id = str(parsed["source_dim_id"] or "")
             target_dim_id = str(parsed["target_dim_id"] or "")
             index_hint = str(parsed["index_hint"] or "")
             confidence = float(parsed["confidence"] or 0.0)
+            if confidence_floor and confidence < confidence_floor:
+                continue
             loc = str(parsed["location"] or "").strip()
 
             if desc:
@@ -604,7 +739,7 @@ def _build_dimension_issues(
                 project_id=project_id,
                 audit_version=audit_version,
                 type="dimension",
-                severity="warning",
+                severity=severity_override or "warning",
                 sheet_no_a=sheet_no_a,
                 sheet_no_b=sheet_no_b,
                 location=loc or None,
@@ -628,15 +763,23 @@ def _build_dimension_issues(
                 else None
             )
 
+            # Prefer AI-output pct, fallback to JSON dimension's global_pct
+            resolved_source_pct = source_pct or (
+                (source_dim or {}).get("global_pct")
+                if isinstance((source_dim or {}).get("global_pct"), dict)
+                else None
+            )
+            resolved_target_pct = target_pct or (
+                (target_dim or {}).get("global_pct")
+                if isinstance((target_dim or {}).get("global_pct"), dict)
+                else None
+            )
+
             source_anchor = build_anchor(
                 role="source",
                 sheet_no=issue.sheet_no_a or a["sheet_no"],
                 grid=source_grid or (source_dim or {}).get("grid"),
-                global_pct=(
-                    (source_dim or {}).get("global_pct")
-                    if isinstance((source_dim or {}).get("global_pct"), dict)
-                    else None
-                ),
+                global_pct=resolved_source_pct,
                 confidence=confidence,
                 origin="dimension",
             )
@@ -647,11 +790,7 @@ def _build_dimension_issues(
                 role="target",
                 sheet_no=issue.sheet_no_b or b["sheet_no"],
                 grid=target_grid or (target_dim or {}).get("grid"),
-                global_pct=(
-                    (target_dim or {}).get("global_pct")
-                    if isinstance((target_dim or {}).get("global_pct"), dict)
-                    else None
-                ),
+                global_pct=resolved_target_pct,
                 confidence=confidence,
                 origin="dimension",
             )
@@ -680,6 +819,16 @@ def audit_dimensions(
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise ValueError("项目不存在")
+    skill_profile = load_runtime_skill_profile(
+        db,
+        skill_type="dimension",
+        stage_key="dimension_pair_compare",
+    )
+    feedback_profile = load_feedback_runtime_profile(db, issue_type="dimension")
+    runtime_policy = resolve_dimension_runtime_policy(
+        skill_profile=skill_profile,
+        feedback_profile=feedback_profile,
+    )
 
     cache_dir = _cache_dir_for_project(project)
     sheet_concurrency = _read_int_env("SHEET_AGENT_CONCURRENCY", 8, low=1, high=32)
@@ -695,11 +844,36 @@ def audit_dimensions(
 
     json_by_sheet = _load_json_by_sheet(project_id, db)
     page_assets_by_sheet = _load_drawing_assets(project_id, db)
-    pairs = _build_pairs(json_by_sheet, pair_filters)
+
+    # Load AI-discovered edges as additional pair source
+    ai_edges: List[Tuple[str, str]] = []
+    try:
+        ai_edge_rows = (
+            db.query(SheetEdge)
+            .filter(
+                SheetEdge.project_id == project_id,
+                SheetEdge.edge_type == "ai_visual",
+            )
+            .all()
+        )
+        ai_edges = [
+            (e.source_sheet_no, e.target_sheet_no)
+            for e in ai_edge_rows
+            if e.source_sheet_no and e.target_sheet_no
+        ]
+    except Exception as exc:
+        logger.warning("加载AI关系边失败: %s", exc)
+
+    pairs = _build_pairs(json_by_sheet, pair_filters, ai_edges=ai_edges)
+    logger.info(
+        "dimension_audit pairs=%s (filters=%s, ai_edges=%s)",
+        len(pairs), len(pair_filters) if pair_filters else "none", len(ai_edges),
+    )
     if not pairs:
         if pair_filters is not None:
             return []
-        raise RuntimeError("未发现可用于尺寸核对的索引图对，无法执行尺寸审核。")
+        logger.warning("未发现可用于尺寸核对的索引图对，跳过尺寸审核。")
+        return []
 
     (
         semantic_cache,
@@ -716,40 +890,34 @@ def audit_dimensions(
         cache_dir,
         audit_version,
     )
-    sheet_results = asyncio.run(
-        _execute_sheet_jobs(sheet_jobs, sheet_concurrency, cache_dir, call_kimi)
-    )
-    for sheet_key, cleaned, cache_key in sheet_results:
-        semantic_cache[sheet_key] = cleaned
-        semantic_hashes[sheet_key] = _sha256_parts(
-            [cache_key, _canonical_json(cleaned)]
-        )
-    logger.info(
-        "dimension_audit sheet_semantic project=%s cache_hit=%s cache_miss=%s involved=%s",
-        project_id,
-        sheet_cache_hit,
-        sheet_cache_miss,
-        involved_total,
-    )
 
-    (
-        pair_compare_results,
-        pair_jobs,
-        pair_cache_hit,
-        pair_cache_miss,
-    ) = _prepare_pair_compare_inputs(
-        pairs,
-        json_by_sheet,
-        semantic_cache,
-        semantic_hashes,
-        prompt_version,
-        cache_dir,
-        audit_version,
-    )
-    pair_compare_results.update(
-        asyncio.run(
-            _execute_pair_jobs(pair_jobs, pair_concurrency, cache_dir, call_kimi)
+    async def _run_all_async() -> Tuple[
+        Dict[Tuple[str, str], List[Dict[str, Any]]], int, int
+    ]:
+        sheet_results = await _execute_sheet_jobs(
+            sheet_jobs, sheet_concurrency, cache_dir, call_kimi
         )
+        for s_key, cleaned, c_key in sheet_results:
+            semantic_cache[s_key] = cleaned
+            semantic_hashes[s_key] = _sha256_parts(
+                [c_key, _canonical_json(cleaned)]
+            )
+        logger.info(
+            "dimension_audit sheet_semantic project=%s cache_hit=%s cache_miss=%s involved=%s",
+            project_id, sheet_cache_hit, sheet_cache_miss, involved_total,
+        )
+
+        pc_results, p_jobs, pc_hit, pc_miss = _prepare_pair_compare_inputs(
+            pairs, json_by_sheet, page_assets_by_sheet, semantic_cache, semantic_hashes,
+            prompt_version, cache_dir, audit_version,
+        )
+        pc_results.update(
+            await _execute_pair_jobs(p_jobs, pair_concurrency, cache_dir, call_kimi)
+        )
+        return pc_results, pc_hit, pc_miss
+
+    pair_compare_results, pair_cache_hit, pair_cache_miss = asyncio.run(
+        _run_all_async()
     )
     logger.info(
         "dimension_audit pair_compare project=%s cache_hit=%s cache_miss=%s pair_total=%s",
@@ -765,6 +933,7 @@ def audit_dimensions(
         pairs=pairs,
         pair_compare_results=pair_compare_results,
         json_by_sheet=json_by_sheet,
+        runtime_policy=runtime_policy,
     )
     add_and_commit(db, issues)
     logger.info(

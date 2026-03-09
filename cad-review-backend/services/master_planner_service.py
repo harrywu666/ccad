@@ -231,7 +231,7 @@ def plan_with_master_llm(
         return {"ok": False, "reason": "no_edges"}
 
     context_meta: Dict[str, Dict[str, Any]] = {}
-    context_items: List[Dict[str, Any]] = []
+    context_items_all: List[Dict[str, Any]] = []
     for ctx in ready_contexts:
         sheet_no = str(ctx.sheet_no or "").strip()
         sheet_name = str(ctx.sheet_name or "").strip()
@@ -248,7 +248,7 @@ def plan_with_master_llm(
             "index_count": index_count,
             "is_plan_sheet": is_plan,
         }
-        context_items.append(
+        context_items_all.append(
             {
                 "sheet_no": sheet_no,
                 "sheet_name": sheet_name,
@@ -282,24 +282,44 @@ def plan_with_master_llm(
     if not allowed_edges:
         return {"ok": False, "reason": "no_valid_edges"}
 
+    relevant_context_keys = {
+        key
+        for key, meta in context_meta.items()
+        if _safe_int(meta.get("index_count"), 0) > 0
+    }
+    for src_key, tgt_key in allowed_edges:
+        relevant_context_keys.add(src_key)
+        relevant_context_keys.add(tgt_key)
+
+    context_items = [
+        item
+        for item in context_items_all
+        if _norm_sheet_no(str(item.get("sheet_no") or "")) in relevant_context_keys
+    ]
     payload = {
         "project_id": project_id,
         "contexts": context_items,
         "edges": edge_items,
     }
-    timeout_seconds = _env_float("AUDIT_MASTER_PLANNER_TIMEOUT_SECONDS", 20.0)
+    max_tokens = _safe_int(os.getenv("AUDIT_MASTER_PLANNER_MAX_TOKENS"), 4096)
 
     try:
         prompts = _resolve_master_planner_prompts(payload)
         started_at = time.perf_counter()
+        logger.info(
+            "master_planner request project=%s contexts=%s/%s edges=%s max_tokens=%s",
+            project_id,
+            len(context_items),
+            len(context_items_all),
+            len(edge_items),
+            max_tokens,
+        )
         result = _run_async(
-            asyncio.wait_for(
-                call_kimi(
-                    system_prompt=prompts["system_prompt"],
-                    user_prompt=prompts["user_prompt"],
-                    temperature=0.0,
-                ),
-                timeout=timeout_seconds,
+            call_kimi(
+                system_prompt=prompts["system_prompt"],
+                user_prompt=prompts["user_prompt"],
+                temperature=0.0,
+                max_tokens=max_tokens,
             )
         )
         logger.info(
@@ -307,13 +327,6 @@ def plan_with_master_llm(
             project_id,
             time.perf_counter() - started_at,
         )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "master_planner timeout project=%s timeout=%.2fs",
-            project_id,
-            timeout_seconds,
-        )
-        return {"ok": False, "reason": "llm_timeout"}
     except Exception as exc:  # noqa: BLE001
         logger.warning("master_planner failed project=%s error=%s", project_id, exc)
         return {"ok": False, "reason": f"llm_error:{exc}"}
