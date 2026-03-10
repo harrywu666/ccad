@@ -210,18 +210,18 @@ def _relationship_below_threshold(
 def _should_skip_relationship_candidate_review(
     source_sheet: Dict[str, Any],
     target_sheet: Dict[str, Any],
-) -> bool:
+) -> str | None:
     source_sheet_no = str(source_sheet.get("sheet_no") or "").strip()
     target_sheet_no = str(target_sheet.get("sheet_no") or "").strip()
     if not source_sheet_no or not target_sheet_no:
-        return True
+        return "missing_sheet_no"
     if normalize_sheet_no(source_sheet_no) == normalize_sheet_no(target_sheet_no):
-        return True
+        return "self_pair"
     if not source_sheet.get("pdf_path") or source_sheet.get("page_index") is None:
-        return True
+        return "missing_source_asset"
     if not target_sheet.get("pdf_path") or target_sheet.get("page_index") is None:
-        return True
-    return False
+        return "missing_target_asset"
+    return None
 
 
 def relationship_to_finding(
@@ -605,7 +605,25 @@ async def _discover_relationship_task_v2(
     feedback_profile: Dict[str, Any],
     hot_sheet_registry: HotSheetRegistry | None = None,
 ) -> List[Dict[str, Any]]:
-    if _should_skip_relationship_candidate_review(source_sheet, target_sheet):
+    skip_reason = _should_skip_relationship_candidate_review(source_sheet, target_sheet)
+    if skip_reason:
+        if project_id is not None and audit_version is not None:
+            append_run_event(
+                project_id,
+                audit_version,
+                level="warning",
+                step_key="relationship_discovery",
+                agent_key="relationship_review_agent",
+                agent_name="关系审查Agent",
+                event_kind="runner_input_skipped",
+                progress_hint=15,
+                message="关系审查Agent 跳过了一组明显无效的候选关系，没有继续发给 AI",
+                meta={
+                    "reason": skip_reason,
+                    "source_sheet_no": source_sheet.get("sheet_no"),
+                    "target_sheet_no": target_sheet.get("sheet_no"),
+                },
+            )
         return []
 
     plans = plan_lite(

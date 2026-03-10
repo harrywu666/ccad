@@ -355,6 +355,24 @@ async def _review_index_issue_candidates_async(
     filtered_count = 0
     for candidate in candidates:
         if _should_skip_index_review_candidate(candidate):
+            if audit_version is not None:
+                append_run_event(
+                    project_id,
+                    audit_version,
+                    level="warning",
+                    step_key="index",
+                    agent_key="index_review_agent",
+                    agent_name="索引审查Agent",
+                    event_kind="runner_input_skipped",
+                    progress_hint=24,
+                    message="索引审查Agent 跳过了一条明显无效的复核请求，没有继续发给 AI",
+                    meta={
+                        "reason": "invalid_review_candidate",
+                        "source_sheet_no": candidate.get("source_sheet_no"),
+                        "target_sheet_no": candidate.get("target_sheet_no"),
+                        "review_kind": candidate.get("review_kind"),
+                    },
+                )
             continue
         try:
             result = await _run_index_ai_review(

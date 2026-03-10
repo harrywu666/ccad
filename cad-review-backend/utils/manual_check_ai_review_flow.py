@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 import time
@@ -99,17 +100,179 @@ def summarize_tasks(tasks: List[Dict[str, Any]]) -> Dict[str, int]:
     }
 
 
+def compute_structured_finding_coverage(results: List[Dict[str, Any]]) -> float:
+    if not results:
+        return 1.0
+
+    required_fields = (
+        "rule_id",
+        "finding_type",
+        "finding_status",
+        "source_agent",
+        "evidence_pack_id",
+        "review_round",
+        "confidence",
+    )
+    valid = 0
+    for result in results:
+        if all(result.get(field) not in (None, "", []) for field in required_fields):
+            valid += 1
+    return round(valid / len(results), 3)
+
+
+def summarize_progressive_metrics(
+    *,
+    tasks: List[Dict[str, Any]],
+    results: List[Dict[str, Any]],
+    events: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    total_tasks = len(tasks)
+    round_2_count = 0
+    needs_review_count = 0
+
+    for result in results:
+        review_round = int(result.get("review_round") or 0)
+        if review_round >= 2:
+            round_2_count += 1
+        if str(result.get("finding_status") or "").strip().lower() == "needs_review":
+            needs_review_count += 1
+
+    budget_usage: Dict[str, Any] = {}
+    for event in events:
+        meta = event.get("meta") if isinstance(event.get("meta"), dict) else {}
+        snapshot = meta.get("budget_usage") if isinstance(meta, dict) else None
+        if isinstance(snapshot, dict):
+            budget_usage = snapshot
+
+    return {
+        "total_tasks": total_tasks,
+        "round_2_count": round_2_count,
+        "round_2_ratio": round(round_2_count / total_tasks, 3) if total_tasks else 0.0,
+        "needs_review_count": needs_review_count,
+        "budget_usage": budget_usage,
+        "structured_finding_coverage": compute_structured_finding_coverage(results),
+    }
+
+
+def summarize_runner_metrics(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    provider_mode = str(os.getenv("AUDIT_RUNNER_PROVIDER", "")).strip().lower() or None
+    sdk_session_reuse_count = 0
+    sdk_repair_attempts = 0
+    sdk_repair_successes = 0
+    sdk_needs_review_count = 0
+    sdk_stream_event_count = 0
+    stalled_turn_retries = 0
+    invalid_input_skipped = 0
+    runner_broadcast_count = 0
+    needs_review_count = 0
+    provider_names: set[str] = set()
+
+    for event in events:
+        meta = event.get("meta") if isinstance(event.get("meta"), dict) else {}
+        provider_name = str(meta.get("provider_name") or "").strip().lower()
+        if provider_name:
+            provider_names.add(provider_name)
+        event_kind = str(event.get("event_kind") or "").strip()
+        if event_kind == "runner_turn_retrying":
+            stalled_turn_retries += 1
+        elif event_kind == "runner_input_skipped":
+            invalid_input_skipped += 1
+        elif event_kind == "runner_broadcast":
+            runner_broadcast_count += 1
+        elif event_kind == "runner_turn_needs_review":
+            needs_review_count += 1
+        if provider_name != "sdk":
+            continue
+        if event_kind == "runner_session_reused":
+            sdk_session_reuse_count += 1
+        elif event_kind == "output_repair_started":
+            sdk_repair_attempts += 1
+        elif event_kind == "output_repair_succeeded":
+            sdk_repair_successes += 1
+        elif event_kind == "runner_turn_needs_review":
+            sdk_needs_review_count += 1
+        elif event_kind == "provider_stream_delta":
+            sdk_stream_event_count += 1
+
+    if not provider_mode and len(provider_names) == 1:
+        provider_mode = next(iter(provider_names))
+
+    last_progress_gap_seconds = None
+    last_progress_at = None
+    for event in reversed(events):
+        event_kind = str(event.get("event_kind") or "").strip()
+        if event_kind in {"heartbeat", "provider_stream_delta", "model_stream_delta"}:
+            continue
+        created_at = _parse_datetime(event.get("created_at"))
+        if created_at is None:
+            continue
+        last_progress_at = created_at
+        last_progress_gap_seconds = round(
+            max(0.0, (datetime.now() - created_at).total_seconds()),
+            3,
+        )
+        break
+
+    return {
+        "provider_mode": provider_mode,
+        "provider_names_seen": sorted(provider_names),
+        "sdk_session_reuse_count": sdk_session_reuse_count,
+        "sdk_repair_attempts": sdk_repair_attempts,
+        "sdk_repair_successes": sdk_repair_successes,
+        "sdk_needs_review_count": sdk_needs_review_count,
+        "sdk_stream_event_count": sdk_stream_event_count,
+        "stalled_turn_retries": stalled_turn_retries,
+        "invalid_input_skipped": invalid_input_skipped,
+        "runner_broadcast_count": runner_broadcast_count,
+        "needs_review_count": needs_review_count,
+        "last_progress_at": last_progress_at.isoformat() if last_progress_at else None,
+        "last_progress_gap_seconds": last_progress_gap_seconds,
+    }
+
+
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 def wait_for_tasks(
     client,
     project_id: str,
     version: int,
-    timeout_seconds: float,
+    deadline_ts: float,
     interval_seconds: float,
 ) -> List[Dict[str, Any]]:
-    deadline = time.time() + timeout_seconds
     latest: List[Dict[str, Any]] = []
-    while time.time() < deadline:
+    while time.time() < deadline_ts:
         resp = client.get(f"/api/projects/{project_id}/audit/tasks", params={"version": version})
+        if resp.status_code == 200:
+            latest = resp.json()
+            if latest:
+                return latest
+        time.sleep(interval_seconds)
+    return latest
+
+
+def wait_for_results(
+    client,
+    project_id: str,
+    version: int,
+    deadline_ts: float,
+    interval_seconds: float,
+) -> List[Dict[str, Any]]:
+    latest: List[Dict[str, Any]] = []
+    while time.time() < deadline_ts:
+        resp = client.get(
+            f"/api/projects/{project_id}/audit/results",
+            params={"version": version, "view": "flat"},
+        )
         if resp.status_code == 200:
             latest = resp.json()
             if latest:
@@ -216,10 +379,10 @@ def main() -> int:
     output_dir = backend_dir.parent / ".artifacts" / "manual-checks"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    output_name = f"{args.project_id}-ai-review-flow-check.json"
+    output_name = f"{args.project_id}-runner-supervisor-check.json"
     if args.base_url:
         safe_host = args.base_url.replace("://", "_").replace("/", "_").replace(":", "_")
-        output_name = f"{args.project_id}-{safe_host}-ai-review-flow-check.json"
+        output_name = f"{args.project_id}-{safe_host}-runner-supervisor-check.json"
     output_path = output_dir / output_name
 
     report: Dict[str, Any] = {
@@ -251,6 +414,7 @@ def main() -> int:
                 "ok": True,
                 "mode": "http",
                 "applied": False,
+                "provider_mode": os.getenv("AUDIT_RUNNER_PROVIDER"),
                 "detail": "HTTP 模式不会远程改服务环境变量，仅记录本次验收期望开关。",
             }
         else:
@@ -263,6 +427,8 @@ def main() -> int:
                 }
             )
             env_context.__enter__()
+            import database  # noqa: WPS433
+            database.init_db()
             from main import app  # noqa: WPS433
 
             client = LocalAPIClient(TestClient(app))
@@ -271,6 +437,7 @@ def main() -> int:
                 "ok": True,
                 "mode": "local",
                 "applied": True,
+                "provider_mode": os.getenv("AUDIT_RUNNER_PROVIDER"),
                 "values": {
                     "AUDIT_ORCHESTRATOR_V2_ENABLED": args.enable_orchestrator_v2,
                     "AUDIT_EVIDENCE_PLANNER_ENABLED": args.enable_evidence_planner,
@@ -385,22 +552,53 @@ def main() -> int:
                 else:
                     start_payload = start_resp.json()
                     runtime_version = int(start_payload["audit_version"])
+                    deadline_ts = time.time() + args.wait_seconds
                     runtime_tasks = wait_for_tasks(
                         client,
                         args.project_id,
                         runtime_version,
-                        args.wait_seconds,
+                        deadline_ts,
+                        args.poll_interval,
+                    )
+                    runtime_results = wait_for_results(
+                        client,
+                        args.project_id,
+                        runtime_version,
+                        deadline_ts,
                         args.poll_interval,
                     )
                     runtime_status_resp = client.get(f"/api/projects/{args.project_id}/audit/status")
                     runtime_history_resp = client.get(f"/api/projects/{args.project_id}/audit/history")
+                    runtime_events_resp = client.get(
+                        f"/api/projects/{args.project_id}/audit/events",
+                        params={"version": runtime_version, "limit": 200},
+                    )
                     runtime_status = runtime_status_resp.json() if runtime_status_resp.status_code == 200 else {}
                     runtime_history = runtime_history_resp.json() if runtime_history_resp.status_code == 200 else []
+                    runtime_events_payload = runtime_events_resp.json() if runtime_events_resp.status_code == 200 else {}
+                    runtime_events = runtime_events_payload.get("items", []) if isinstance(runtime_events_payload, dict) else []
                     runtime_summary = summarize_tasks(runtime_tasks)
+                    progressive_metrics = summarize_progressive_metrics(
+                        tasks=runtime_tasks,
+                        results=runtime_results,
+                        events=runtime_events,
+                    )
+                    runner_metrics = summarize_runner_metrics(runtime_events)
+                    status_value = str(runtime_status.get("status") or "").strip().lower()
+                    completed_within_window = status_value in {"completed", "failed"}
+                    last_progress_gap_seconds = runner_metrics.get("last_progress_gap_seconds")
+                    running_with_recent_progress = (
+                        status_value == "running"
+                        and isinstance(last_progress_gap_seconds, (int, float))
+                        and float(last_progress_gap_seconds) <= max(args.poll_interval * 2, 15.0)
+                    )
                     report["checks"]["runtime_audit"] = {
                         "ok": True,
                         "audit_version": runtime_version,
                         "status": runtime_status,
+                        "completed_within_window": completed_within_window,
+                        "window_seconds": args.wait_seconds,
+                        "running_with_recent_progress": running_with_recent_progress,
                         "task_summary_from_list": runtime_summary,
                         "matches_plan_counts": (
                             runtime_summary["index_tasks"] == planned_summary_from_list["index_tasks"]
@@ -408,8 +606,12 @@ def main() -> int:
                             and runtime_summary["material_tasks"] == planned_summary_from_list["material_tasks"]
                         ),
                         "history_head": runtime_history[:3],
+                        "progressive_metrics": progressive_metrics,
+                        "runner_metrics": runner_metrics,
                     }
                     report["artifacts"]["runtime_tasks"] = runtime_tasks
+                    report["artifacts"]["runtime_results"] = runtime_results
+                    report["artifacts"]["runtime_events"] = runtime_events
 
         save_report(output_path, report)
         print(f"[INFO] report saved: {output_path}")
