@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import threading
+import time
 from typing import Any, Dict, Optional, Tuple
 
 from services.audit_runtime.output_guard import guard_output
@@ -87,6 +88,10 @@ class ProjectAuditAgentRunner:
                 self._subsessions[request.agent_key] = subsession
             return subsession
 
+    def _provider_name(self) -> str:
+        provider_name = getattr(self.provider, "provider_name", "")
+        return str(provider_name or "unknown").strip() or "unknown"
+
     async def run_once(
         self,
         request: RunnerTurnRequest,
@@ -95,25 +100,38 @@ class ProjectAuditAgentRunner:
     ) -> RunnerTurnResult:
         subsession = self.resolve_subsession(request)
         self._ensure_session_started(request, subsession)
+        self._mark_turn_started(subsession, phase="running")
         self._append_event(
             request,
             event_kind="runner_turn_started",
             message=f"{request.agent_name or request.agent_key} 已通过 Runner 发起一次非流式调用",
-            meta={"turn_kind": request.turn_kind, "session_key": subsession.session_key},
+            meta={
+                "turn_kind": request.turn_kind,
+                "session_key": subsession.session_key,
+                "provider_name": self._provider_name(),
+            },
         )
         subsession.current_turn_status = "running"
         try:
             result = await self.provider.run_once(request, subsession)
+            self._mark_progress(subsession, phase="completed")
             subsession.current_turn_status = "idle"
+            subsession.current_phase = "idle"
             return result
         except Exception as exc:
             subsession.current_turn_status = "failed"
+            subsession.current_phase = "failed"
+            subsession.stall_reason = str(exc)
             self._append_event(
                 request,
                 event_kind="runner_session_failed",
                 level="error",
                 message=f"{request.agent_name or request.agent_key} 的 Runner 会话执行失败：{exc}",
-                meta={"turn_kind": request.turn_kind, "session_key": subsession.session_key},
+                meta={
+                    "turn_kind": request.turn_kind,
+                    "session_key": subsession.session_key,
+                    "provider_name": self._provider_name(),
+                },
             )
             raise
 
@@ -125,11 +143,16 @@ class ProjectAuditAgentRunner:
     ) -> RunnerTurnResult:
         subsession = self.resolve_subsession(request)
         self._ensure_session_started(request, subsession)
+        self._mark_turn_started(subsession, phase="running")
         self._append_event(
             request,
             event_kind="runner_turn_started",
             message=f"{request.agent_name or request.agent_key} 已通过 Runner 发起一次流式调用",
-            meta={"turn_kind": request.turn_kind, "session_key": subsession.session_key},
+            meta={
+                "turn_kind": request.turn_kind,
+                "session_key": subsession.session_key,
+                "provider_name": self._provider_name(),
+            },
         )
         subsession.current_turn_status = "running"
 
@@ -137,14 +160,26 @@ class ProjectAuditAgentRunner:
             if event.text:
                 subsession.output_history.append(event.text)
                 subsession.output_history = subsession.output_history[-50:]
+                subsession.last_broadcast = event.text
+            if event.event_kind == "provider_stream_delta":
+                self._mark_progress(subsession, phase="streaming", has_delta=True)
+            elif event.event_kind == "phase_event":
+                self._mark_progress(
+                    subsession,
+                    phase=str(event.meta.get("kind") or "progress").strip() or "progress",
+                )
             if event.event_kind == "phase_event" and event.meta.get("reason"):
                 subsession.retry_count += 1
+                subsession.stall_reason = str(event.meta.get("reason") or "").strip() or None
             self._append_event(
                 request,
                 event_kind=event.event_kind,
                 level="warning" if event.event_kind == "phase_event" and event.meta.get("reason") else "info",
                 message=event.text or "AI 引擎正在重试",
-                meta=event.meta,
+                meta={
+                    "provider_name": self._provider_name(),
+                    **(event.meta or {}),
+                },
             )
 
         try:
@@ -155,16 +190,25 @@ class ProjectAuditAgentRunner:
                 should_cancel=should_cancel,
             )
             result = self._apply_output_guard(request, subsession, result)
+            self._mark_progress(subsession, phase="completed")
             subsession.current_turn_status = "idle"
+            subsession.current_phase = "idle"
+            subsession.stall_reason = None
             return result
         except Exception as exc:
             subsession.current_turn_status = "failed"
+            subsession.current_phase = "failed"
+            subsession.stall_reason = str(exc)
             self._append_event(
                 request,
                 event_kind="runner_session_failed",
                 level="error",
                 message=f"{request.agent_name or request.agent_key} 的 Runner 会话执行失败：{exc}",
-                meta={"turn_kind": request.turn_kind, "session_key": subsession.session_key},
+                meta={
+                    "turn_kind": request.turn_kind,
+                    "session_key": subsession.session_key,
+                    "provider_name": self._provider_name(),
+                },
             )
             raise
 
@@ -174,13 +218,25 @@ class ProjectAuditAgentRunner:
         subsession: RunnerSubsession,
     ) -> None:
         if subsession.session_started:
+            self._append_event(
+                request,
+                event_kind="runner_session_reused",
+                message=f"{request.agent_name or request.agent_key} 继续复用已有 Runner 子会话",
+                meta={
+                    "session_key": subsession.session_key,
+                    "provider_name": self._provider_name(),
+                },
+            )
             return
         subsession.session_started = True
         self._append_event(
             request,
             event_kind="runner_session_started",
             message=f"{request.agent_name or request.agent_key} 已创建项目级 Runner 子会话",
-            meta={"session_key": subsession.session_key},
+            meta={
+                "session_key": subsession.session_key,
+                "provider_name": self._provider_name(),
+            },
         )
 
     def _append_event(
@@ -194,6 +250,9 @@ class ProjectAuditAgentRunner:
     ) -> None:
         from services.audit_runtime.state_transitions import append_run_event
 
+        subsession = self._subsessions.get(request.agent_key)
+        if subsession is not None and message:
+            subsession.last_broadcast = message
         append_run_event(
             self.project_id,
             self.audit_version,
@@ -221,13 +280,20 @@ class ProjectAuditAgentRunner:
             event_kind="output_validation_failed",
             level="warning",
             message=f"{request.agent_name or request.agent_key} 的输出结构不完整，Runner 正在尝试整理",
-            meta={"session_key": subsession.session_key, "error": result.error},
+            meta={
+                "session_key": subsession.session_key,
+                "error": result.error,
+                "provider_name": self._provider_name(),
+            },
         )
         self._append_event(
             request,
             event_kind="output_repair_started",
             message=f"{request.agent_name or request.agent_key} 正在把 AI 引擎的原始输出整理成标准结果",
-            meta={"session_key": subsession.session_key},
+            meta={
+                "session_key": subsession.session_key,
+                "provider_name": self._provider_name(),
+            },
         )
 
         try:
@@ -241,7 +307,12 @@ class ProjectAuditAgentRunner:
                 event_kind="runner_turn_needs_review",
                 level="warning",
                 message=f"{request.agent_name or request.agent_key} 仍然无法整理出稳定结果，已转为待人工确认",
-                meta={"session_key": subsession.session_key, "error": str(exc)},
+                meta={
+                    "session_key": subsession.session_key,
+                    "error": str(exc),
+                    "provider_name": self._provider_name(),
+                    "repair_attempts": result.repair_attempts,
+                },
             )
             return result
 
@@ -252,9 +323,33 @@ class ProjectAuditAgentRunner:
             request,
             event_kind="output_repair_succeeded",
             message=f"{request.agent_name or request.agent_key} 已成功整理出标准结果",
-            meta={"session_key": subsession.session_key},
+            meta={
+                "session_key": subsession.session_key,
+                "provider_name": self._provider_name(),
+                "repair_attempts": result.repair_attempts,
+            },
         )
         return result
+
+    def _mark_turn_started(self, subsession: RunnerSubsession, *, phase: str) -> None:
+        now = time.time()
+        subsession.turn_started_at = now
+        subsession.last_progress_at = now
+        subsession.current_phase = phase
+        subsession.stall_reason = None
+
+    def _mark_progress(
+        self,
+        subsession: RunnerSubsession,
+        *,
+        phase: str,
+        has_delta: bool = False,
+    ) -> None:
+        now = time.time()
+        subsession.last_progress_at = now
+        subsession.current_phase = phase
+        if has_delta:
+            subsession.last_delta_at = now
 
 
 __all__ = ["ProjectAuditAgentRunner"]

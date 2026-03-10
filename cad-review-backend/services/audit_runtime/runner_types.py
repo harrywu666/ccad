@@ -58,6 +58,12 @@ class RunnerSubsession:
     retry_count: int = 0
     session_started: bool = False
     current_turn_status: str = "idle"
+    turn_started_at: Optional[float] = None
+    last_delta_at: Optional[float] = None
+    last_progress_at: Optional[float] = None
+    current_phase: str = "idle"
+    stall_reason: Optional[str] = None
+    last_broadcast: Optional[str] = None
     output_history: List[str] = field(default_factory=list)
 
 
