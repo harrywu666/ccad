@@ -32,10 +32,41 @@ def build_runner_observer_system_prompt() -> str:
     return f"{agent_prompt}\n\n---\n\n{soul_prompt}".strip()
 
 
+def _consecutive_observe_only_count(memory: RunnerObserverMemory) -> int:
+    count = 0
+    for item in reversed(memory.recent_decisions):
+        action = str(item.get("suggested_action") or "").strip()
+        if action != "observe_only":
+            break
+        count += 1
+    return count
+
+
+def _build_decision_pressure(
+    snapshot: RunnerObserverFeedSnapshot,
+    memory: RunnerObserverMemory,
+) -> str:
+    observe_only_count = _consecutive_observe_only_count(memory)
+    unstable_count = int(snapshot.risk_summary.get("output_validation_failed_count") or 0)
+    unstable_streak = int(snapshot.risk_summary.get("output_unstable_streak") or 0)
+
+    parts = []
+    if observe_only_count >= 2:
+        parts.append(f"你最近已经连续 {observe_only_count} 次仍以 observe_only 收敛。")
+    if unstable_count >= 2:
+        parts.append(f"最近同类输出不稳一共出现了 {unstable_count} 次。")
+    if unstable_streak >= 2:
+        parts.append(f"其中最近连续 {unstable_streak} 次都没有完全恢复。")
+    if not parts:
+        return "当前决策压力不高，可以继续以观察为主。"
+    return "".join(parts) + "除非你能明确说明现场已经恢复，否则不要继续只给 observe_only。"
+
+
 def build_runner_observer_user_prompt(
     snapshot: RunnerObserverFeedSnapshot,
     memory: RunnerObserverMemory,
 ) -> str:
+    decision_pressure = _build_decision_pressure(snapshot, memory)
     payload = {
         "project_id": snapshot.project_id,
         "audit_version": snapshot.audit_version,
@@ -45,6 +76,7 @@ def build_runner_observer_user_prompt(
         "current_risk_signals": snapshot.current_risk_signals,
         "risk_summary": snapshot.risk_summary,
         "intervention_hint": snapshot.intervention_hint,
+        "decision_pressure": decision_pressure,
         "available_actions": snapshot.available_actions,
         "memory": {
             "project_summary": memory.project_summary,
@@ -59,6 +91,7 @@ def build_runner_observer_user_prompt(
         "你必须只返回 JSON 对象，不要 markdown，不要解释。\n"
         "判断原则补充：如果同类问题已经连续出现，或者你最近已经连续多次只给 observe_only，"
         "不要连续多次只给 observe_only；你需要认真考虑 broadcast_update、restart_subsession、mark_needs_review。\n"
+        f"本轮决策压力提示：{decision_pressure}\n"
         "JSON 字段固定为："
         '{"summary":"","risk_level":"low|medium|high","suggested_action":"observe_only|broadcast_update|cancel_turn|restart_subsession|rerun_current_step|mark_needs_review","reason":"","should_intervene":false,"confidence":0.0,"user_facing_broadcast":""}\n'
         "现场数据如下：\n"
