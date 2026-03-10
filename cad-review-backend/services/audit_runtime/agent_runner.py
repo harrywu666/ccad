@@ -6,6 +6,7 @@ import inspect
 import threading
 from typing import Any, Dict, Optional, Tuple
 
+from services.audit_runtime.output_guard import guard_output
 from services.audit_runtime.runner_types import (
     ProviderStreamEvent,
     RunnerSubsession,
@@ -153,6 +154,7 @@ class ProjectAuditAgentRunner:
                 on_event=_on_provider_event,
                 should_cancel=should_cancel,
             )
+            result = self._apply_output_guard(request, subsession, result)
             subsession.current_turn_status = "idle"
             return result
         except Exception as exc:
@@ -204,6 +206,55 @@ class ProjectAuditAgentRunner:
             message=message,
             meta=meta,
         )
+
+    def _apply_output_guard(
+        self,
+        request: RunnerTurnRequest,
+        subsession: RunnerSubsession,
+        result: RunnerTurnResult,
+    ) -> RunnerTurnResult:
+        if result.output is not None:
+            return result
+
+        self._append_event(
+            request,
+            event_kind="output_validation_failed",
+            level="warning",
+            message=f"{request.agent_name or request.agent_key} 的输出结构不完整，Runner 正在尝试整理",
+            meta={"session_key": subsession.session_key, "error": result.error},
+        )
+        self._append_event(
+            request,
+            event_kind="output_repair_started",
+            message=f"{request.agent_name or request.agent_key} 正在把 AI 引擎的原始输出整理成标准结果",
+            meta={"session_key": subsession.session_key},
+        )
+
+        try:
+            repaired_output = guard_output(result.raw_output)
+        except Exception as exc:
+            result.status = "needs_review"
+            result.error = str(exc)
+            result.repair_attempts += 1
+            self._append_event(
+                request,
+                event_kind="runner_turn_needs_review",
+                level="warning",
+                message=f"{request.agent_name or request.agent_key} 仍然无法整理出稳定结果，已转为待人工确认",
+                meta={"session_key": subsession.session_key, "error": str(exc)},
+            )
+            return result
+
+        result.output = repaired_output
+        result.status = "ok"
+        result.repair_attempts += 1
+        self._append_event(
+            request,
+            event_kind="output_repair_succeeded",
+            message=f"{request.agent_name or request.agent_key} 已成功整理出标准结果",
+            meta={"session_key": subsession.session_key},
+        )
+        return result
 
 
 __all__ = ["ProjectAuditAgentRunner"]

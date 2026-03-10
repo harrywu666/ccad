@@ -120,4 +120,4 @@ def test_plan_with_master_llm_stream_emits_retry_events(monkeypatch):
 
     assert result["ok"] is True
     assert any(event["event_kind"] == "phase_event" for event in captured_events)
-    assert "自动重试" in captured_events[-1]["message"]
+    assert "第 1 次重试" in captured_events[-1]["message"]

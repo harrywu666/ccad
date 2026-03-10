@@ -38,9 +38,11 @@ class RunnerTurnResult:
 
     provider_name: str
     output: Any
+    status: str = "ok"
     raw_output: str = ""
     subsession_key: Optional[str] = None
     repair_attempts: int = 0
+    error: Optional[str] = None
     events: List[ProviderStreamEvent] = field(default_factory=list)
 
 

@@ -72,24 +72,38 @@ class KimiApiProvider(BaseRunnerProvider):
             await _emit_stream_event(on_event, event)
 
         async def _on_retry(payload: dict) -> None:
+            attempt = int(payload.get("attempt") or 1)
             event = ProviderStreamEvent(
                 event_kind="phase_event",
-                text="AI 引擎连接暂时被打断，正在自动重试",
+                text=f"AI 引擎连接暂时被打断，正在第 {attempt} 次重试",
                 meta=payload,
             )
             events.append(event)
             await _emit_stream_event(on_event, event)
 
-        output = await self._run_stream_func(
-            system_prompt=request.system_prompt,
-            user_prompt=request.user_prompt,
-            images=request.images,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            on_delta=_on_delta,
-            on_retry=_on_retry,
-            should_cancel=should_cancel,
-        )
+        try:
+            output = await self._run_stream_func(
+                system_prompt=request.system_prompt,
+                user_prompt=request.user_prompt,
+                images=request.images,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                on_delta=_on_delta,
+                on_retry=_on_retry,
+                should_cancel=should_cancel,
+            )
+        except Exception as exc:
+            if not chunks:
+                raise
+            return RunnerTurnResult(
+                provider_name=self.provider_name,
+                output=None,
+                status="invalid_output",
+                raw_output="".join(chunks),
+                subsession_key=subsession.session_key,
+                error=str(exc),
+                events=events,
+            )
         return RunnerTurnResult(
             provider_name=self.provider_name,
             output=output,

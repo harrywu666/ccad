@@ -24,14 +24,71 @@ from services.audit.prompt_builder import (
 )
 from services.audit.result_parser import parse_dimension_pair_item
 from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidenceRequest
+from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
 from services.audit_runtime.evidence_planner import plan_evidence_requests
 from services.audit_runtime.evidence_service import get_evidence_service
+from services.audit_runtime.finding_schema import Finding, apply_finding_to_audit_result
+from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
+from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
+from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
+from services.audit_runtime.cancel_registry import is_cancel_requested
+from services.audit_runtime.state_transitions import append_run_event
 from services.coordinate_service import cad_to_global_pct, enrich_json_with_coordinates
 from services.feedback_runtime_service import load_feedback_runtime_profile
+from services.kimi_service import call_kimi_stream
 from services.skill_pack_service import load_runtime_skill_profile
 from services.storage_path_service import resolve_project_dir
 
 logger = logging.getLogger(__name__)
+
+
+def _get_dimension_runner(
+    project_id: str,
+    audit_version: int,
+    *,
+    call_kimi,  # noqa: ANN001
+) -> ProjectAuditAgentRunner:
+    return ProjectAuditAgentRunner.get_or_create(
+        project_id,
+        audit_version=audit_version,
+        provider=KimiApiProvider(
+            run_once_func=call_kimi,
+            run_stream_func=call_kimi_stream,
+        ),
+        shared_context={"project_id": project_id, "audit_version": audit_version},
+    )
+
+
+def _dimension_status_from_confidence(confidence: float, *, review_round: int = 1) -> str:
+    if review_round >= 3:
+        return "needs_review"
+    if confidence >= 0.75:
+        return "confirmed"
+    return "suspected"
+
+
+def _apply_dimension_finding(
+    issue: AuditResult,
+    *,
+    confidence: float,
+    review_round: int = 1,
+    triggered_by: str | None = None,
+) -> AuditResult:
+    finding = Finding(
+        sheet_no=str(issue.sheet_no_a or issue.sheet_no_b or "UNKNOWN").strip() or "UNKNOWN",
+        location=str(issue.location or "未定位").strip() or "未定位",
+        rule_id="dimension_pair_compare",
+        finding_type="dim_mismatch",
+        severity=str(issue.severity or "warning").strip().lower() or "warning",
+        status=_dimension_status_from_confidence(confidence, review_round=review_round),  # type: ignore[arg-type]
+        confidence=max(0.0, min(1.0, confidence)),
+        source_agent="dimension_review_agent",
+        evidence_pack_id="paired_overview_pack",
+        review_round=review_round,
+        triggered_by=triggered_by,
+        description=str(issue.description or "").strip(),
+    )
+    return apply_finding_to_audit_result(issue, finding)
 
 
 def _dimension_v2_enabled() -> bool:
@@ -43,6 +100,37 @@ def _dimension_v2_enabled() -> bool:
     }
 
 
+def _dimension_stream_enabled() -> bool:
+    raw = os.getenv("AUDIT_KIMI_STREAM_ENABLED")
+    if raw is None:
+        return True
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _append_dimension_stream_event(
+    project_id: str,
+    audit_version: int,
+    *,
+    event_kind: str,
+    message: str,
+    progress_hint: int,
+    level: str = "info",
+    meta: Dict[str, Any] | None = None,
+) -> None:
+    append_run_event(
+        project_id,
+        audit_version,
+        level=level,
+        step_key="dimension",
+        agent_key="dimension_review_agent",
+        agent_name="尺寸审查Agent",
+        event_kind=event_kind,
+        progress_hint=progress_hint,
+        message=message,
+        meta=meta or {},
+    )
+
+
 def resolve_dimension_runtime_policy(
     *,
     skill_profile: Dict[str, Any] | None = None,
@@ -51,6 +139,7 @@ def resolve_dimension_runtime_policy(
     floor = 0.0
     needs_secondary_review = bool((feedback_profile or {}).get("needs_secondary_review"))
     severity_override = (feedback_profile or {}).get("severity_override")
+    hint = (feedback_profile or {}).get("experience_hint")
 
     skill_policy = ((skill_profile or {}).get("judgement_policy") or {}).get("dimension")
     if isinstance(skill_policy, dict):
@@ -61,6 +150,13 @@ def resolve_dimension_runtime_policy(
             needs_secondary_review = True
         if skill_policy.get("severity_override"):
             severity_override = skill_policy.get("severity_override")
+
+    if isinstance(hint, dict):
+        raw_floor = hint.get("confidence_floor")
+        if isinstance(raw_floor, (int, float)):
+            floor = max(floor, float(raw_floor))
+        if str(hint.get("intervention_level") or "").strip().lower() in {"soft", "hard"}:
+            needs_secondary_review = True
 
     raw_feedback_floor = (feedback_profile or {}).get("confidence_floor")
     if isinstance(raw_feedback_floor, (int, float)):
@@ -431,6 +527,9 @@ async def _execute_sheet_jobs(
     sheet_concurrency: int,
     cache_dir: Path,
     call_kimi,
+    *,
+    project_id: str | None = None,
+    audit_version: int | None = None,
 ) -> List[Tuple[str, List[Dict[str, Any]], str]]:
     if not sheet_jobs:
         return []
@@ -450,6 +549,7 @@ async def _execute_sheet_jobs(
                 requires_visual=True,
                 skill_profile=skill_profile,
                 feedback_profile=feedback_profile,
+                priority="normal",
             )
             if plans:
                 pack_type = plans[0].pack_type
@@ -471,15 +571,46 @@ async def _execute_sheet_jobs(
             ]
         else:
             images = list(pack.images.values())
-        semantic_result = await call_kimi(
-            system_prompt=resolve_stage_system_prompt_with_skills(
-                stage_key,
-                "dimension",
-            ),
-            user_prompt=job["prompt"],
-            images=images,
-            temperature=0.0,
-        )
+        if project_id is not None and audit_version is not None and _dimension_stream_enabled():
+            runner = _get_dimension_runner(
+                project_id,
+                audit_version,
+                call_kimi=call_kimi,
+            )
+            turn_result: RunnerTurnResult = await runner.run_stream(
+                RunnerTurnRequest(
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    step_key="dimension",
+                    progress_hint=29,
+                    turn_kind="dimension_sheet_semantic",
+                    system_prompt=resolve_stage_system_prompt_with_skills(
+                        stage_key,
+                        "dimension",
+                    ),
+                    user_prompt=job["prompt"],
+                    images=images,
+                    temperature=0.0,
+                    meta={
+                        "mode": "sheet_semantic",
+                        "sheet_no": job["sheet_no"],
+                        "visual_only": bool(job.get("visual_only")),
+                        "pack_type": pack_type.value,
+                    },
+                ),
+                should_cancel=lambda: is_cancel_requested(project_id),
+            )
+            semantic_result = turn_result.output if turn_result.status != "needs_review" else []
+        else:
+            semantic_result = await call_kimi(
+                system_prompt=resolve_stage_system_prompt_with_skills(
+                    stage_key,
+                    "dimension",
+                ),
+                user_prompt=job["prompt"],
+                images=images,
+                temperature=0.0,
+            )
         if not isinstance(semantic_result, list):
             raise RuntimeError(
                 f"尺寸语义分析返回格式异常：{job['sheet_no']}，返回类型={type(semantic_result).__name__}"
@@ -580,6 +711,9 @@ async def _execute_pair_jobs(
     pair_concurrency: int,
     cache_dir: Path,
     call_kimi,
+    *,
+    project_id: str | None = None,
+    audit_version: int | None = None,
 ) -> Dict[Tuple[str, str], List[Dict[str, Any]]]:
     if not pair_jobs:
         return {}
@@ -603,6 +737,7 @@ async def _execute_pair_jobs(
                         requires_visual=True,
                         skill_profile=skill_profile,
                         feedback_profile=feedback_profile,
+                        priority="high",
                     )
                     if plans:
                         if plans[0].pack_type == EvidencePackType.OVERVIEW_PACK:
@@ -622,22 +757,59 @@ async def _execute_pair_jobs(
             except Exception:
                 pair_images = []
 
-        compare_result = await call_kimi(
-            system_prompt=resolve_stage_system_prompt_with_skills(
-                "dimension_pair_compare",
-                "dimension",
-            ),
-            user_prompt=build_pair_compare_prompt(
-                a_sheet_no=job["a_sheet_no"],
-                a_sheet_name=job["a_sheet_name"],
-                a_semantic=job["semantic_a"],
-                b_sheet_no=job["b_sheet_no"],
-                b_sheet_name=job["b_sheet_name"],
-                b_semantic=job["semantic_b"],
-            ),
-            images=pair_images if pair_images else None,
-            temperature=0.0,
-        )
+        if project_id is not None and audit_version is not None and _dimension_stream_enabled():
+            runner = _get_dimension_runner(
+                project_id,
+                audit_version,
+                call_kimi=call_kimi,
+            )
+            turn_result: RunnerTurnResult = await runner.run_stream(
+                RunnerTurnRequest(
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    step_key="dimension",
+                    progress_hint=31,
+                    turn_kind="dimension_pair_compare",
+                    system_prompt=resolve_stage_system_prompt_with_skills(
+                        "dimension_pair_compare",
+                        "dimension",
+                    ),
+                    user_prompt=build_pair_compare_prompt(
+                        a_sheet_no=job["a_sheet_no"],
+                        a_sheet_name=job["a_sheet_name"],
+                        a_semantic=job["semantic_a"],
+                        b_sheet_no=job["b_sheet_no"],
+                        b_sheet_name=job["b_sheet_name"],
+                        b_semantic=job["semantic_b"],
+                    ),
+                    images=pair_images if pair_images else [],
+                    temperature=0.0,
+                    meta={
+                        "mode": "pair_compare",
+                        "source_sheet_no": job["a_sheet_no"],
+                        "target_sheet_no": job["b_sheet_no"],
+                    },
+                ),
+                should_cancel=lambda: is_cancel_requested(project_id),
+            )
+            compare_result = turn_result.output if turn_result.status != "needs_review" else []
+        else:
+            compare_result = await call_kimi(
+                system_prompt=resolve_stage_system_prompt_with_skills(
+                    "dimension_pair_compare",
+                    "dimension",
+                ),
+                user_prompt=build_pair_compare_prompt(
+                    a_sheet_no=job["a_sheet_no"],
+                    a_sheet_name=job["a_sheet_name"],
+                    a_semantic=job["semantic_a"],
+                    b_sheet_no=job["b_sheet_no"],
+                    b_sheet_name=job["b_sheet_name"],
+                    b_semantic=job["semantic_b"],
+                ),
+                images=pair_images if pair_images else None,
+                temperature=0.0,
+            )
         if not isinstance(compare_result, list):
             raise RuntimeError(
                 f"尺寸图对比对返回格式异常：{job['a_sheet_no']} vs {job['b_sheet_no']}，"
@@ -802,6 +974,11 @@ def _build_dimension_issues(
                 pair_id=f"{pair['a']}::{pair['b']}",
                 unlocated_reason=None if anchors else "dimension_pair_unlocated",
             )
+            _apply_dimension_finding(
+                issue,
+                confidence=confidence,
+                review_round=1,
+            )
             issues.append(issue)
 
     return issues
@@ -813,6 +990,7 @@ def audit_dimensions(
     audit_version: int,
     db,
     pair_filters: Optional[List[Tuple[str, str]]] = None,
+    hot_sheet_registry: HotSheetRegistry | None = None,
 ) -> List[AuditResult]:
     from services.kimi_service import call_kimi
 
@@ -865,6 +1043,18 @@ def audit_dimensions(
         logger.warning("加载AI关系边失败: %s", exc)
 
     pairs = _build_pairs(json_by_sheet, pair_filters, ai_edges=ai_edges)
+    if hot_sheet_registry is not None:
+        pairs = sorted(
+            pairs,
+            key=lambda pair: (
+                -max(
+                    hot_sheet_registry.score(json_by_sheet.get(pair["a"], {}).get("sheet_no")),
+                    hot_sheet_registry.score(json_by_sheet.get(pair["b"], {}).get("sheet_no")),
+                ),
+                pair["a"],
+                pair["b"],
+            ),
+        )
     logger.info(
         "dimension_audit pairs=%s (filters=%s, ai_edges=%s)",
         len(pairs), len(pair_filters) if pair_filters else "none", len(ai_edges),
@@ -895,7 +1085,12 @@ def audit_dimensions(
         Dict[Tuple[str, str], List[Dict[str, Any]]], int, int
     ]:
         sheet_results = await _execute_sheet_jobs(
-            sheet_jobs, sheet_concurrency, cache_dir, call_kimi
+            sheet_jobs,
+            sheet_concurrency,
+            cache_dir,
+            call_kimi,
+            project_id=project_id,
+            audit_version=audit_version,
         )
         for s_key, cleaned, c_key in sheet_results:
             semantic_cache[s_key] = cleaned
@@ -912,7 +1107,14 @@ def audit_dimensions(
             prompt_version, cache_dir, audit_version,
         )
         pc_results.update(
-            await _execute_pair_jobs(p_jobs, pair_concurrency, cache_dir, call_kimi)
+            await _execute_pair_jobs(
+                p_jobs,
+                pair_concurrency,
+                cache_dir,
+                call_kimi,
+                project_id=project_id,
+                audit_version=audit_version,
+            )
         )
         return pc_results, pc_hit, pc_miss
 
@@ -935,6 +1137,21 @@ def audit_dimensions(
         json_by_sheet=json_by_sheet,
         runtime_policy=runtime_policy,
     )
+    if hot_sheet_registry is not None:
+        for issue in issues:
+            confidence = float(getattr(issue, "confidence", None) or 0.72)
+            hot_sheet_registry.publish(
+                issue.sheet_no_a,
+                finding_type=getattr(issue, "finding_type", None) or "dim_mismatch",
+                confidence=confidence,
+                source_agent="dimension_review_agent",
+            )
+            hot_sheet_registry.publish(
+                issue.sheet_no_b,
+                finding_type=getattr(issue, "finding_type", None) or "dim_mismatch",
+                confidence=confidence,
+                source_agent="dimension_review_agent",
+            )
     add_and_commit(db, issues)
     logger.info(
         "dimension_audit done project=%s version=%s issues=%s",
