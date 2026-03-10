@@ -47,3 +47,30 @@ def test_runner_observer_user_prompt_includes_escalation_hint_and_recent_decisio
 
     assert "不要连续多次只给 observe_only" in prompt
     assert "recent_decisions" in prompt
+
+
+def test_runner_observer_user_prompt_includes_decision_pressure_summary():
+    snapshot = build_observer_snapshot(
+        project_id="proj-pressure",
+        audit_version=3,
+        runtime_status={"status": "running", "current_step": "关系复核"},
+        recent_events=[
+            {"event_kind": "output_validation_failed", "message": "第一次输出不稳"},
+            {"event_kind": "output_validation_failed", "message": "第二次输出不稳"},
+            {"event_kind": "output_validation_failed", "message": "第三次输出不稳"},
+        ],
+    )
+    memory = RunnerObserverMemory(
+        project_id="proj-pressure",
+        audit_version=3,
+        recent_decisions=[
+            {"suggested_action": "observe_only", "risk_level": "medium"},
+            {"suggested_action": "observe_only", "risk_level": "medium"},
+            {"suggested_action": "observe_only", "risk_level": "medium"},
+        ],
+    )
+
+    prompt = build_runner_observer_user_prompt(snapshot, memory)
+
+    assert "decision_pressure" in prompt
+    assert "连续 3 次仍以 observe_only 收敛" in prompt
