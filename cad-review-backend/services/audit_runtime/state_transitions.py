@@ -227,7 +227,44 @@ def _load_observer_runtime_status(project_id: str, audit_version: int) -> Dict[s
             .first()
         )
         if not run:
-            return {}
+            rows = (
+                db.query(AuditRunEvent)
+                .filter(
+                    AuditRunEvent.project_id == project_id,
+                    AuditRunEvent.audit_version == audit_version,
+                )
+                .order_by(AuditRunEvent.id.desc())
+                .limit(20)
+                .all()
+            )
+            provider_mode = None
+            current_step = None
+            progress = None
+            for row in rows:
+                if current_step is None and getattr(row, "step_key", None):
+                    current_step = row.step_key
+                if progress is None and getattr(row, "progress_hint", None) is not None:
+                    progress = row.progress_hint
+                try:
+                    meta = json.loads(row.meta_json) if row.meta_json else {}
+                except Exception:
+                    meta = {}
+                if not isinstance(meta, dict):
+                    meta = {}
+                if provider_mode is None:
+                    provider_mode = (
+                        str(meta.get("provider_mode") or "").strip()
+                        or str(meta.get("provider_name") or "").strip()
+                        or None
+                    )
+                if current_step and progress is not None and provider_mode:
+                    break
+            return {
+                "status": "running",
+                "current_step": current_step,
+                "progress": progress,
+                "provider_mode": provider_mode,
+            }
         return {
             "status": getattr(run, "status", None),
             "current_step": getattr(run, "current_step", None),
