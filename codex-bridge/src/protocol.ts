@@ -18,12 +18,12 @@ export type BridgeResponseType = (typeof BRIDGE_RESPONSE_TYPES)[number];
 
 export interface BridgeRequestEnvelope<TPayload = Record<string, unknown>> {
   op: BridgeRequestOp;
-  requestId: string;
+  request_id: string;
   payload: TPayload;
 }
 
 export interface BridgeResponseEnvelope<TPayload = Record<string, unknown>> {
   type: BridgeResponseType;
-  requestId: string;
+  request_id: string;
   payload: TPayload;
 }
