@@ -12,6 +12,8 @@ from services.audit_runtime.runner_types import (
     RunnerTurnResult,
 )
 
+CODEX_BRIDGE_BOUNDARY = True
+
 
 def _thread_map(subsession: RunnerSubsession) -> dict[str, str]:
     mapping = subsession.shared_context.setdefault("__codex_thread_map__", {})
@@ -80,4 +82,4 @@ class CodexSdkProvider(BaseRunnerProvider):
         return user or system
 
 
-__all__ = ["CodexSdkProvider"]
+__all__ = ["CODEX_BRIDGE_BOUNDARY", "CodexSdkProvider"]
