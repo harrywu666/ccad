@@ -95,6 +95,13 @@ class ProjectAuditAgentRunner:
         provider_name = getattr(self.provider, "provider_name", "")
         return str(provider_name or "unknown").strip() or "unknown"
 
+    def _provider_mode(self) -> str:
+        if isinstance(self.shared_context, dict):
+            raw = self.shared_context.get("provider_mode")
+            if raw:
+                return str(raw).strip()
+        return self._provider_name()
+
     async def run_once(
         self,
         request: RunnerTurnRequest,
@@ -113,6 +120,7 @@ class ProjectAuditAgentRunner:
                 "turn_kind": request.turn_kind,
                 "session_key": subsession.session_key,
                 "provider_name": self._provider_name(),
+                "provider_mode": self._provider_mode(),
             },
         )
         subsession.current_turn_status = "running"
@@ -135,6 +143,7 @@ class ProjectAuditAgentRunner:
                     "turn_kind": request.turn_kind,
                     "session_key": subsession.session_key,
                     "provider_name": self._provider_name(),
+                    "provider_mode": self._provider_mode(),
                 },
             )
             raise
@@ -157,6 +166,7 @@ class ProjectAuditAgentRunner:
                 "turn_kind": request.turn_kind,
                 "session_key": subsession.session_key,
                 "provider_name": self._provider_name(),
+                "provider_mode": self._provider_mode(),
             },
         )
         subsession.current_turn_status = "running"
@@ -185,6 +195,7 @@ class ProjectAuditAgentRunner:
                 message=event.text or "AI 引擎正在重试",
                 meta={
                     "provider_name": self._provider_name(),
+                    "provider_mode": self._provider_mode(),
                     **(event.meta or {}),
                 },
             )

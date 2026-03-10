@@ -6,7 +6,7 @@
 import os
 from pathlib import Path
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import close_all_sessions, sessionmaker, declarative_base
 
 BASE_DIR = Path.home() / "cad-review"
 DB_DIR = BASE_DIR / "db"
@@ -48,6 +48,12 @@ def init_db():
     _ensure_runtime_columns()
 
 
+def dispose_db_engine() -> None:
+    """释放当前进程内的会话与数据库连接。"""
+    close_all_sessions()
+    engine.dispose()
+
+
 def _ensure_runtime_columns():
     """
     轻量Schema迁移（无alembic场景）：
@@ -56,6 +62,7 @@ def _ensure_runtime_columns():
     - audit_results.resolved_at
     - audit_results.feedback_status
     - audit_results.feedback_at
+    - audit_results.rule_id / finding_type / finding_status / source_agent / evidence_pack_id / review_round / triggered_by / confidence
     - projects.ui_preferences
     """
     with engine.begin() as conn:
@@ -73,6 +80,22 @@ def _ensure_runtime_columns():
             conn.execute(text("ALTER TABLE audit_results ADD COLUMN feedback_at DATETIME"))
         if "feedback_note" not in col_names:
             conn.execute(text("ALTER TABLE audit_results ADD COLUMN feedback_note TEXT"))
+        if "rule_id" not in col_names:
+            conn.execute(text("ALTER TABLE audit_results ADD COLUMN rule_id TEXT"))
+        if "finding_type" not in col_names:
+            conn.execute(text("ALTER TABLE audit_results ADD COLUMN finding_type TEXT"))
+        if "finding_status" not in col_names:
+            conn.execute(text("ALTER TABLE audit_results ADD COLUMN finding_status TEXT"))
+        if "source_agent" not in col_names:
+            conn.execute(text("ALTER TABLE audit_results ADD COLUMN source_agent TEXT"))
+        if "evidence_pack_id" not in col_names:
+            conn.execute(text("ALTER TABLE audit_results ADD COLUMN evidence_pack_id TEXT"))
+        if "review_round" not in col_names:
+            conn.execute(text("ALTER TABLE audit_results ADD COLUMN review_round INTEGER DEFAULT 1"))
+        if "triggered_by" not in col_names:
+            conn.execute(text("ALTER TABLE audit_results ADD COLUMN triggered_by TEXT"))
+        if "confidence" not in col_names:
+            conn.execute(text("ALTER TABLE audit_results ADD COLUMN confidence REAL"))
 
         project_rows = conn.execute(text("PRAGMA table_info(projects)")).fetchall()
         project_col_names = {str(row[1]) for row in project_rows}
@@ -83,6 +106,11 @@ def _ensure_runtime_columns():
         drawing_col_names = {str(row[1]) for row in drawing_rows}
         if "annotation_board" not in drawing_col_names:
             conn.execute(text("ALTER TABLE drawings ADD COLUMN annotation_board TEXT"))
+
+        audit_run_rows = conn.execute(text("PRAGMA table_info(audit_runs)")).fetchall()
+        audit_run_col_names = {str(row[1]) for row in audit_run_rows}
+        if "provider_mode" not in audit_run_col_names:
+            conn.execute(text("ALTER TABLE audit_runs ADD COLUMN provider_mode TEXT"))
 
         existing_tables = {
             str(row[0])
@@ -193,8 +221,23 @@ def _ensure_runtime_columns():
                     audit_version INTEGER NOT NULL,
                     level TEXT DEFAULT 'info',
                     step_key TEXT,
+                    agent_key TEXT,
+                    agent_name TEXT,
+                    event_kind TEXT,
+                    progress_hint INTEGER,
                     message TEXT NOT NULL,
                     meta_json TEXT,
                     created_at DATETIME
                 )
             """))
+        else:
+            audit_event_rows = conn.execute(text("PRAGMA table_info(audit_run_events)")).fetchall()
+            audit_event_col_names = {str(row[1]) for row in audit_event_rows}
+            if "agent_key" not in audit_event_col_names:
+                conn.execute(text("ALTER TABLE audit_run_events ADD COLUMN agent_key TEXT"))
+            if "agent_name" not in audit_event_col_names:
+                conn.execute(text("ALTER TABLE audit_run_events ADD COLUMN agent_name TEXT"))
+            if "event_kind" not in audit_event_col_names:
+                conn.execute(text("ALTER TABLE audit_run_events ADD COLUMN event_kind TEXT"))
+            if "progress_hint" not in audit_event_col_names:
+                conn.execute(text("ALTER TABLE audit_run_events ADD COLUMN progress_hint INTEGER"))

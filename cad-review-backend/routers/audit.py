@@ -78,6 +78,7 @@ class AuditStatusResponse(BaseModel):
     progress: int = 0
     total_issues: int = 0
     run_status: Optional[str] = None
+    provider_mode: Optional[str] = None
     error: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
@@ -189,6 +190,7 @@ class ThreeLineMatchResponse(BaseModel):
 
 class StartAuditRequest(BaseModel):
     allow_incomplete: bool = False
+    provider_mode: Optional[str] = None
 
 
 class AuditIssueDrawingPreviewAssetResponse(BaseModel):
@@ -507,6 +509,7 @@ def get_audit_status(project_id: str, db: Session = Depends(get_db)):
         progress=int(snapshot["progress"] or (100 if project.status == "done" else 0)),
         total_issues=total_issues,
         run_status=snapshot["status"],
+        provider_mode=snapshot.get("provider_mode"),
         error=snapshot["error"],
         started_at=snapshot["started_at"],
         finished_at=snapshot["finished_at"],
@@ -1176,6 +1179,7 @@ def start_audit(
         is_project_running,
         mark_stale_running_runs,
     )
+    from services.audit_runtime.providers.factory import normalize_provider_mode
 
     if is_project_running(project_id):
         latest_run = get_latest_run(project_id, db)
@@ -1193,6 +1197,7 @@ def start_audit(
         raise HTTPException(status_code=409, detail="该项目已有审核任务在运行")
 
     new_version = get_next_audit_version(project_id, db)
+    provider_mode = normalize_provider_mode(request.provider_mode if request else None)
 
     run = AuditRun(
         project_id=project_id,
@@ -1201,6 +1206,7 @@ def start_audit(
         current_step="等待执行",
         progress=0,
         total_issues=0,
+        provider_mode=provider_mode,
         scope_mode="partial"
         if (allow_incomplete and summary["ready"] < summary["total"])
         else "full",
@@ -1211,7 +1217,12 @@ def start_audit(
     db.commit()
 
     try:
-        start_audit_async(project_id, new_version, allow_incomplete=allow_incomplete)
+        start_audit_async(
+            project_id,
+            new_version,
+            allow_incomplete=allow_incomplete,
+            provider_mode=provider_mode,
+        )
     except RuntimeError as exc:
         run.status = "failed"
         run.current_step = "启动失败"
