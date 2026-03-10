@@ -17,7 +17,13 @@ import {
 } from '@/components/ui/alert-dialog';
 import * as api from '@/api';
 import type { Project, Category, CatalogItem, Drawing, JsonData, AuditResult, AuditStatus, ThreeLineMatch, ThreeLineItem, MatchFilter } from '@/types';
-import type { AuditEvent, AuditHistoryItem } from '@/types/api';
+import {
+  AUDIT_PROVIDER_STORAGE_KEY,
+  DEFAULT_AUDIT_PROVIDER_MODE,
+  type AuditEvent,
+  type AuditHistoryItem,
+  type AuditProviderMode,
+} from '@/types/api';
 
 // Layout & UI Components
 import AppLayout from '@/components/layout/AppLayout';
@@ -27,7 +33,12 @@ import UploadCard from './ProjectDetail/components/UploadCard';
 import CatalogTable from './ProjectDetail/components/CatalogTable';
 import MatchTable from './ProjectDetail/components/MatchTable';
 import ProjectStepAudit from './ProjectDetail/components/project-detail/ProjectStepAudit';
-import AuditProgressDialog, { AuditProgressPill } from './ProjectDetail/components/AuditProgressDialog';
+import AuditProgressDialog, {
+  AuditProgressPill,
+  AuditProviderSelector,
+  getAuditProviderLabel,
+} from './ProjectDetail/components/AuditProgressDialog';
+import { createAuditEventStreamController } from './ProjectDetail/components/auditEventStream';
 
 const STAGE_FLOW = [
   { match: ['校验三线匹配'], title: '准备检查' },
@@ -39,6 +50,12 @@ const STAGE_FLOW = [
   { match: ['材料核对'], title: '材料表验证' },
   { match: ['审核完成'], title: '生成报告' },
 ];
+
+function readDefaultAuditProviderMode(): AuditProviderMode {
+  if (typeof window === 'undefined') return DEFAULT_AUDIT_PROVIDER_MODE;
+  const raw = window.localStorage.getItem(AUDIT_PROVIDER_STORAGE_KEY);
+  return raw === 'codex_sdk' ? 'codex_sdk' : DEFAULT_AUDIT_PROVIDER_MODE;
+}
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -80,6 +97,8 @@ export default function ProjectDetail() {
   const [isAuditProgressMinimized, setIsAuditProgressMinimized] = useState(false);
   const [isAuditProgressDismissed, setIsAuditProgressDismissed] = useState(false);
   const [awaitingAuditStatusSync, setAwaitingAuditStatusSync] = useState(false);
+  const [defaultAuditProviderMode, setDefaultAuditProviderMode] = useState<AuditProviderMode>(readDefaultAuditProviderMode);
+  const [auditProviderMode, setAuditProviderMode] = useState<AuditProviderMode>(readDefaultAuditProviderMode);
   const [previewDrawing, setPreviewDrawing] = useState<{
     sheetNo: string;
     sheetName: string;
@@ -113,6 +132,16 @@ export default function ProjectDetail() {
     if (id) loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    const handleDefaultChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ providerMode?: AuditProviderMode }>).detail;
+      const next = detail?.providerMode === 'codex_sdk' ? 'codex_sdk' : DEFAULT_AUDIT_PROVIDER_MODE;
+      setDefaultAuditProviderMode(next);
+    };
+    window.addEventListener('ccad:audit-provider-default-changed', handleDefaultChange);
+    return () => window.removeEventListener('ccad:audit-provider-default-changed', handleDefaultChange);
+  }, []);
 
   useEffect(() => {
     if (!id || (currentStep !== 2)) return;
@@ -188,54 +217,33 @@ export default function ProjectDetail() {
     const version = auditStatus?.audit_version ?? selectedAuditVersion ?? null;
     if (version === null || version === undefined) return;
 
-    let stopped = false;
-    let timer: number | undefined;
-
-    const pollAuditEvents = async (initialLoad = false) => {
-      try {
-        if (initialLoad) {
-          setAuditEventsLoading(true);
-        }
-
-        const versionChanged = auditEventsVersionRef.current !== version;
-        const response = await api.getAuditEvents(id, {
-          version,
-          since_id: versionChanged ? undefined : (auditEventsSinceIdRef.current ?? undefined),
-          limit: versionChanged ? 50 : 30,
-        });
-        if (stopped) return;
-
-        auditEventsVersionRef.current = version;
-        auditEventsSinceIdRef.current = response.next_since_id ?? auditEventsSinceIdRef.current;
-        setAuditEventsError('');
-        setAuditEvents((current) => {
-          const base = versionChanged ? [] : current;
-          return [...base, ...response.items].slice(-50);
-        });
-      } catch (error) {
-        if (stopped) return;
-        console.error('获取审图进度日志失败', error);
-        setAuditEventsError('暂时无法更新进度日志');
-      } finally {
-        if (!stopped && initialLoad) {
-          setAuditEventsLoading(false);
-        }
-      }
-    };
-
     if (auditEventsVersionRef.current !== version) {
       setAuditEvents([]);
       auditEventsSinceIdRef.current = null;
     }
 
-    void pollAuditEvents(true);
-    timer = window.setInterval(() => {
-      void pollAuditEvents(false);
-    }, 2000);
+    auditEventsVersionRef.current = version;
+    const controller = createAuditEventStreamController({
+      projectId: id,
+      version,
+      onEvents: (events) => {
+        setAuditEvents(events);
+        const latest = events[events.length - 1];
+        if (latest) {
+          auditEventsSinceIdRef.current = latest.id;
+        }
+      },
+      onError: (message) => {
+        setAuditEventsError(message);
+      },
+      onLoadingChange: (loading) => {
+        setAuditEventsLoading(loading);
+      },
+    });
+    controller.start();
 
     return () => {
-      stopped = true;
-      if (timer) window.clearInterval(timer);
+      controller.stop();
     };
   }, [id, shouldShowAuditProgress, auditStatus?.audit_version, selectedAuditVersion]);
 
@@ -474,7 +482,10 @@ export default function ProjectDetail() {
       setIsAuditProgressDismissed(false);
       setIsAuditProgressMinimized(false);
       setIsAuditProgressDialogOpen(true);
-      await api.startAudit(id, allowIncomplete ? { allow_incomplete: true } : undefined);
+      await api.startAudit(id, {
+        provider_mode: auditProviderMode,
+        ...(allowIncomplete ? { allow_incomplete: true } : {}),
+      });
       await loadData();
       setCurrentStep(2);
     } catch (err: any) {
@@ -903,6 +914,13 @@ export default function ProjectDetail() {
                     <h3 className="text-[13px] font-sans font-semibold mb-2 text-foreground">
                       确认无误后，启动审核
                     </h3>
+                    <div className="mb-4 text-left">
+                      <AuditProviderSelector
+                        value={auditProviderMode}
+                        onChange={setAuditProviderMode}
+                        defaultLabel={getAuditProviderLabel(defaultAuditProviderMode)}
+                      />
+                    </div>
                     <Button
                       onClick={handleStartAudit}
                       disabled={startingAudit || matchItems.length === 0}
@@ -1039,6 +1057,7 @@ export default function ProjectDetail() {
           events={auditEvents}
           eventError={auditEventsError}
           eventLoading={auditEventsLoading}
+          providerLabel={getAuditProviderLabel(auditStatus?.provider_mode || auditProviderMode)}
           onMinimize={() => {
             setIsAuditProgressDialogOpen(false);
             setIsAuditProgressMinimized(true);

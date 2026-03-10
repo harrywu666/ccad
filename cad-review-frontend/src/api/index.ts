@@ -14,7 +14,7 @@ import type {
   ThreeLineMatch,
   AuditResultPreview,
 } from '@/types';
-import type { SkillPackItem, SkillPackListResponse, SkillTypesResponse } from '@/types/api';
+import type { AuditEventsResponse, AuditProviderMode, SkillPackItem, SkillPackListResponse, SkillTypesResponse } from '@/types/api';
 
 const API_BASE = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:7002').replace(/\/$/, '');
 
@@ -132,6 +132,15 @@ export const uploadDrawings = (projectId: string, file: File, options?: { onUplo
   }
   ).then(res => res.data);
 };
+export const uploadDrawingsPng = (projectId: string, files: File[]) => {
+  const formData = new FormData();
+  files.forEach(file => formData.append('files', file));
+  return api.post<{ success: boolean; total: number; matched: number; unmatched: number }>(
+    `/api/projects/${projectId}/drawings/upload-png`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000,
+  }).then(res => res.data);
+};
 export const getDrawingsUploadProgress = (projectId: string) =>
   api.get<{ phase: string; progress: number; message: string; success?: boolean }>(
     `/api/projects/${projectId}/drawings/upload-progress`
@@ -201,8 +210,20 @@ export const getAuditResults = (
   api.get<AuditResult[]>(`/api/projects/${projectId}/audit/results`, { params }).then(res => res.data);
 export const getAuditResultPreview = (projectId: string, resultId: string) =>
   api.get<AuditResultPreview>(`/api/projects/${projectId}/audit/results/${resultId}/preview`).then(res => res.data);
+export const batchAuditResultPreview = (projectId: string, resultIds: string[]) =>
+  api.post<AuditResultPreview & { extra_source_anchors?: any[]; extra_target_anchors?: any[] }>(
+    `/api/projects/${projectId}/audit/results/batch-preview`,
+    { result_ids: resultIds },
+  ).then(res => res.data);
 export const getAuditHistory = (projectId: string) =>
   api.get<any[]>(`/api/projects/${projectId}/audit/history`).then(res => res.data);
+export const getAuditEvents = (
+  projectId: string,
+  params?: { version?: number; since_id?: number; limit?: number },
+) =>
+  api.get<AuditEventsResponse>(`/api/projects/${projectId}/audit/events`, { params }).then(res => res.data);
+export const getAuditEventsStreamUrl = (projectId: string) =>
+  `${API_BASE}/api/projects/${projectId}/audit/events/stream`;
 
 export interface AuditResultUpdatePayload {
   is_resolved?: boolean;
@@ -225,7 +246,10 @@ export const batchUpdateAuditResults = (
     result_ids: resultIds,
     ...payload,
   }).then(res => res.data);
-export const startAudit = (projectId: string, payload?: { allow_incomplete?: boolean }) =>
+export const startAudit = (
+  projectId: string,
+  payload?: { allow_incomplete?: boolean; provider_mode?: AuditProviderMode },
+) =>
   api.post<{ success: boolean; audit_version: number }>(`/api/projects/${projectId}/audit/start`, payload ?? {}).then(res => res.data);
 export const runAudit = (projectId: string) =>
   api.post<{ success: boolean; audit_version: number; total_issues: number }>(`/api/projects/${projectId}/audit/run`)
@@ -340,5 +364,16 @@ export const getDrawingImageUrl = (projectId: string, drawingId: string, cacheVe
   const suffix = cacheVersion !== undefined ? `?v=${cacheVersion}` : '';
   return `${API_BASE}/api/projects/${projectId}/drawings/${drawingId}/image${suffix}`;
 };
+
+export const getJsonThumbnailUrl = (projectId: string, jsonId: string, cacheVersion?: number) => {
+  const suffix = cacheVersion !== undefined ? `?v=${cacheVersion}` : '';
+  return `${API_BASE}/api/projects/${projectId}/json-data/${jsonId}/thumbnail${suffix}`;
+};
+
+export const bindJsonToCatalog = (projectId: string, jsonId: string, catalogId: string) =>
+  api.patch<{ success: boolean; json_id: string; catalog_id: string }>(
+    `/api/projects/${projectId}/json-data/${jsonId}/bind-catalog`,
+    { catalog_id: catalogId }
+  ).then(res => res.data);
 
 export default api;

@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Check, Loader2, Minus, RefreshCw, TriangleAlert, X } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogDescription, DialogOverlay, DialogPortal, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -16,6 +16,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import type { AuditEvent } from "@/types/api";
+import type { AuditProviderMode } from "@/types/api";
 import AuditEventList from "./AuditEventList";
 
 type AuditPhaseState = "complete" | "current" | "pending";
@@ -36,9 +37,61 @@ interface AuditProgressDialogProps {
   events: AuditEvent[];
   eventError?: string;
   eventLoading?: boolean;
+  providerLabel?: string;
   onMinimize: () => void;
   onRequestClose: (onStep: (step: string) => void) => Promise<void>;
   closeDisabled?: boolean;
+}
+
+export function getAuditProviderLabel(value?: AuditProviderMode | string | null) {
+  return value === "codex_sdk" ? "Codex SDK" : "Kimi SDK";
+}
+
+export function AuditProviderSelector({
+  value,
+  onChange,
+  defaultLabel,
+}: {
+  value: AuditProviderMode;
+  onChange: (next: AuditProviderMode) => void;
+  defaultLabel?: string;
+}) {
+  return (
+    <fieldset className="space-y-3">
+      <legend className="text-[13px] font-semibold text-foreground">本轮审核引擎选择</legend>
+      <p className="text-[12px] leading-5 text-muted-foreground">
+        {defaultLabel ? `默认会先选 ${defaultLabel}，这次你也可以临时改。` : '这次审核想走哪条引擎路线，就在这里直接选。'}
+      </p>
+      <div className="grid grid-cols-1 gap-3">
+        {([
+          { value: "kimi_sdk", label: "Kimi SDK", description: "继续走现有 Kimi SDK 路线，更稳。", },
+          { value: "codex_sdk", label: "Codex SDK", description: "改走新的 Codex SDK 路线，便于本轮验证。", },
+        ] as const).map((option) => (
+          <label
+            key={option.value}
+            className={cn(
+              "flex cursor-pointer items-start gap-3 border px-4 py-3 transition-colors",
+              value === option.value ? "border-primary bg-primary/5" : "border-border bg-white hover:border-primary/40",
+            )}
+          >
+            <input
+              type="radio"
+              name="audit-provider-mode"
+              value={option.value}
+              checked={value === option.value}
+              onChange={() => onChange(option.value)}
+              className="mt-1 h-4 w-4 accent-primary"
+              aria-label={option.label}
+            />
+            <span className="space-y-1">
+              <span className="block text-[14px] font-semibold text-foreground">{option.label}</span>
+              <span className="block text-[12px] leading-5 text-muted-foreground">{option.description}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
 }
 
 export function AuditProgressPill({
@@ -73,6 +126,7 @@ export default function AuditProgressDialog({
   events,
   eventError,
   eventLoading = false,
+  providerLabel,
   onMinimize,
   onRequestClose,
   closeDisabled = false,
@@ -80,6 +134,9 @@ export default function AuditProgressDialog({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [shuttingDown, setShuttingDown] = useState(false);
   const [shutdownStep, setShutdownStep] = useState("");
+  const latestEvent = useMemo(() => events[events.length - 1] ?? null, [events]);
+  const activeAgentName = latestEvent?.agent_name || headline;
+  const activeAgentMessage = latestEvent?.message || supportingText;
 
   const handleConfirmClose = async () => {
     setConfirmOpen(false);
@@ -161,8 +218,21 @@ export default function AuditProgressDialog({
                       AI 正在帮你审图
                     </DialogTitle>
                     <DialogDescription className="max-w-[560px] text-[14px] leading-6 text-muted-foreground">
-                      系统已经开始逐张核对图纸、目录和 DWG 数据，你现在不用守着看。后台还在继续跑，发现的问题会自动汇总到审核报告里。
+                      系统已经开始按 Agent 分工持续审图。你不用一直守着页面，右侧日志会不断追加当前动作和阶段进展。
                     </DialogDescription>
+                    <div className="flex flex-wrap items-center gap-3 text-[13px]">
+                      <span className="rounded-full border border-border bg-secondary/40 px-3 py-1 font-medium text-foreground">
+                        当前执行：{activeAgentName}
+                      </span>
+                      {providerLabel ? (
+                        <span className="rounded-full border border-border bg-white px-3 py-1 font-medium text-foreground">
+                          本轮引擎：{providerLabel}
+                        </span>
+                      ) : null}
+                      {latestEvent?.event_kind === "heartbeat" ? (
+                        <span className="text-muted-foreground">当前任务仍在持续处理中</span>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -196,7 +266,7 @@ export default function AuditProgressDialog({
                   </div>
 
                   <p className="mt-3 text-[14px] leading-6 text-muted-foreground">
-                    {supportingText}
+                    {activeAgentMessage}
                   </p>
 
                   <div className="mt-6">
@@ -255,8 +325,8 @@ export default function AuditProgressDialog({
           )}
         </DialogPrimitive.Content>
         {!shuttingDown ? (
-          <div className="fixed left-[calc(50%+434px)] top-1/2 z-50 hidden -translate-y-1/2 xl:block">
-            <div className="w-[360px]">
+          <div className="pointer-events-none fixed bottom-6 right-6 top-6 z-50 hidden xl:block">
+            <div className="pointer-events-auto h-full w-[380px] overflow-hidden">
               <AuditEventList events={events} error={eventError} loading={eventLoading} />
             </div>
           </div>

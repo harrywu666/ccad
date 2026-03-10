@@ -1,4 +1,8 @@
 export type UiPreferencesMap = Record<string, unknown>;
+export type AuditProviderMode = 'kimi_sdk' | 'codex_sdk';
+
+export const DEFAULT_AUDIT_PROVIDER_MODE: AuditProviderMode = 'kimi_sdk';
+export const AUDIT_PROVIDER_STORAGE_KEY = 'ccad.auditProvider.default';
 
 export interface ProjectUiPreferencesResponse {
   project_id: string;
@@ -64,6 +68,26 @@ export interface AuditHistoryItem {
   error?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  scope_mode?: 'full' | 'partial' | null;
+}
+
+export interface AuditEvent {
+  id: number;
+  audit_version: number;
+  level: 'info' | 'success' | 'warning' | 'error';
+  step_key?: string | null;
+  agent_key?: string | null;
+  agent_name?: string | null;
+  event_kind?: string | null;
+  progress_hint?: number | null;
+  message: string;
+  created_at?: string | null;
+  meta: Record<string, unknown>;
+}
+
+export interface AuditEventsResponse {
+  items: AuditEvent[];
+  next_since_id?: number | null;
 }
 
 export interface AIPromptStage {

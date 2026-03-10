@@ -1,6 +1,7 @@
 /**
  * 类型定义
  */
+import type { AuditProviderMode } from './api';
 
 export interface Category {
   id: string;
@@ -133,6 +134,14 @@ export interface AuditResult {
   location: string | null;
   value_a: string | null;
   value_b: string | null;
+  rule_id: string | null;
+  finding_type: string | null;
+  finding_status: 'confirmed' | 'suspected' | 'needs_review' | null;
+  source_agent: string | null;
+  evidence_pack_id: string | null;
+  review_round: number;
+  triggered_by: string | null;
+  confidence: number | null;
   description: string | null;
   evidence_json: string | null;
   locations: string[];
@@ -155,9 +164,12 @@ export interface AuditStatus {
   progress: number;
   total_issues: number;
   run_status?: string | null;
+  provider_mode?: AuditProviderMode | null;
   error?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  scope_mode?: 'full' | 'partial' | null;
+  scope_summary?: string | null;
 }
 
 export interface ThreeLineAsset {
@@ -192,10 +204,23 @@ export interface ThreeLineSummary {
   missing_all: number;
 }
 
+export interface UnmatchedJson {
+  id: string;
+  sheet_no: string | null;
+  layout_name: string | null;
+  source_dwg: string | null;
+  thumbnail_path: string | null;
+  json_path: string | null;
+  data_version: number | null;
+  status: string | null;
+  created_at: string | null;
+}
+
 export interface ThreeLineMatch {
   project_id: string;
   summary: ThreeLineSummary;
   items: ThreeLineItem[];
+  unmatched_jsons?: UnmatchedJson[];
 }
 
 export type MatchFilter = 'all' | 'ready' | 'missing' | 'missing_png' | 'missing_json' | 'missing_all';
