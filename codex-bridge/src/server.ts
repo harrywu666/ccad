@@ -125,15 +125,15 @@ async function streamFakeTurn(
   const record = store.getOrCreate(subsessionKey);
   const threadId = record.threadId || buildFakeThreadId(subsessionKey);
   record.threadId = threadId;
-  writeNdjson(response, requestId, "phase_event", {
-    kind: "thread_ready",
-    subsession_key: subsessionKey,
-    thread_id: threadId,
-  });
   writeNdjson(response, requestId, "provider_stream_delta", {
     text: `fake:${String(payload.input || "").trim() || "ok"}`,
     thread_id: threadId,
     subsession_key: subsessionKey,
+  });
+  writeNdjson(response, requestId, "phase_event", {
+    kind: "thread_ready",
+    subsession_key: subsessionKey,
+    thread_id: threadId,
   });
   writeNdjson(response, requestId, "done", {
     thread_id: threadId,
@@ -270,7 +270,6 @@ async function handleTurn(
   response.writeHead(200, {
     "content-type": "application/x-ndjson; charset=utf-8",
     "cache-control": "no-cache",
-    connection: "keep-alive",
   });
 
   try {
