@@ -8,10 +8,12 @@ from datetime import datetime
 import hashlib
 import os
 import re
+import time
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, ConfigDict
-from database import get_db
+from database import get_db, SessionLocal
 import json as _json
 from models import (
     Project,
@@ -22,6 +24,7 @@ from models import (
     FeedbackSample,
 )
 from services.audit.issue_preview import get_issue_preview
+from services.audit_runtime.finding_schema import finding_from_audit_result
 
 router = APIRouter()
 
@@ -43,6 +46,14 @@ class AuditResultResponse(BaseModel):
     location: Optional[str] = None
     value_a: Optional[str] = None
     value_b: Optional[str] = None
+    rule_id: Optional[str] = None
+    finding_type: Optional[str] = None
+    finding_status: Optional[str] = None
+    source_agent: Optional[str] = None
+    evidence_pack_id: Optional[str] = None
+    review_round: int = 1
+    triggered_by: Optional[str] = None
+    confidence: Optional[float] = None
     description: Optional[str] = None
     evidence_json: Optional[str] = None
     locations: List[str] = []
@@ -109,6 +120,10 @@ class AuditRunEventResponse(BaseModel):
     audit_version: int
     level: str
     step_key: Optional[str] = None
+    agent_key: Optional[str] = None
+    agent_name: Optional[str] = None
+    event_kind: Optional[str] = None
+    progress_hint: Optional[int] = None
     message: str
     created_at: Optional[str] = None
     meta: Dict[str, Any] = Field(default_factory=dict)
@@ -221,6 +236,7 @@ def _normalize_index_description(description: Optional[str]) -> str:
 
 
 def _serialize_audit_result(item: AuditResult) -> Dict[str, Any]:
+    finding = finding_from_audit_result(item)
     location = (
         item.location.strip() if isinstance(item.location, str) else item.location
     )
@@ -238,6 +254,14 @@ def _serialize_audit_result(item: AuditResult) -> Dict[str, Any]:
         "occurrence_count": 1,
         "value_a": item.value_a,
         "value_b": item.value_b,
+        "rule_id": finding.rule_id,
+        "finding_type": finding.finding_type,
+        "finding_status": finding.status,
+        "source_agent": finding.source_agent,
+        "evidence_pack_id": finding.evidence_pack_id,
+        "review_round": finding.review_round,
+        "triggered_by": finding.triggered_by,
+        "confidence": finding.confidence,
         "description": item.description,
         "evidence_json": item.evidence_json,
         "is_resolved": bool(item.is_resolved),
@@ -576,6 +600,134 @@ def get_audit_result_preview(
         raise HTTPException(status_code=409, detail=str(exc))
 
 
+def _stream_env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _serialize_audit_event_row(row: AuditRunEvent) -> AuditRunEventResponse:
+    meta: Dict[str, Any] = {}
+    if row.meta_json:
+        try:
+            parsed = _json.loads(row.meta_json)
+            if isinstance(parsed, dict):
+                meta = parsed
+        except Exception:
+            meta = {}
+    if row.event_kind == "runner_broadcast":
+        meta.setdefault("stream_layer", "user_facing")
+    return AuditRunEventResponse(
+        id=row.id,
+        audit_version=row.audit_version,
+        level=row.level,
+        step_key=row.step_key,
+        agent_key=row.agent_key,
+        agent_name=row.agent_name,
+        event_kind=row.event_kind,
+        progress_hint=row.progress_hint,
+        message=row.message,
+        created_at=row.created_at.isoformat() if row.created_at else None,
+        meta=meta,
+    )
+
+
+def _resolve_audit_event_version(project_id: str, db: Session, version: Optional[int]) -> int:
+    if version is not None:
+        return version
+
+    latest_run = (
+        db.query(AuditRun)
+        .filter(AuditRun.project_id == project_id)
+        .order_by(AuditRun.audit_version.desc(), AuditRun.created_at.desc())
+        .first()
+    )
+    if latest_run:
+        return latest_run.audit_version
+
+    latest_event = (
+        db.query(AuditRunEvent)
+        .filter(AuditRunEvent.project_id == project_id)
+        .order_by(AuditRunEvent.audit_version.desc(), AuditRunEvent.id.desc())
+        .first()
+    )
+    return latest_event.audit_version if latest_event else 1
+
+
+def _format_sse_event(*, event: str, data: Dict[str, Any], event_id: Optional[int] = None) -> str:
+    lines: List[str] = []
+    if event_id is not None:
+        lines.append(f"id: {event_id}")
+    lines.append(f"event: {event}")
+    lines.append(f"data: {_json.dumps(data, ensure_ascii=False)}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _iter_audit_events_stream(project_id: str, version: int, since_id: Optional[int]):
+    last_id = int(since_id or 0)
+    heartbeat_seconds = _stream_env_float("AUDIT_STREAM_HEARTBEAT_SECONDS", 25.0)
+    poll_seconds = _stream_env_float("AUDIT_STREAM_POLL_SECONDS", 1.0)
+    test_once = str(os.getenv("AUDIT_STREAM_TEST_ONCE", "")).strip().lower() in {"1", "true", "yes", "on"}
+    last_emit_at = time.monotonic()
+    sent_any = False
+    sent_heartbeat = False
+
+    while True:
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(AuditRunEvent)
+                .filter(
+                    AuditRunEvent.project_id == project_id,
+                    AuditRunEvent.audit_version == version,
+                    AuditRunEvent.id > last_id,
+                )
+                .order_by(AuditRunEvent.id.asc())
+                .limit(200)
+                .all()
+            )
+        finally:
+            db.close()
+
+        if rows:
+            for row in rows:
+                payload = _serialize_audit_event_row(row).model_dump()
+                event_name = str(row.event_kind or "phase_event").strip() or "phase_event"
+                last_id = row.id
+                last_emit_at = time.monotonic()
+                sent_any = True
+                yield _format_sse_event(event=event_name, data=payload, event_id=row.id)
+            if test_once and since_id is not None:
+                break
+            continue
+
+        if time.monotonic() - last_emit_at >= heartbeat_seconds:
+            last_emit_at = time.monotonic()
+            sent_any = True
+            sent_heartbeat = True
+            yield _format_sse_event(
+                event="heartbeat",
+                data={
+                    "id": last_id,
+                    "audit_version": version,
+                    "event_kind": "heartbeat",
+                    "message": "日志流连接正常，系统仍在等待新进展",
+                },
+                event_id=last_id if last_id > 0 else None,
+            )
+            if test_once:
+                break
+
+        if test_once and sent_any and sent_heartbeat:
+            break
+        time.sleep(poll_seconds)
+
+
 class BatchPreviewRequest(BaseModel):
     result_ids: List[str]
 
@@ -849,23 +1001,7 @@ def get_audit_events(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    if version is None:
-        latest_run = (
-            db.query(AuditRun)
-            .filter(AuditRun.project_id == project_id)
-            .order_by(AuditRun.audit_version.desc(), AuditRun.created_at.desc())
-            .first()
-        )
-        if latest_run:
-            version = latest_run.audit_version
-        else:
-            latest_event = (
-                db.query(AuditRunEvent)
-                .filter(AuditRunEvent.project_id == project_id)
-                .order_by(AuditRunEvent.audit_version.desc(), AuditRunEvent.id.desc())
-                .first()
-            )
-            version = latest_event.audit_version if latest_event else 1
+    version = _resolve_audit_event_version(project_id, db, version)
 
     query = db.query(AuditRunEvent).filter(
         AuditRunEvent.project_id == project_id,
@@ -875,32 +1011,36 @@ def get_audit_events(
         query = query.filter(AuditRunEvent.id > since_id)
 
     rows = query.order_by(AuditRunEvent.id.asc()).limit(limit).all()
-    items: List[AuditRunEventResponse] = []
-    for row in rows:
-        meta: Dict[str, Any] = {}
-        if row.meta_json:
-            try:
-                parsed = _json.loads(row.meta_json)
-                if isinstance(parsed, dict):
-                    meta = parsed
-            except Exception:
-                meta = {}
-        items.append(
-            AuditRunEventResponse(
-                id=row.id,
-                audit_version=row.audit_version,
-                level=row.level,
-                step_key=row.step_key,
-                message=row.message,
-                created_at=row.created_at.isoformat() if row.created_at else None,
-                meta=meta,
-            )
-        )
+    items = [_serialize_audit_event_row(row) for row in rows]
 
     return {
         "items": items,
         "next_since_id": items[-1].id if items else since_id,
     }
+
+
+@router.get("/projects/{project_id}/audit/events/stream")
+def stream_audit_events(
+    project_id: str,
+    version: Optional[int] = Query(None, description="审核版本号"),
+    since_id: Optional[int] = Query(None, description="增量拉取起点事件ID"),
+    db: Session = Depends(get_db),
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    resolved_version = _resolve_audit_event_version(project_id, db, version)
+
+    return StreamingResponse(
+        _iter_audit_events_stream(project_id, resolved_version, since_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get(
@@ -983,9 +1123,9 @@ def plan_audit_tasks(
         "on",
     }
     ai_relationships = (
-        discover_relationships_v2(project_id, db)
+        discover_relationships_v2(project_id, db, audit_version=audit_version)
         if use_v2
-        else discover_relationships(project_id, db)
+        else discover_relationships(project_id, db, audit_version=audit_version)
     )
     relationship_count = save_ai_edges(project_id, ai_relationships, db)
     task_summary = build_audit_tasks(project_id, audit_version, db)

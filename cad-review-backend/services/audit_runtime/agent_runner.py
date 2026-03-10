@@ -209,6 +209,7 @@ class ProjectAuditAgentRunner:
                 subsession.current_turn_status = "idle"
                 subsession.current_phase = "needs_review"
                 subsession.stall_reason = "idle_timeout"
+                self._set_runner_broadcast(request, subsession, state="needs_review")
                 self._append_event(
                     request,
                     event_kind="runner_turn_needs_review",
@@ -432,7 +433,20 @@ class ProjectAuditAgentRunner:
             state=state,
             meta=meta,
         )
+        if message == subsession.last_broadcast:
+            return message
         subsession.last_broadcast = message
+        self._append_event(
+            request,
+            event_kind="runner_broadcast",
+            message=message,
+            meta={
+                "state": state,
+                "stream_layer": "user_facing",
+                "provider_name": self._provider_name(),
+                **(meta or {}),
+            },
+        )
         return message
 
 
