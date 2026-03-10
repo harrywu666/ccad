@@ -8,12 +8,14 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 from services.audit_runtime.output_guard import guard_output
+from services.audit_runtime.providers.kimi_sdk_provider import SdkStreamIdleTimeoutError
 from services.audit_runtime.runner_types import (
     ProviderStreamEvent,
     RunnerSubsession,
     RunnerTurnRequest,
     RunnerTurnResult,
 )
+from services.audit_runtime.visual_budget import get_active_visual_budget
 
 
 class ProjectAuditAgentRunner:
@@ -182,35 +184,65 @@ class ProjectAuditAgentRunner:
                 },
             )
 
-        try:
-            result = await self.provider.run_stream(
-                request,
-                subsession,
-                on_event=_on_provider_event,
-                should_cancel=should_cancel,
-            )
-            result = self._apply_output_guard(request, subsession, result)
-            self._mark_progress(subsession, phase="completed")
-            subsession.current_turn_status = "idle"
-            subsession.current_phase = "idle"
-            subsession.stall_reason = None
-            return result
-        except Exception as exc:
-            subsession.current_turn_status = "failed"
-            subsession.current_phase = "failed"
-            subsession.stall_reason = str(exc)
-            self._append_event(
-                request,
-                event_kind="runner_session_failed",
-                level="error",
-                message=f"{request.agent_name or request.agent_key} 的 Runner 会话执行失败：{exc}",
-                meta={
-                    "turn_kind": request.turn_kind,
-                    "session_key": subsession.session_key,
-                    "provider_name": self._provider_name(),
-                },
-            )
-            raise
+        while True:
+            try:
+                result = await self.provider.run_stream(
+                    request,
+                    subsession,
+                    on_event=_on_provider_event,
+                    should_cancel=should_cancel,
+                )
+                result = self._apply_output_guard(request, subsession, result)
+                self._mark_progress(subsession, phase="completed")
+                subsession.current_turn_status = "idle"
+                subsession.current_phase = "idle"
+                subsession.stall_reason = None
+                return result
+            except SdkStreamIdleTimeoutError as exc:
+                if self._retry_stalled_turn(request, subsession, exc):
+                    continue
+                subsession.current_turn_status = "idle"
+                subsession.current_phase = "needs_review"
+                subsession.stall_reason = "idle_timeout"
+                self._append_event(
+                    request,
+                    event_kind="runner_turn_needs_review",
+                    level="warning",
+                    message=f"{request.agent_name or request.agent_key} 这一轮长时间没有新进展，已转为待人工确认",
+                    meta={
+                        "turn_kind": request.turn_kind,
+                        "session_key": subsession.session_key,
+                        "provider_name": self._provider_name(),
+                        "reason": "idle_timeout",
+                        "error": str(exc),
+                        "repair_attempts": 0,
+                    },
+                )
+                return RunnerTurnResult(
+                    provider_name=self._provider_name(),
+                    output=None,
+                    status="needs_review",
+                    raw_output="",
+                    subsession_key=subsession.session_key,
+                    repair_attempts=0,
+                    error=str(exc),
+                )
+            except Exception as exc:
+                subsession.current_turn_status = "failed"
+                subsession.current_phase = "failed"
+                subsession.stall_reason = str(exc)
+                self._append_event(
+                    request,
+                    event_kind="runner_session_failed",
+                    level="error",
+                    message=f"{request.agent_name or request.agent_key} 的 Runner 会话执行失败：{exc}",
+                    meta={
+                        "turn_kind": request.turn_kind,
+                        "session_key": subsession.session_key,
+                        "provider_name": self._provider_name(),
+                    },
+                )
+                raise
 
     def _ensure_session_started(
         self,
@@ -350,6 +382,36 @@ class ProjectAuditAgentRunner:
         subsession.current_phase = phase
         if has_delta:
             subsession.last_delta_at = now
+
+    def _retry_stalled_turn(
+        self,
+        request: RunnerTurnRequest,
+        subsession: RunnerSubsession,
+        exc: SdkStreamIdleTimeoutError,
+    ) -> bool:
+        budget = get_active_visual_budget()
+        if budget is None or not budget.consume_retry():
+            return False
+
+        subsession.retry_count += 1
+        subsession.current_phase = "retrying"
+        subsession.stall_reason = "idle_timeout"
+        self._append_event(
+            request,
+            event_kind="runner_turn_retrying",
+            level="warning",
+            message=f"{request.agent_name or request.agent_key} 这一轮长时间没有新进展，Runner 正在重试",
+            meta={
+                "turn_kind": request.turn_kind,
+                "session_key": subsession.session_key,
+                "provider_name": self._provider_name(),
+                "reason": "idle_timeout",
+                "error": str(exc),
+                "retry_count": subsession.retry_count,
+                "retry_budget_remaining": budget.remaining_retry_budget(),
+            },
+        )
+        return True
 
 
 __all__ = ["ProjectAuditAgentRunner"]
