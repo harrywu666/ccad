@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from services.audit_runtime.output_guard import guard_output
 from services.audit_runtime.providers.kimi_sdk_provider import SdkStreamIdleTimeoutError
+from services.audit_runtime.runner_broadcasts import build_runner_broadcast_message
 from services.audit_runtime.runner_types import (
     ProviderStreamEvent,
     RunnerSubsession,
@@ -103,6 +104,7 @@ class ProjectAuditAgentRunner:
         subsession = self.resolve_subsession(request)
         self._ensure_session_started(request, subsession)
         self._mark_turn_started(subsession, phase="running")
+        self._set_runner_broadcast(request, subsession, state="progress")
         self._append_event(
             request,
             event_kind="runner_turn_started",
@@ -146,6 +148,7 @@ class ProjectAuditAgentRunner:
         subsession = self.resolve_subsession(request)
         self._ensure_session_started(request, subsession)
         self._mark_turn_started(subsession, phase="running")
+        self._set_runner_broadcast(request, subsession, state="progress")
         self._append_event(
             request,
             event_kind="runner_turn_started",
@@ -165,11 +168,13 @@ class ProjectAuditAgentRunner:
                 subsession.last_broadcast = event.text
             if event.event_kind == "provider_stream_delta":
                 self._mark_progress(subsession, phase="streaming", has_delta=True)
+                self._set_runner_broadcast(request, subsession, state="progress", meta=event.meta)
             elif event.event_kind == "phase_event":
                 self._mark_progress(
                     subsession,
                     phase=str(event.meta.get("kind") or "progress").strip() or "progress",
                 )
+                self._set_runner_broadcast(request, subsession, state="progress", meta=event.meta)
             if event.event_kind == "phase_event" and event.meta.get("reason"):
                 subsession.retry_count += 1
                 subsession.stall_reason = str(event.meta.get("reason") or "").strip() or None
@@ -282,9 +287,6 @@ class ProjectAuditAgentRunner:
     ) -> None:
         from services.audit_runtime.state_transitions import append_run_event
 
-        subsession = self._subsessions.get(request.agent_key)
-        if subsession is not None and message:
-            subsession.last_broadcast = message
         append_run_event(
             self.project_id,
             self.audit_version,
@@ -327,6 +329,7 @@ class ProjectAuditAgentRunner:
                 "provider_name": self._provider_name(),
             },
         )
+        self._set_runner_broadcast(request, subsession, state="repairing")
 
         try:
             repaired_output = guard_output(result.raw_output)
@@ -334,6 +337,7 @@ class ProjectAuditAgentRunner:
             result.status = "needs_review"
             result.error = str(exc)
             result.repair_attempts += 1
+            self._set_runner_broadcast(request, subsession, state="needs_review")
             self._append_event(
                 request,
                 event_kind="runner_turn_needs_review",
@@ -396,6 +400,7 @@ class ProjectAuditAgentRunner:
         subsession.retry_count += 1
         subsession.current_phase = "retrying"
         subsession.stall_reason = "idle_timeout"
+        self._set_runner_broadcast(request, subsession, state="retrying")
         self._append_event(
             request,
             event_kind="runner_turn_retrying",
@@ -412,6 +417,23 @@ class ProjectAuditAgentRunner:
             },
         )
         return True
+
+    def _set_runner_broadcast(
+        self,
+        request: RunnerTurnRequest,
+        subsession: RunnerSubsession,
+        *,
+        state: str,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        message = build_runner_broadcast_message(
+            request,
+            subsession,
+            state=state,
+            meta=meta,
+        )
+        subsession.last_broadcast = message
+        return message
 
 
 __all__ = ["ProjectAuditAgentRunner"]
