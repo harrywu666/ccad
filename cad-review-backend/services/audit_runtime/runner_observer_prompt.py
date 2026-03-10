@@ -43,17 +43,22 @@ def build_runner_observer_user_prompt(
         "runtime_status": snapshot.runtime_status,
         "recent_events": snapshot.recent_events,
         "current_risk_signals": snapshot.current_risk_signals,
+        "risk_summary": snapshot.risk_summary,
+        "intervention_hint": snapshot.intervention_hint,
         "available_actions": snapshot.available_actions,
         "memory": {
             "project_summary": memory.project_summary,
             "current_focus": memory.current_focus,
             "recent_events": memory.recent_events,
+            "recent_decisions": memory.recent_decisions,
             "intervention_history": memory.intervention_history,
         },
     }
     return (
         "请作为项目级 Runner Observer Agent，对当前审图现场做一次结构化判断。\n"
         "你必须只返回 JSON 对象，不要 markdown，不要解释。\n"
+        "判断原则补充：如果同类问题已经连续出现，或者你最近已经连续多次只给 observe_only，"
+        "不要连续多次只给 observe_only；你需要认真考虑 broadcast_update、restart_subsession、mark_needs_review。\n"
         "JSON 字段固定为："
         '{"summary":"","risk_level":"low|medium|high","suggested_action":"observe_only|broadcast_update|cancel_turn|restart_subsession|rerun_current_step|mark_needs_review","reason":"","should_intervene":false,"confidence":0.0,"user_facing_broadcast":""}\n'
         "现场数据如下：\n"

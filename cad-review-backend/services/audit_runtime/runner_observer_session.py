@@ -58,6 +58,16 @@ class ProjectRunnerObserverSession:
         self.memory.project_summary = decision.summary
         self.memory.current_focus = snapshot.current_step
         self.memory.recent_events = list(snapshot.recent_events)[-20:]
+        self.memory.recent_decisions.append(
+            {
+                "summary": decision.summary,
+                "risk_level": decision.risk_level,
+                "suggested_action": decision.suggested_action,
+                "should_intervene": decision.should_intervene,
+                "confidence": decision.confidence,
+            }
+        )
+        self.memory.recent_decisions = self.memory.recent_decisions[-20:]
         if decision.should_intervene:
             self.memory.intervention_history.append(
                 {

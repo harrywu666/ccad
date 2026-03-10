@@ -30,6 +30,8 @@ class RunnerObserverFeedSnapshot:
     runtime_status: Dict[str, Any] = field(default_factory=dict)
     recent_events: List[Dict[str, Any]] = field(default_factory=list)
     current_risk_signals: List[str] = field(default_factory=list)
+    risk_summary: Dict[str, Any] = field(default_factory=dict)
+    intervention_hint: str = ""
     available_actions: List[str] = field(default_factory=list)
 
 
@@ -42,6 +44,7 @@ class RunnerObserverMemory:
     project_summary: str = ""
     current_focus: str = ""
     recent_events: List[Dict[str, Any]] = field(default_factory=list)
+    recent_decisions: List[Dict[str, Any]] = field(default_factory=list)
     intervention_history: List[Dict[str, Any]] = field(default_factory=list)
 
 
