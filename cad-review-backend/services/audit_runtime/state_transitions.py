@@ -244,6 +244,15 @@ def append_agent_status_report(
         },
         dispatch_observer=False,
     )
+    _execute_agent_help_request(
+        project_id,
+        audit_version,
+        step_key=step_key,
+        progress_hint=progress_hint,
+        agent_key=agent_key,
+        agent_name=agent_name,
+        report=report,
+    )
 
 
 def _run_async(coro):  # noqa: ANN001
@@ -269,6 +278,90 @@ def _run_async(coro):  # noqa: ANN001
     if "error" in holder:
         raise holder["error"]
     return holder.get("result")
+
+
+def _rewrite_agent_help_request(requested_action: str) -> Tuple[str, str]:
+    normalized = str(requested_action or "").strip()
+    if normalized == "mark_needs_review":
+        return "restart_subsession", "mid_run_needs_review_blocked"
+    if normalized == "rerun_current_batch":
+        return "restart_subsession", "batch_rerun_mapped_to_restart_subsession"
+    return normalized, ""
+
+
+def _execute_agent_help_request(
+    project_id: str,
+    audit_version: int,
+    *,
+    step_key: Optional[str],
+    progress_hint: Optional[int],
+    agent_key: str,
+    agent_name: str,
+    report,  # noqa: ANN001
+) -> Optional[Dict[str, Any]]:
+    requested_action_name = str(getattr(report, "runner_help_request", "") or "").strip()
+    blocking_issues = list(getattr(report, "blocking_issues", None) or [])
+    if not requested_action_name or not blocking_issues:
+        return None
+
+    from services.audit_runtime.runner_action_gate import RunnerActionGate
+
+    action_name, rewrite_reason = _rewrite_agent_help_request(requested_action_name)
+    append_run_event(
+        project_id,
+        audit_version,
+        step_key=step_key,
+        agent_key="runner_observer_agent",
+        agent_name="Runner观察Agent",
+        event_kind="runner_help_requested",
+        progress_hint=progress_hint,
+        message=f"Runner 已收到 {agent_name} 的求助请求，正在尝试处理",
+        meta={
+            "stream_layer": "internal_agent_help",
+            "source_agent_key": agent_key,
+            "requested_action_name": requested_action_name,
+            "action_name": action_name,
+            "rewrite_reason": rewrite_reason,
+            "blocking_issues": blocking_issues,
+        },
+        dispatch_observer=False,
+    )
+
+    gate = RunnerActionGate(project_root=".")
+    result = gate.execute(
+        action_name,
+        context={
+            "broadcast_message": f"Runner 正在协助 {agent_name} 恢复稳定",
+            "restart_subsession": lambda: _restart_runner_subsession(
+                project_id,
+                audit_version,
+                agent_key=agent_key,
+            ),
+        },
+    )
+    append_run_event(
+        project_id,
+        audit_version,
+        step_key=step_key,
+        agent_key="runner_observer_agent",
+        agent_name="Runner观察Agent",
+        event_kind="runner_help_resolved",
+        progress_hint=progress_hint,
+        message=f"Runner 已处理 {agent_name} 的求助请求：{result.get('action_name') or action_name}",
+        meta={
+            "stream_layer": "internal_agent_help",
+            "source_agent_key": agent_key,
+            "requested_action_name": requested_action_name,
+            "action_name": result.get("action_name") or action_name,
+            "allowed": bool(result.get("allowed")),
+            "executed": bool(result.get("executed")),
+            "result": result.get("result"),
+            "reason": result.get("reason", ""),
+            "rewrite_reason": rewrite_reason,
+        },
+        dispatch_observer=False,
+    )
+    return result
 
 
 def _load_observer_runtime_status(project_id: str, audit_version: int) -> Dict[str, Any]:
