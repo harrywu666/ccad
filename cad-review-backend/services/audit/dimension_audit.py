@@ -23,14 +23,19 @@ from services.audit.prompt_builder import (
     compact_dimensions,
 )
 from services.audit.result_parser import parse_dimension_pair_item
-from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidenceRequest
+from services.audit_runtime.agent_reports import DimensionAgentReport
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidenceRequest
 from services.audit_runtime.evidence_planner import plan_evidence_requests
 from services.audit_runtime.evidence_service import get_evidence_service
 from services.audit_runtime.finding_schema import Finding, apply_finding_to_audit_result
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider
-from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
+from services.audit_runtime.runner_types import (
+    ProviderStreamEvent,
+    RunnerTurnRequest,
+    RunnerTurnResult,
+)
 from services.audit_runtime.cancel_registry import is_cancel_requested
 from services.audit_runtime.state_transitions import append_run_event
 from services.coordinate_service import cad_to_global_pct, enrich_json_with_coordinates
@@ -40,6 +45,57 @@ from services.skill_pack_service import load_runtime_skill_profile
 from services.storage_path_service import resolve_project_dir
 
 logger = logging.getLogger(__name__)
+
+
+def _build_dimension_agent_report(
+    job: Dict[str, Any],
+    turn_result: RunnerTurnResult,
+    *,
+    cleaned: List[Dict[str, Any]],
+    stage: str,
+) -> DimensionAgentReport:
+    blocking_issues: List[Dict[str, Any]] = []
+    event_kinds = {
+        str(item.event_kind or "").strip()
+        for item in (turn_result.events or [])
+        if str(item.event_kind or "").strip()
+    }
+    unstable = (
+        turn_result.status != "ok"
+        or turn_result.repair_attempts > 0
+        or "output_validation_failed" in event_kinds
+    )
+    if unstable:
+        blocking_issues.append(
+            {
+                "kind": "unstable_output",
+                "stage": stage,
+                "sheet_no": str(job.get("sheet_no") or "").strip(),
+                "reason": turn_result.error or "runner_output_unstable",
+            }
+        )
+
+    if blocking_issues:
+        help_request = "restart_subsession"
+        next_action = "rerun_current_batch"
+        confidence = 0.35
+    else:
+        help_request = ""
+        next_action = "continue"
+        confidence = 0.85 if cleaned else 0.6
+
+    return DimensionAgentReport(
+        batch_summary=(
+            f"尺寸审查Agent 已完成 {stage} 批次检查"
+            f"（{job.get('sheet_no') or job.get('sheet_key') or 'UNKNOWN'}）"
+        ),
+        confirmed_findings=[],
+        suspected_findings=[],
+        blocking_issues=blocking_issues,
+        runner_help_request=help_request,
+        agent_confidence=confidence,
+        next_recommended_action=next_action,
+    )
 
 
 def _load_requested_provider_mode(project_id: str, audit_version: int) -> Optional[str]:
@@ -626,7 +682,7 @@ async def _execute_sheet_jobs(
                 ),
                 should_cancel=lambda: is_cancel_requested(project_id),
             )
-            semantic_result = turn_result.output if turn_result.status != "needs_review" else []
+            semantic_result = turn_result.output if turn_result.status == "ok" else []
         else:
             runner = _get_dimension_runner(
                 project_id or "__adhoc_dimension__",
@@ -649,12 +705,27 @@ async def _execute_sheet_jobs(
                     temperature=0.0,
                 )
             )
-            semantic_result = turn_result.output if turn_result.status != "needs_review" else []
+            semantic_result = turn_result.output if turn_result.status == "ok" else []
         if not isinstance(semantic_result, list):
             raise RuntimeError(
                 f"尺寸语义分析返回格式异常：{job['sheet_no']}，返回类型={type(semantic_result).__name__}"
             )
         cleaned = [item for item in semantic_result if isinstance(item, dict)]
+        report = _build_dimension_agent_report(
+            job,
+            turn_result,
+            cleaned=cleaned,
+            stage="sheet_semantic",
+        )
+        if report.blocking_issues:
+            logger.info(
+                "dimension_agent_report project=%s version=%s stage=%s help=%s sheet=%s",
+                project_id,
+                audit_version,
+                "sheet_semantic",
+                report.runner_help_request,
+                job.get("sheet_no"),
+            )
         await asyncio.to_thread(
             _save_cache_json, cache_dir, "sheet", job["cache_key"], cleaned
         )
@@ -831,7 +902,7 @@ async def _execute_pair_jobs(
                 ),
                 should_cancel=lambda: is_cancel_requested(project_id),
             )
-            compare_result = turn_result.output if turn_result.status != "needs_review" else []
+            compare_result = turn_result.output if turn_result.status == "ok" else []
         else:
             runner = _get_dimension_runner(
                 project_id or "__adhoc_dimension__",
@@ -861,13 +932,29 @@ async def _execute_pair_jobs(
                     temperature=0.0,
                 )
             )
-            compare_result = turn_result.output if turn_result.status != "needs_review" else []
+            compare_result = turn_result.output if turn_result.status == "ok" else []
         if not isinstance(compare_result, list):
             raise RuntimeError(
                 f"尺寸图对比对返回格式异常：{job['a_sheet_no']} vs {job['b_sheet_no']}，"
                 f"返回类型={type(compare_result).__name__}"
             )
         cleaned = [item for item in compare_result if isinstance(item, dict)]
+        report = _build_dimension_agent_report(
+            job,
+            turn_result,
+            cleaned=cleaned,
+            stage="pair_compare",
+        )
+        if report.blocking_issues:
+            logger.info(
+                "dimension_agent_report project=%s version=%s stage=%s help=%s source=%s target=%s",
+                project_id,
+                audit_version,
+                "pair_compare",
+                report.runner_help_request,
+                job.get("a_sheet_no"),
+                job.get("b_sheet_no"),
+            )
         await asyncio.to_thread(
             _save_cache_json, cache_dir, "pair", job["cache_key"], cleaned
         )
