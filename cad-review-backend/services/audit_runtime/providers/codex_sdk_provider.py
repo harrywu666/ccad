@@ -5,7 +5,16 @@ from __future__ import annotations
 from typing import Optional
 
 from services.audit_runtime.codex_bridge_client import CodexBridgeClient
+from services.audit_runtime.runner_observer_prompt import (
+    build_runner_observer_system_prompt,
+    build_runner_observer_user_prompt,
+)
 from services.audit_runtime.providers.base import BaseRunnerProvider, StreamCallback
+from services.audit_runtime.runner_observer_types import (
+    RunnerObserverFeedSnapshot,
+    RunnerObserverMemory,
+    observer_decision_from_text,
+)
 from services.audit_runtime.runner_types import (
     RunnerSubsession,
     RunnerTurnRequest,
@@ -28,6 +37,7 @@ class CodexSdkProvider(BaseRunnerProvider):
 
     def __init__(self, *, bridge_client: Optional[CodexBridgeClient] = None) -> None:
         self.bridge_client = bridge_client or CodexBridgeClient()
+        self._observer_threads: dict[str, str] = {}
 
     async def run_once(
         self,
@@ -74,6 +84,24 @@ class CodexSdkProvider(BaseRunnerProvider):
     async def cancel(self, subsession: RunnerSubsession) -> bool:
         return await self.bridge_client.cancel_turn(subsession_key=subsession.session_key)
 
+    async def observe_once(
+        self,
+        snapshot: RunnerObserverFeedSnapshot,
+        memory: RunnerObserverMemory,
+    ):
+        subsession_key = f"observer:{memory.project_id}:{memory.audit_version}"
+        thread_id = self._observer_threads.get(subsession_key)
+        op = "resume_turn" if thread_id else "start_turn"
+        bridge_result = await self.bridge_client.stream_turn(
+            op=op,
+            subsession_key=subsession_key,
+            thread_id=thread_id,
+            input_text=self._build_observer_prompt(snapshot, memory),
+        )
+        if bridge_result.thread_id:
+            self._observer_threads[subsession_key] = bridge_result.thread_id
+        return observer_decision_from_text(bridge_result.output_text)
+
     def _build_prompt(self, request: RunnerTurnRequest) -> str:
         system = (request.system_prompt or "").strip()
         user = (request.user_prompt or "").strip()
@@ -81,5 +109,13 @@ class CodexSdkProvider(BaseRunnerProvider):
             return f"[系统要求]\n{system}\n\n[用户任务]\n{user}"
         return user or system
 
+    def _build_observer_prompt(
+        self,
+        snapshot: RunnerObserverFeedSnapshot,
+        memory: RunnerObserverMemory,
+    ) -> str:
+        system = build_runner_observer_system_prompt()
+        user = build_runner_observer_user_prompt(snapshot, memory)
+        return f"[系统要求]\n{system}\n\n[用户任务]\n{user}"
 
 __all__ = ["CODEX_BRIDGE_BOUNDARY", "CodexSdkProvider"]

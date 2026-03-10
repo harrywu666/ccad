@@ -285,26 +285,35 @@ def _dispatch_runner_observer(
 
     from services.audit_runtime.runner_observer_feed import build_observer_snapshot
     from services.audit_runtime.runner_observer_session import ProjectRunnerObserverSession
+    from services.audit_runtime.providers.factory import build_runner_provider
 
     runtime_status = _load_observer_runtime_status(project_id, audit_version)
     recent_events = _load_recent_observer_events(project_id, audit_version)
+    provider_mode = str(runtime_status.get("provider_mode") or "").strip() or None
     observer = ProjectRunnerObserverSession.get_or_create(
         project_id,
         audit_version=audit_version,
-        provider=_PassiveObserverProvider(),
+        provider=build_runner_provider(requested_mode=provider_mode) if provider_mode else _PassiveObserverProvider(),
     )
-    decision = _run_async(
-        observer.observe(
-            build_observer_snapshot(
-                project_id=project_id,
-                audit_version=audit_version,
-                runtime_status=runtime_status,
-                recent_events=recent_events,
+    try:
+        decision = _run_async(
+            observer.observe(
+                build_observer_snapshot(
+                    project_id=project_id,
+                    audit_version=audit_version,
+                    runtime_status=runtime_status,
+                    recent_events=recent_events,
+                )
             )
         )
-    )
+    except NotImplementedError:
+        return
+    except Exception:
+        return
     if not decision:
         return
+    observer_provider = getattr(observer, "provider", None)
+    observer_provider_name = getattr(observer_provider, "provider_name", "unknown")
 
     append_run_event(
         project_id,
@@ -317,6 +326,8 @@ def _dispatch_runner_observer(
         message=str(getattr(decision, "summary", "") or "Runner 已更新现场判断"),
         meta={
             "stream_layer": "observer_reasoning",
+            "provider_name": observer_provider_name,
+            "provider_mode": provider_mode or observer_provider_name,
             "risk_level": getattr(decision, "risk_level", ""),
             "suggested_action": getattr(decision, "suggested_action", ""),
             "reason": getattr(decision, "reason", ""),
@@ -339,6 +350,8 @@ def _dispatch_runner_observer(
             meta={
                 "stream_layer": "user_facing",
                 "source": "runner_observer",
+                "provider_name": observer_provider_name,
+                "provider_mode": provider_mode or observer_provider_name,
             },
             dispatch_observer=False,
         )

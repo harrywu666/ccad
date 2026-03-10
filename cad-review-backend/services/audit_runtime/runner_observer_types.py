@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
@@ -44,8 +45,42 @@ class RunnerObserverMemory:
     intervention_history: List[Dict[str, Any]] = field(default_factory=list)
 
 
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        raise ValueError("empty_observer_output")
+    try:
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            return payload
+    except json.JSONDecodeError:
+        pass
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        payload = json.loads(raw[start : end + 1])
+        if isinstance(payload, dict):
+            return payload
+    raise ValueError("invalid_observer_output")
+
+
+def observer_decision_from_text(text: str) -> RunnerObserverDecision:
+    payload = _extract_json_object(text)
+    return RunnerObserverDecision(
+        summary=str(payload.get("summary") or "").strip(),
+        risk_level=str(payload.get("risk_level") or "unknown").strip() or "unknown",
+        suggested_action=str(payload.get("suggested_action") or "observe_only").strip() or "observe_only",
+        reason=str(payload.get("reason") or "").strip(),
+        should_intervene=bool(payload.get("should_intervene", False)),
+        confidence=float(payload.get("confidence") or 0.0),
+        user_facing_broadcast=str(payload.get("user_facing_broadcast") or "").strip(),
+    )
+
+
 __all__ = [
     "RunnerObserverDecision",
     "RunnerObserverFeedSnapshot",
     "RunnerObserverMemory",
+    "observer_decision_from_text",
 ]
