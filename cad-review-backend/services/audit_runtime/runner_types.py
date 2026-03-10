@@ -26,6 +26,9 @@ class RunnerTurnRequest:
     images: List[bytes] = field(default_factory=list)
     temperature: float = 0.1
     max_tokens: int = 65536
+    agent_name: str = ""
+    step_key: str = ""
+    progress_hint: Optional[int] = None
     meta: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -51,6 +54,7 @@ class RunnerSubsession:
     session_key: str
     shared_context: Dict[str, Any]
     retry_count: int = 0
+    session_started: bool = False
     current_turn_status: str = "idle"
     output_history: List[str] = field(default_factory=list)
 

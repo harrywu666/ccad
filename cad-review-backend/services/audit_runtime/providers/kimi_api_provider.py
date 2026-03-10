@@ -29,12 +29,16 @@ async def _emit_stream_event(
 class KimiApiProvider(BaseRunnerProvider):
     provider_name = "api"
 
+    def __init__(self, *, run_once_func=call_kimi, run_stream_func=call_kimi_stream) -> None:  # noqa: ANN001
+        self._run_once_func = run_once_func
+        self._run_stream_func = run_stream_func
+
     async def run_once(
         self,
         request: RunnerTurnRequest,
         subsession: RunnerSubsession,
     ) -> RunnerTurnResult:
-        output = await call_kimi(
+        output = await self._run_once_func(
             system_prompt=request.system_prompt,
             user_prompt=request.user_prompt,
             images=request.images,
@@ -69,14 +73,14 @@ class KimiApiProvider(BaseRunnerProvider):
 
         async def _on_retry(payload: dict) -> None:
             event = ProviderStreamEvent(
-                event_kind="provider_retry",
-                text="",
+                event_kind="phase_event",
+                text="AI 引擎连接暂时被打断，正在自动重试",
                 meta=payload,
             )
             events.append(event)
             await _emit_stream_event(on_event, event)
 
-        output = await call_kimi_stream(
+        output = await self._run_stream_func(
             system_prompt=request.system_prompt,
             user_prompt=request.user_prompt,
             images=request.images,

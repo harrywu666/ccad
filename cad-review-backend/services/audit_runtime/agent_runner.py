@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import inspect
 import threading
 from typing import Any, Dict, Optional, Tuple
 
-from services.audit_runtime.runner_types import RunnerSubsession, RunnerTurnRequest
+from services.audit_runtime.runner_types import (
+    ProviderStreamEvent,
+    RunnerSubsession,
+    RunnerTurnRequest,
+    RunnerTurnResult,
+)
 
 
 class ProjectAuditAgentRunner:
@@ -79,6 +85,125 @@ class ProjectAuditAgentRunner:
                 )
                 self._subsessions[request.agent_key] = subsession
             return subsession
+
+    async def run_once(
+        self,
+        request: RunnerTurnRequest,
+        *,
+        should_cancel=None,  # noqa: ANN001
+    ) -> RunnerTurnResult:
+        subsession = self.resolve_subsession(request)
+        self._ensure_session_started(request, subsession)
+        self._append_event(
+            request,
+            event_kind="runner_turn_started",
+            message=f"{request.agent_name or request.agent_key} 已通过 Runner 发起一次非流式调用",
+            meta={"turn_kind": request.turn_kind, "session_key": subsession.session_key},
+        )
+        subsession.current_turn_status = "running"
+        try:
+            result = await self.provider.run_once(request, subsession)
+            subsession.current_turn_status = "idle"
+            return result
+        except Exception as exc:
+            subsession.current_turn_status = "failed"
+            self._append_event(
+                request,
+                event_kind="runner_session_failed",
+                level="error",
+                message=f"{request.agent_name or request.agent_key} 的 Runner 会话执行失败：{exc}",
+                meta={"turn_kind": request.turn_kind, "session_key": subsession.session_key},
+            )
+            raise
+
+    async def run_stream(
+        self,
+        request: RunnerTurnRequest,
+        *,
+        should_cancel=None,  # noqa: ANN001
+    ) -> RunnerTurnResult:
+        subsession = self.resolve_subsession(request)
+        self._ensure_session_started(request, subsession)
+        self._append_event(
+            request,
+            event_kind="runner_turn_started",
+            message=f"{request.agent_name or request.agent_key} 已通过 Runner 发起一次流式调用",
+            meta={"turn_kind": request.turn_kind, "session_key": subsession.session_key},
+        )
+        subsession.current_turn_status = "running"
+
+        async def _on_provider_event(event: ProviderStreamEvent) -> None:
+            if event.text:
+                subsession.output_history.append(event.text)
+                subsession.output_history = subsession.output_history[-50:]
+            if event.event_kind == "phase_event" and event.meta.get("reason"):
+                subsession.retry_count += 1
+            self._append_event(
+                request,
+                event_kind=event.event_kind,
+                level="warning" if event.event_kind == "phase_event" and event.meta.get("reason") else "info",
+                message=event.text or "AI 引擎正在重试",
+                meta=event.meta,
+            )
+
+        try:
+            result = await self.provider.run_stream(
+                request,
+                subsession,
+                on_event=_on_provider_event,
+                should_cancel=should_cancel,
+            )
+            subsession.current_turn_status = "idle"
+            return result
+        except Exception as exc:
+            subsession.current_turn_status = "failed"
+            self._append_event(
+                request,
+                event_kind="runner_session_failed",
+                level="error",
+                message=f"{request.agent_name or request.agent_key} 的 Runner 会话执行失败：{exc}",
+                meta={"turn_kind": request.turn_kind, "session_key": subsession.session_key},
+            )
+            raise
+
+    def _ensure_session_started(
+        self,
+        request: RunnerTurnRequest,
+        subsession: RunnerSubsession,
+    ) -> None:
+        if subsession.session_started:
+            return
+        subsession.session_started = True
+        self._append_event(
+            request,
+            event_kind="runner_session_started",
+            message=f"{request.agent_name or request.agent_key} 已创建项目级 Runner 子会话",
+            meta={"session_key": subsession.session_key},
+        )
+
+    def _append_event(
+        self,
+        request: RunnerTurnRequest,
+        *,
+        event_kind: str,
+        message: str,
+        level: str = "info",
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        from services.audit_runtime.state_transitions import append_run_event
+
+        append_run_event(
+            self.project_id,
+            self.audit_version,
+            level=level,
+            step_key=request.step_key or None,
+            agent_key=request.agent_key,
+            agent_name=request.agent_name or None,
+            event_kind=event_kind,
+            progress_hint=request.progress_hint,
+            message=message,
+            meta=meta,
+        )
 
 
 __all__ = ["ProjectAuditAgentRunner"]

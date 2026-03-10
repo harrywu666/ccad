@@ -15,7 +15,11 @@ import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from models import SheetContext, SheetEdge
-from services.kimi_service import call_kimi
+from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
+from services.audit_runtime.runner_types import RunnerTurnRequest
+from services.audit_runtime.cancel_registry import is_cancel_requested, AuditCancellationRequested
+from services.kimi_service import call_kimi, call_kimi_stream
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +42,13 @@ def _env_float(name: str, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return value if value > 0 else default
+
+
+def _stream_enabled() -> bool:
+    raw = os.getenv("AUDIT_KIMI_STREAM_ENABLED")
+    if raw is None:
+        return True
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _norm_sheet_no(value: Optional[str]) -> str:
@@ -117,6 +128,43 @@ def _resolve_master_planner_prompts(payload: Dict[str, Any]) -> Dict[str, str]:
     return resolve_stage_prompts(
         "master_task_planner",
         {"payload_json": json.dumps(payload, ensure_ascii=False)},
+    )
+
+
+def _append_planner_runtime_event(
+    project_id: str,
+    audit_version: int,
+    *,
+    message: str,
+    event_kind: str,
+    level: str = "info",
+    meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    from services.audit_runtime.state_transitions import append_run_event
+
+    append_run_event(
+        project_id,
+        audit_version,
+        level=level,
+        step_key="task_planning",
+        agent_key="master_planner_agent",
+        agent_name="总控规划Agent",
+        event_kind=event_kind,
+        progress_hint=18,
+        message=message,
+        meta=meta,
+    )
+
+
+def _get_master_runner(project_id: str, audit_version: int) -> ProjectAuditAgentRunner:
+    return ProjectAuditAgentRunner.get_or_create(
+        project_id,
+        audit_version=audit_version,
+        provider=KimiApiProvider(
+            run_once_func=call_kimi,
+            run_stream_func=call_kimi_stream,
+        ),
+        shared_context={"project_id": project_id, "audit_version": audit_version},
     )
 
 
@@ -205,6 +253,7 @@ def plan_with_master_llm(
     project_id: str,
     contexts: List[SheetContext],
     edges: List[SheetEdge],
+    audit_version: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     使用总控 LLM 规划任务。
@@ -314,19 +363,43 @@ def plan_with_master_llm(
             len(edge_items),
             max_tokens,
         )
-        result = _run_async(
-            call_kimi(
+        if audit_version is not None and _stream_enabled():
+            runner = _get_master_runner(project_id, audit_version)
+            request = RunnerTurnRequest(
+                agent_key="master_planner_agent",
+                agent_name="总控规划Agent",
+                step_key="task_planning",
+                progress_hint=18,
+                turn_kind="planning",
                 system_prompt=prompts["system_prompt"],
                 user_prompt=prompts["user_prompt"],
                 temperature=0.0,
                 max_tokens=max_tokens,
+                meta={"source": "master_planner_stream"},
             )
-        )
+            turn_result = _run_async(
+                runner.run_stream(
+                    request,
+                    should_cancel=lambda: is_cancel_requested(project_id),
+                )
+            )
+            result = turn_result.output
+        else:
+            result = _run_async(
+                call_kimi(
+                    system_prompt=prompts["system_prompt"],
+                    user_prompt=prompts["user_prompt"],
+                    temperature=0.0,
+                    max_tokens=max_tokens,
+                )
+            )
         logger.info(
             "master_planner llm completed project=%s elapsed=%.2fs",
             project_id,
             time.perf_counter() - started_at,
         )
+    except AuditCancellationRequested:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("master_planner failed project=%s error=%s", project_id, exc)
         return {"ok": False, "reason": f"llm_error:{exc}"}
