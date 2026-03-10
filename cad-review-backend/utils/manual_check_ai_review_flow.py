@@ -154,24 +154,33 @@ def summarize_progressive_metrics(
     }
 
 
-def summarize_runner_metrics(events: List[Dict[str, Any]]) -> Dict[str, Any]:
-    provider_mode = str(os.getenv("AUDIT_RUNNER_PROVIDER", "")).strip().lower() or None
-    sdk_session_reuse_count = 0
-    sdk_repair_attempts = 0
-    sdk_repair_successes = 0
-    sdk_needs_review_count = 0
-    sdk_stream_event_count = 0
+def summarize_runner_metrics(
+    events: List[Dict[str, Any]],
+    *,
+    requested_provider_mode: Optional[str] = None,
+    runtime_status: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    provider_mode = str(requested_provider_mode or "").strip().lower() or None
+    codex_thread_ids: set[str] = set()
+    codex_resume_count = 0
+    codex_cancel_count = 0
+    codex_stream_event_count = 0
     stalled_turn_retries = 0
     invalid_input_skipped = 0
     runner_broadcast_count = 0
     needs_review_count = 0
+    observer_decision_count = 0
+    observer_intervention_suggested_count = 0
+    observer_auto_action_count = 0
     provider_names: set[str] = set()
 
     for event in events:
         meta = event.get("meta") if isinstance(event.get("meta"), dict) else {}
         provider_name = str(meta.get("provider_name") or "").strip().lower()
-        if provider_name:
-            provider_names.add(provider_name)
+        provider_mode_hint = str(meta.get("provider_mode") or "").strip().lower()
+        effective_provider = provider_mode_hint or provider_name
+        if effective_provider:
+            provider_names.add(effective_provider)
         event_kind = str(event.get("event_kind") or "").strip()
         if event_kind == "runner_turn_retrying":
             stalled_turn_retries += 1
@@ -181,19 +190,30 @@ def summarize_runner_metrics(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             runner_broadcast_count += 1
         elif event_kind == "runner_turn_needs_review":
             needs_review_count += 1
-        if provider_name != "sdk":
+        elif event_kind == "runner_observer_decision":
+            observer_decision_count += 1
+            if meta.get("should_intervene") is True:
+                observer_intervention_suggested_count += 1
+            if str(meta.get("suggested_action") or "").strip() in {"observe_only", "broadcast_update"}:
+                observer_auto_action_count += 1
+        if effective_provider != "codex_sdk":
             continue
+        thread_id = str(meta.get("thread_id") or "").strip()
+        if thread_id:
+            codex_thread_ids.add(thread_id)
         if event_kind == "runner_session_reused":
-            sdk_session_reuse_count += 1
-        elif event_kind == "output_repair_started":
-            sdk_repair_attempts += 1
-        elif event_kind == "output_repair_succeeded":
-            sdk_repair_successes += 1
-        elif event_kind == "runner_turn_needs_review":
-            sdk_needs_review_count += 1
+            codex_resume_count += 1
         elif event_kind == "provider_stream_delta":
-            sdk_stream_event_count += 1
+            codex_stream_event_count += 1
+        elif event_kind in {"runner_turn_cancelled", "runner_session_cancelled"}:
+            codex_cancel_count += 1
+        elif str(meta.get("reason") or "").strip().lower() in {"user_cancelled", "cancel_turn"}:
+            codex_cancel_count += 1
 
+    if not provider_mode:
+        status_provider_mode = str((runtime_status or {}).get("provider_mode") or "").strip().lower()
+        if status_provider_mode:
+            provider_mode = status_provider_mode
     if not provider_mode and len(provider_names) == 1:
         provider_mode = next(iter(provider_names))
 
@@ -216,15 +236,17 @@ def summarize_runner_metrics(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "provider_mode": provider_mode,
         "provider_names_seen": sorted(provider_names),
-        "sdk_session_reuse_count": sdk_session_reuse_count,
-        "sdk_repair_attempts": sdk_repair_attempts,
-        "sdk_repair_successes": sdk_repair_successes,
-        "sdk_needs_review_count": sdk_needs_review_count,
-        "sdk_stream_event_count": sdk_stream_event_count,
+        "codex_thread_count": len(codex_thread_ids),
+        "codex_resume_count": codex_resume_count,
+        "codex_cancel_count": codex_cancel_count,
+        "codex_stream_event_count": codex_stream_event_count,
         "stalled_turn_retries": stalled_turn_retries,
         "invalid_input_skipped": invalid_input_skipped,
         "runner_broadcast_count": runner_broadcast_count,
         "needs_review_count": needs_review_count,
+        "observer_decision_count": observer_decision_count,
+        "observer_intervention_suggested_count": observer_intervention_suggested_count,
+        "observer_auto_action_count": observer_auto_action_count,
         "last_progress_at": last_progress_at.isoformat() if last_progress_at else None,
         "last_progress_gap_seconds": last_progress_gap_seconds,
     }
@@ -349,6 +371,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable-orchestrator-v2", action="store_true", help="Enable AUDIT_ORCHESTRATOR_V2_ENABLED in local mode")
     parser.add_argument("--enable-evidence-planner", action="store_true", help="Mark evidence planner enabled for this run")
     parser.add_argument("--enable-feedback-runtime", action="store_true", help="Mark feedback runtime injection enabled for this run")
+    parser.add_argument("--provider-mode", choices=["kimi_sdk", "codex_sdk"], help="Per-audit provider mode to request")
     return parser.parse_args()
 
 
@@ -380,9 +403,13 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_name = f"{args.project_id}-runner-supervisor-check.json"
+    if args.provider_mode:
+        output_name = f"{args.project_id}-{args.provider_mode}-codex-switch-check.json"
     if args.base_url:
         safe_host = args.base_url.replace("://", "_").replace("/", "_").replace(":", "_")
         output_name = f"{args.project_id}-{safe_host}-runner-supervisor-check.json"
+        if args.provider_mode:
+            output_name = f"{args.project_id}-{args.provider_mode}-{safe_host}-codex-switch-check.json"
     output_path = output_dir / output_name
 
     report: Dict[str, Any] = {
@@ -395,6 +422,7 @@ def main() -> int:
             "poll_interval": args.poll_interval,
             "base_url": args.base_url,
             "request_timeout": args.request_timeout,
+            "provider_mode": args.provider_mode,
             "enable_orchestrator_v2": args.enable_orchestrator_v2,
             "enable_evidence_planner": args.enable_evidence_planner,
             "enable_feedback_runtime": args.enable_feedback_runtime,
@@ -414,7 +442,7 @@ def main() -> int:
                 "ok": True,
                 "mode": "http",
                 "applied": False,
-                "provider_mode": os.getenv("AUDIT_RUNNER_PROVIDER"),
+                "provider_mode": args.provider_mode,
                 "detail": "HTTP 模式不会远程改服务环境变量，仅记录本次验收期望开关。",
             }
         else:
@@ -437,7 +465,7 @@ def main() -> int:
                 "ok": True,
                 "mode": "local",
                 "applied": True,
-                "provider_mode": os.getenv("AUDIT_RUNNER_PROVIDER"),
+                "provider_mode": args.provider_mode,
                 "values": {
                     "AUDIT_ORCHESTRATOR_V2_ENABLED": args.enable_orchestrator_v2,
                     "AUDIT_EVIDENCE_PLANNER_ENABLED": args.enable_evidence_planner,
@@ -534,7 +562,10 @@ def main() -> int:
             try:
                 start_resp = client.post(
                     f"/api/projects/{args.project_id}/audit/start",
-                    json_body={"allow_incomplete": args.allow_incomplete},
+                    json_body={
+                        "allow_incomplete": args.allow_incomplete,
+                        "provider_mode": args.provider_mode,
+                    },
                 )
             except httpx.TimeoutException as exc:
                 report["checks"]["runtime_audit"] = {
@@ -583,7 +614,11 @@ def main() -> int:
                         results=runtime_results,
                         events=runtime_events,
                     )
-                    runner_metrics = summarize_runner_metrics(runtime_events)
+                    runner_metrics = summarize_runner_metrics(
+                        runtime_events,
+                        requested_provider_mode=args.provider_mode,
+                        runtime_status=runtime_status,
+                    )
                     status_value = str(runtime_status.get("status") or "").strip().lower()
                     completed_within_window = status_value in {"completed", "failed"}
                     last_progress_gap_seconds = runner_metrics.get("last_progress_gap_seconds")
