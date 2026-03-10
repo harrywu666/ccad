@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from models import SheetContext, SheetEdge
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
-from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
+from services.audit_runtime.providers.factory import build_runner_provider
 from services.audit_runtime.runner_types import RunnerTurnRequest
 from services.audit_runtime.cancel_registry import is_cancel_requested, AuditCancellationRequested
 from services.kimi_service import call_kimi, call_kimi_stream
@@ -156,15 +156,41 @@ def _append_planner_runtime_event(
     )
 
 
+def _load_requested_provider_mode(project_id: str, audit_version: int) -> Optional[str]:
+    from database import SessionLocal
+    from models import AuditRun
+
+    db = SessionLocal()
+    try:
+        run = (
+            db.query(AuditRun)
+            .filter(
+                AuditRun.project_id == project_id,
+                AuditRun.audit_version == audit_version,
+            )
+            .order_by(AuditRun.created_at.desc())
+            .first()
+        )
+        value = str(getattr(run, "provider_mode", "") or "").strip()
+        return value or None
+    finally:
+        db.close()
+
+
 def _get_master_runner(project_id: str, audit_version: int) -> ProjectAuditAgentRunner:
+    provider_mode = _load_requested_provider_mode(project_id, audit_version)
+    shared_context = {"project_id": project_id, "audit_version": audit_version}
+    if provider_mode:
+        shared_context["provider_mode"] = provider_mode
     return ProjectAuditAgentRunner.get_or_create(
         project_id,
         audit_version=audit_version,
-        provider=KimiApiProvider(
+        provider=build_runner_provider(
+            requested_mode=provider_mode,
             run_once_func=call_kimi,
             run_stream_func=call_kimi_stream,
         ),
-        shared_context={"project_id": project_id, "audit_version": audit_version},
+        shared_context=shared_context,
     )
 
 
