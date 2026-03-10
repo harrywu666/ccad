@@ -14,14 +14,6 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 
-from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
-from services.audit_runtime.runner_types import (
-    ProviderStreamEvent,
-    RunnerTurnRequest,
-    RunnerTurnResult,
-)
-
-
 def _clear_backend_modules() -> None:
     targets = (
         "database",
@@ -37,9 +29,16 @@ def _clear_backend_modules() -> None:
         "routers.settings",
         "routers.feedback",
         "routers.skill_pack",
+        "services.audit_runtime.state_transitions",
+        "services.audit_runtime.agent_runner",
+        "services.audit_runtime.runner_broadcasts",
     )
     for name in list(sys.modules):
-        if name in targets or name.startswith("routers."):
+        if (
+            name in targets
+            or name.startswith("routers.")
+            or name.startswith("services.audit_runtime")
+        ):
             sys.modules.pop(name, None)
 
 
@@ -59,6 +58,8 @@ class _FakeProvider:
     provider_name = "sdk"
 
     async def run_once(self, request, subsession):  # noqa: ANN001
+        from services.audit_runtime.runner_types import RunnerTurnResult
+
         return RunnerTurnResult(
             provider_name=self.provider_name,
             output={"ok": True},
@@ -66,6 +67,11 @@ class _FakeProvider:
         )
 
     async def run_stream(self, request, subsession, *, on_event=None, should_cancel=None):  # noqa: ANN001
+        from services.audit_runtime.runner_types import (
+            ProviderStreamEvent,
+            RunnerTurnResult,
+        )
+
         if on_event is not None:
             await on_event(
                 ProviderStreamEvent(
@@ -84,6 +90,8 @@ class _FakeProvider:
 
 def test_runner_broadcast_is_written_as_user_facing_event(monkeypatch, tmp_path):
     app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+    from services.audit_runtime.runner_types import RunnerTurnRequest
 
     db = session_local()
     try:
