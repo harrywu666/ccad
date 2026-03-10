@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 from services.audit_runtime.output_guard import guard_output
+from services.audit_runtime.cancel_registry import AuditCancellationRequested
 from services.audit_runtime.providers.kimi_sdk_provider import SdkStreamIdleTimeoutError
 from services.audit_runtime.runner_broadcasts import build_runner_broadcast_message
 from services.audit_runtime.runner_types import (
@@ -77,6 +78,16 @@ class ProjectAuditAgentRunner:
         with cls._registry_lock:
             cls._registry.clear()
 
+    @classmethod
+    def get_existing(
+        cls,
+        project_id: str,
+        *,
+        audit_version: int,
+    ) -> Optional["ProjectAuditAgentRunner"]:
+        with cls._registry_lock:
+            return cls._registry.get((project_id, int(audit_version)))
+
     def resolve_subsession(self, request: RunnerTurnRequest) -> RunnerSubsession:
         with self._subsession_lock:
             subsession = self._subsessions.get(request.agent_key)
@@ -90,6 +101,10 @@ class ProjectAuditAgentRunner:
                 )
                 self._subsessions[request.agent_key] = subsession
             return subsession
+
+    def get_existing_subsession(self, agent_key: str) -> Optional[RunnerSubsession]:
+        with self._subsession_lock:
+            return self._subsessions.get(agent_key)
 
     def _provider_name(self) -> str:
         provider_name = getattr(self.provider, "provider_name", "")
@@ -130,6 +145,24 @@ class ProjectAuditAgentRunner:
             subsession.current_turn_status = "idle"
             subsession.current_phase = "idle"
             return result
+        except AuditCancellationRequested:
+            subsession.current_turn_status = "cancelled"
+            subsession.current_phase = "cancelled"
+            subsession.stall_reason = "user_cancelled"
+            self._append_event(
+                request,
+                event_kind="runner_turn_cancelled",
+                level="warning",
+                message=f"{request.agent_name or request.agent_key} 已响应用户中断请求，当前调用已停止",
+                meta={
+                    "turn_kind": request.turn_kind,
+                    "session_key": subsession.session_key,
+                    "provider_name": self._provider_name(),
+                    "provider_mode": self._provider_mode(),
+                    "reason": "user_cancelled",
+                },
+            )
+            raise
         except Exception as exc:
             subsession.current_turn_status = "failed"
             subsession.current_phase = "failed"
@@ -214,6 +247,25 @@ class ProjectAuditAgentRunner:
                 subsession.current_phase = "idle"
                 subsession.stall_reason = None
                 return result
+            except AuditCancellationRequested:
+                subsession.current_turn_status = "cancelled"
+                subsession.current_phase = "cancelled"
+                subsession.stall_reason = "user_cancelled"
+                self._set_runner_broadcast(request, subsession, state="cancelled")
+                self._append_event(
+                    request,
+                    event_kind="runner_turn_cancelled",
+                    level="warning",
+                    message=f"{request.agent_name or request.agent_key} 已响应用户中断请求，当前调用已停止",
+                    meta={
+                        "turn_kind": request.turn_kind,
+                        "session_key": subsession.session_key,
+                        "provider_name": self._provider_name(),
+                        "provider_mode": self._provider_mode(),
+                        "reason": "user_cancelled",
+                    },
+                )
+                raise
             except SdkStreamIdleTimeoutError as exc:
                 if self._retry_stalled_turn(request, subsession, exc):
                     continue

@@ -14,6 +14,7 @@ from typing import Optional
 from kaos.path import KaosPath
 from kimi_agent_sdk import ApprovalRequest, ImageURLPart, Session, TextPart, ThinkPart
 
+from services.audit_runtime.cancel_registry import AuditCancellationRequested
 from services.audit_runtime.providers.base import BaseRunnerProvider, StreamCallback
 from services.audit_runtime.runner_observer_prompt import (
     build_runner_observer_system_prompt,
@@ -57,6 +58,17 @@ def _idle_timeout_seconds() -> float:
     except (TypeError, ValueError):
         return 0.0
     return value if value > 0 else 0.0
+
+
+def _cancel_poll_interval_seconds() -> float:
+    raw = os.getenv("AUDIT_SDK_CANCEL_POLL_INTERVAL_SECONDS")
+    if raw is None:
+        return 0.25
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0.25
+    return max(0.05, value)
 
 
 class SdkStreamIdleTimeoutError(RuntimeError):
@@ -112,30 +124,50 @@ class KimiSdkProvider(BaseRunnerProvider):
         last_delta_at = time.monotonic()
         stream = session.prompt(prompt_input, merge_wire_messages=True)
         iterator = stream.__aiter__()
+        cancel_poll = _cancel_poll_interval_seconds()
 
         while True:
-            next_message = iterator.__anext__()
+            next_message = asyncio.create_task(iterator.__anext__())
             try:
-                if idle_timeout > 0:
-                    timeout_seconds = max(
-                        0.001,
-                        idle_timeout - max(0.0, time.monotonic() - last_delta_at),
+                while True:
+                    now = time.monotonic()
+                    idle_remaining = None
+                    if idle_timeout > 0:
+                        idle_remaining = max(
+                            0.0,
+                            idle_timeout - max(0.0, now - last_delta_at),
+                        )
+                    wait_timeout = cancel_poll
+                    if idle_remaining is not None:
+                        wait_timeout = min(wait_timeout, max(0.001, idle_remaining))
+
+                    done, _pending = await asyncio.wait(
+                        {next_message},
+                        timeout=wait_timeout,
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
-                    msg = await asyncio.wait_for(next_message, timeout=timeout_seconds)
-                else:
-                    msg = await next_message
+                    if done:
+                        msg = next_message.result()
+                        break
+                    if should_cancel and should_cancel():
+                        await _maybe_await(session.cancel())
+                        next_message.cancel()
+                        await asyncio.gather(next_message, return_exceptions=True)
+                        raise AuditCancellationRequested("用户手动中断审核")
+                    if idle_timeout > 0 and (time.monotonic() - last_delta_at) >= idle_timeout:
+                        await _maybe_await(session.cancel())
+                        next_message.cancel()
+                        await asyncio.gather(next_message, return_exceptions=True)
+                        raise SdkStreamIdleTimeoutError(
+                            idle_seconds=idle_timeout,
+                            session_key=subsession.session_key,
+                        )
             except StopAsyncIteration:
                 break
-            except asyncio.TimeoutError as exc:
-                await _maybe_await(session.cancel())
-                raise SdkStreamIdleTimeoutError(
-                    idle_seconds=idle_timeout,
-                    session_key=subsession.session_key,
-                ) from exc
 
             if should_cancel and should_cancel():
                 await _maybe_await(session.cancel())
-                raise RuntimeError("用户手动中断审核")
+                raise AuditCancellationRequested("用户手动中断审核")
             if self._is_think_part(msg):
                 think = getattr(msg, "think", "")
                 if think:
@@ -207,6 +239,31 @@ class KimiSdkProvider(BaseRunnerProvider):
                 if text:
                     chunks.append(text)
         return observer_decision_from_text("".join(chunks))
+
+    async def cancel(self, subsession: RunnerSubsession) -> bool:
+        key = self._session_store_key(subsession)
+        with self._session_lock:
+            session = self._sessions.get(key)
+        if session is None:
+            return False
+        await _maybe_await(session.cancel())
+        return True
+
+    async def restart_subsession(self, subsession: RunnerSubsession) -> bool:
+        key = self._session_store_key(subsession)
+        with self._session_lock:
+            session = self._sessions.pop(key, None)
+        if session is None:
+            return False
+        try:
+            await _maybe_await(session.cancel())
+        except Exception:
+            pass
+        try:
+            await _maybe_await(session.close())
+        except Exception:
+            pass
+        return True
 
     def _session_store_key(self, subsession: RunnerSubsession) -> str:
         return subsession.session_key

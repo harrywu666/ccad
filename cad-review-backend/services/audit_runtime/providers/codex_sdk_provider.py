@@ -84,6 +84,11 @@ class CodexSdkProvider(BaseRunnerProvider):
     async def cancel(self, subsession: RunnerSubsession) -> bool:
         return await self.bridge_client.cancel_turn(subsession_key=subsession.session_key)
 
+    async def restart_subsession(self, subsession: RunnerSubsession) -> bool:
+        cancelled = await self.cancel(subsession)
+        thread_id = _thread_map(subsession).pop(subsession.session_key, None)
+        return cancelled or thread_id is not None
+
     async def observe_once(
         self,
         snapshot: RunnerObserverFeedSnapshot,

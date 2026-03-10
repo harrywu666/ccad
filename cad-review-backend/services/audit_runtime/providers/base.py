@@ -44,6 +44,9 @@ class BaseRunnerProvider(ABC):
     async def cancel(self, subsession: RunnerSubsession) -> bool:
         return False
 
+    async def restart_subsession(self, subsession: RunnerSubsession) -> bool:
+        return False
+
     async def observe_once(
         self,
         snapshot: RunnerObserverFeedSnapshot,

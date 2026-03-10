@@ -310,6 +310,118 @@ def _load_recent_observer_events(project_id: str, audit_version: int, *, limit: 
     return items
 
 
+def _find_target_agent_key(recent_events: List[Dict[str, Any]]) -> Optional[str]:
+    for item in reversed(recent_events):
+        agent_key = str(item.get("agent_key") or "").strip()
+        if not agent_key or agent_key == "runner_observer_agent":
+            continue
+        return agent_key
+    return None
+
+
+def _mark_observer_needs_review(
+    project_id: str,
+    audit_version: int,
+    *,
+    runtime_status: Dict[str, Any],
+    reason: str,
+) -> str:
+    update_run_progress(
+        project_id,
+        audit_version,
+        status="needs_review",
+        current_step=runtime_status.get("current_step") or None,
+        progress=runtime_status.get("progress"),
+        error=reason or None,
+    )
+    return "needs_review"
+
+
+def _restart_runner_subsession(
+    project_id: str,
+    audit_version: int,
+    *,
+    agent_key: Optional[str],
+) -> bool:
+    if not agent_key:
+        return False
+
+    from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+
+    runner = ProjectAuditAgentRunner.get_existing(project_id, audit_version=audit_version)
+    if runner is None or getattr(runner, "provider", None) is None:
+        return False
+
+    subsession = runner.get_existing_subsession(agent_key)
+    if subsession is None:
+        return False
+
+    restarted = bool(_run_async(runner.provider.restart_subsession(subsession)))
+    if restarted:
+        subsession.session_started = False
+        subsession.current_turn_status = "idle"
+        subsession.current_phase = "observer_restart_pending"
+        subsession.stall_reason = "observer_restart_subsession"
+        subsession.output_history.clear()
+        subsession.last_broadcast = None
+    return restarted
+
+
+def _execute_observer_action(
+    project_id: str,
+    audit_version: int,
+    *,
+    runtime_status: Dict[str, Any],
+    recent_events: List[Dict[str, Any]],
+    decision,
+) -> Optional[Dict[str, Any]]:  # noqa: ANN001
+    if not bool(getattr(decision, "should_intervene", False)):
+        return None
+
+    from services.audit_runtime.runner_action_gate import RunnerActionGate
+
+    reason = str(getattr(decision, "reason", "") or "").strip()
+    gate = RunnerActionGate(project_root=".")
+    action_name = str(getattr(decision, "suggested_action", "") or "").strip()
+    result = gate.execute(
+        action_name,
+        context={
+            "broadcast_message": str(getattr(decision, "user_facing_broadcast", "") or "").strip(),
+            "mark_needs_review": lambda: _mark_observer_needs_review(
+                project_id,
+                audit_version,
+                runtime_status=runtime_status,
+                reason=reason,
+            ),
+            "restart_subsession": lambda: _restart_runner_subsession(
+                project_id,
+                audit_version,
+                agent_key=_find_target_agent_key(recent_events),
+            ),
+        },
+    )
+    append_run_event(
+        project_id,
+        audit_version,
+        step_key=runtime_status.get("current_step") or None,
+        agent_key="runner_observer_agent",
+        agent_name="Runner观察Agent",
+        event_kind="runner_observer_action",
+        progress_hint=runtime_status.get("progress") or 0,
+        message=f"Runner 已执行观察动作：{action_name or 'observe_only'}",
+        meta={
+            "stream_layer": "observer_action",
+            "action_name": result.get("action_name"),
+            "allowed": bool(result.get("allowed")),
+            "executed": bool(result.get("executed")),
+            "result": result.get("result"),
+            "reason": result.get("reason", ""),
+        },
+        dispatch_observer=False,
+    )
+    return result
+
+
 def _dispatch_runner_observer(
     project_id: str,
     audit_version: int,
@@ -392,6 +504,13 @@ def _dispatch_runner_observer(
             },
             dispatch_observer=False,
         )
+    _execute_observer_action(
+        project_id,
+        audit_version,
+        runtime_status=runtime_status,
+        recent_events=recent_events,
+        decision=decision,
+    )
 
 
 def append_task_trace(task: AuditTask, payload: Dict[str, object]) -> None:
