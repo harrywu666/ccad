@@ -16,6 +16,7 @@ from services.audit_runtime.providers.kimi_sdk_provider import (
     KimiSdkProvider,
     SdkStreamIdleTimeoutError,
 )
+from services.audit_runtime.cancel_registry import AuditCancellationRequested
 from services.audit_runtime.runner_types import RunnerSubsession, RunnerTurnRequest
 
 
@@ -32,6 +33,22 @@ class _IdleSession:
         yield _FakeText("hello")
         await asyncio.sleep(0.05)
         yield _FakeText(" world")
+
+    def cancel(self):
+        self.cancelled = True
+
+    async def close(self):
+        return None
+
+
+class _SilentSession:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    async def prompt(self, _user_input, merge_wire_messages=True):
+        await asyncio.sleep(10)
+        if False:
+            yield None
 
     def cancel(self):
         self.cancelled = True
@@ -68,5 +85,96 @@ def test_sdk_provider_times_out_when_stream_has_no_new_delta(monkeypatch):
             await provider.run_stream(request, subsession)
 
         assert session.cancelled is True
+
+    asyncio.run(_run())
+
+
+def test_sdk_provider_can_cancel_while_stream_is_silent(monkeypatch):
+    monkeypatch.delenv("AUDIT_SDK_STREAM_IDLE_TIMEOUT_SECONDS", raising=False)
+    session = _SilentSession()
+
+    async def _fake_session_factory(**_kwargs):
+        return session
+
+    async def _run():
+        provider = KimiSdkProvider(session_factory=_fake_session_factory)
+        request = RunnerTurnRequest(
+            agent_key="relationship_review_agent",
+            agent_name="关系审查Agent",
+            turn_kind="relationship_candidate_review",
+            system_prompt="你是助手",
+            user_prompt="请输出 JSON",
+        )
+        subsession = RunnerSubsession(
+            project_id="proj-sdk-cancel",
+            audit_version=1,
+            agent_key=request.agent_key,
+            session_key="proj-sdk-cancel:1:relationship_review_agent",
+            shared_context={},
+        )
+
+        cancel_state = {"value": False}
+
+        async def _trigger_cancel():
+            await asyncio.sleep(0.05)
+            cancel_state["value"] = True
+
+        trigger = asyncio.create_task(_trigger_cancel())
+        started = asyncio.get_running_loop().time()
+        with pytest.raises(AuditCancellationRequested, match="用户手动中断审核"):
+            await provider.run_stream(
+                request,
+                subsession,
+                should_cancel=lambda: cancel_state["value"],
+            )
+        elapsed = asyncio.get_running_loop().time() - started
+        await trigger
+
+        assert elapsed < 1.0
+        assert session.cancelled is True
+
+    asyncio.run(_run())
+
+
+def test_sdk_provider_can_restart_subsession_with_fresh_session():
+    created_sessions = []
+
+    class _RestartableSession:
+        def __init__(self) -> None:
+            self.cancelled = False
+            self.closed = False
+
+        async def prompt(self, _user_input, merge_wire_messages=True):
+            yield _FakeText("hello")
+
+        def cancel(self):
+            self.cancelled = True
+
+        async def close(self):
+            self.closed = True
+
+    async def _fake_session_factory(**_kwargs):
+        session = _RestartableSession()
+        created_sessions.append(session)
+        return session
+
+    async def _run():
+        provider = KimiSdkProvider(session_factory=_fake_session_factory)
+        subsession = RunnerSubsession(
+            project_id="proj-sdk-restart",
+            audit_version=1,
+            agent_key="relationship_review_agent",
+            session_key="proj-sdk-restart:1:relationship_review_agent",
+            shared_context={},
+        )
+
+        first = await provider._get_or_create_session(subsession)
+        restarted = await provider.restart_subsession(subsession)
+        second = await provider._get_or_create_session(subsession)
+
+        assert restarted is True
+        assert first is not second
+        assert first.cancelled is True
+        assert first.closed is True
 
     asyncio.run(_run())

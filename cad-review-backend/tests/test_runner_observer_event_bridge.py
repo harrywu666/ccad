@@ -158,3 +158,74 @@ def test_observer_event_bridge_falls_back_to_event_meta_without_audit_run(monkey
 
     event_kinds = [row.event_kind for row in rows]
     assert "runner_observer_decision" in event_kinds
+
+
+def test_observer_event_bridge_executes_mark_needs_review_action(monkeypatch, tmp_path):
+    session_local, models, state_transitions, observer_session, observer_types = _load_runtime(
+        monkeypatch,
+        tmp_path,
+    )
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-observer-action", name="Observer Action"))
+        db.add(models.AuditRun(project_id="proj-observer-action", audit_version=1, status="running"))
+        db.commit()
+    finally:
+        db.close()
+
+    class _FakeObserverSession:
+        async def observe(self, snapshot):  # noqa: ANN001
+            return observer_types.RunnerObserverDecision(
+                summary="当前步骤已经连续不稳定，应该先转人工确认",
+                risk_level="high",
+                suggested_action="mark_needs_review",
+                reason="连续多次输出不稳定，继续自动推进风险太高",
+                should_intervene=True,
+                confidence=0.96,
+                user_facing_broadcast="Runner 判断当前步骤风险偏高，已转为待人工确认",
+            )
+
+    monkeypatch.setattr(
+        observer_session.ProjectRunnerObserverSession,
+        "get_or_create",
+        classmethod(lambda cls, project_id, *, audit_version, provider=None: _FakeObserverSession()),
+    )
+
+    state_transitions.append_run_event(
+        "proj-observer-action",
+        1,
+        step_key="dimension",
+        event_kind="output_validation_failed",
+        message="尺寸审查Agent 的输出结构不完整，Runner 正在尝试整理",
+        meta={"provider_name": "sdk", "provider_mode": "sdk"},
+    )
+
+    db = session_local()
+    try:
+        run = (
+            db.query(models.AuditRun)
+            .filter(
+                models.AuditRun.project_id == "proj-observer-action",
+                models.AuditRun.audit_version == 1,
+            )
+            .first()
+        )
+        rows = (
+            db.query(models.AuditRunEvent)
+            .filter(
+                models.AuditRunEvent.project_id == "proj-observer-action",
+                models.AuditRunEvent.audit_version == 1,
+            )
+            .order_by(models.AuditRunEvent.id.asc())
+            .all()
+        )
+    finally:
+        db.close()
+
+    assert run is not None
+    assert run.status == "needs_review"
+    action_row = next(row for row in rows if row.event_kind == "runner_observer_action")
+    payload = json.loads(action_row.meta_json or "{}")
+    assert payload["action_name"] == "mark_needs_review"
+    assert payload["executed"] is True
