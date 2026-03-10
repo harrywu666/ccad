@@ -29,6 +29,7 @@ class RunnerObserverFeedSnapshot:
     current_step: str = ""
     runtime_status: Dict[str, Any] = field(default_factory=dict)
     recent_events: List[Dict[str, Any]] = field(default_factory=list)
+    active_agent_reports: List[Dict[str, Any]] = field(default_factory=list)
     current_risk_signals: List[str] = field(default_factory=list)
     risk_summary: Dict[str, Any] = field(default_factory=dict)
     intervention_hint: str = ""

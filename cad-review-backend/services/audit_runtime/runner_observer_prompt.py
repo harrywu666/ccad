@@ -73,6 +73,7 @@ def build_runner_observer_user_prompt(
         "current_step": snapshot.current_step,
         "runtime_status": snapshot.runtime_status,
         "recent_events": snapshot.recent_events,
+        "active_agent_reports": snapshot.active_agent_reports,
         "current_risk_signals": snapshot.current_risk_signals,
         "risk_summary": snapshot.risk_summary,
         "intervention_hint": snapshot.intervention_hint,
@@ -90,10 +91,10 @@ def build_runner_observer_user_prompt(
         "请作为项目级 Runner Observer Agent，对当前审图现场做一次结构化判断。\n"
         "你必须只返回 JSON 对象，不要 markdown，不要解释。\n"
         "判断原则补充：如果同类问题已经连续出现，或者你最近已经连续多次只给 observe_only，"
-        "不要连续多次只给 observe_only；你需要认真考虑 broadcast_update、restart_subsession、mark_needs_review。\n"
+        "不要连续多次只给 observe_only；你需要认真考虑 broadcast_update、restart_subsession、rerun_current_step。\n"
         f"本轮决策压力提示：{decision_pressure}\n"
         "JSON 字段固定为："
-        '{"summary":"","risk_level":"low|medium|high","suggested_action":"observe_only|broadcast_update|cancel_turn|restart_subsession|rerun_current_step|mark_needs_review","reason":"","should_intervene":false,"confidence":0.0,"user_facing_broadcast":""}\n'
+        '{"summary":"","risk_level":"low|medium|high","suggested_action":"observe_only|broadcast_update|cancel_turn|restart_subsession|rerun_current_step","reason":"","should_intervene":false,"confidence":0.0,"user_facing_broadcast":""}\n'
         "现场数据如下：\n"
         f"{json.dumps(payload, ensure_ascii=False)}"
     )

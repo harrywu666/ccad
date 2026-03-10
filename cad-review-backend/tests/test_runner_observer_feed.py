@@ -52,3 +52,40 @@ def test_observer_snapshot_exposes_repeated_risk_summary_and_intervention_hint()
     assert snapshot.risk_summary["output_validation_failed_count"] == 3
     assert snapshot.risk_summary["output_unstable_streak"] == 2
     assert "不要继续只做 observe_only" in snapshot.intervention_hint
+
+
+def test_observer_snapshot_includes_active_agent_help_reports():
+    snapshot = build_observer_snapshot(
+        project_id="proj-agent-help",
+        audit_version=5,
+        runtime_status={"status": "running", "current_step": "尺寸复核"},
+        recent_events=[
+            {
+                "event_kind": "agent_status_reported",
+                "agent_key": "dimension_review_agent",
+                "agent_name": "尺寸审查Agent",
+                "message": "第 3 批尺寸关系结果不稳",
+                "meta": {
+                    "report_scope": "internal_only",
+                    "runner_help_request": "restart_subsession",
+                    "blocking_issues": [{"kind": "unstable_output"}],
+                    "next_recommended_action": "rerun_current_batch",
+                },
+            },
+            {
+                "event_kind": "runner_help_requested",
+                "agent_key": "runner_observer_agent",
+                "message": "Runner 已收到尺寸审查Agent 的求助请求，正在尝试处理",
+                "meta": {
+                    "report_scope": "internal_only",
+                    "source_agent_key": "dimension_review_agent",
+                    "requested_action_name": "restart_subsession",
+                },
+            },
+        ],
+    )
+
+    assert snapshot.risk_summary["agent_help_requested_count"] == 1
+    assert snapshot.active_agent_reports[0]["agent_key"] == "dimension_review_agent"
+    assert snapshot.active_agent_reports[0]["runner_help_request"] == "restart_subsession"
+    assert "下属审查Agent 已主动求助" in snapshot.intervention_hint

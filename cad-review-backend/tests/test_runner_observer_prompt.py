@@ -74,3 +74,31 @@ def test_runner_observer_user_prompt_includes_decision_pressure_summary():
 
     assert "decision_pressure" in prompt
     assert "连续 3 次仍以 observe_only 收敛" in prompt
+
+
+def test_runner_observer_user_prompt_includes_active_agent_reports():
+    snapshot = build_observer_snapshot(
+        project_id="proj-agent-help",
+        audit_version=6,
+        runtime_status={"status": "running", "current_step": "尺寸复核"},
+        recent_events=[
+            {
+                "event_kind": "agent_status_reported",
+                "agent_key": "dimension_review_agent",
+                "agent_name": "尺寸审查Agent",
+                "message": "第 3 批尺寸关系结果不稳",
+                "meta": {
+                    "report_scope": "internal_only",
+                    "runner_help_request": "restart_subsession",
+                    "blocking_issues": [{"kind": "unstable_output"}],
+                },
+            }
+        ],
+    )
+    memory = RunnerObserverMemory(project_id="proj-agent-help", audit_version=6)
+
+    prompt = build_runner_observer_user_prompt(snapshot, memory)
+
+    assert "active_agent_reports" in prompt
+    assert "dimension_review_agent" in prompt
+    assert "restart_subsession" in prompt
