@@ -99,3 +99,62 @@ def test_observer_decision_is_written_to_audit_run_events(monkeypatch, tmp_path)
     observer_row = next(row for row in rows if row.event_kind == "runner_observer_decision")
     payload = json.loads(observer_row.meta_json or "{}")
     assert payload["stream_layer"] == "observer_reasoning"
+
+
+def test_observer_event_bridge_falls_back_to_event_meta_without_audit_run(monkeypatch, tmp_path):
+    session_local, models, state_transitions, observer_session, observer_types = _load_runtime(
+        monkeypatch,
+        tmp_path,
+    )
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-observer-fallback", name="Observer Fallback"))
+        db.commit()
+    finally:
+        db.close()
+
+    class _FakeObserverSession:
+        async def observe(self, snapshot):  # noqa: ANN001
+            assert snapshot.runtime_status["provider_mode"] == "sdk"
+            return observer_types.RunnerObserverDecision(
+                summary="当前像是假活",
+                risk_level="high",
+                suggested_action="restart_subsession",
+                reason="最近长时间没有稳定进展",
+                should_intervene=True,
+                confidence=0.93,
+                user_facing_broadcast="Runner 判断当前步骤像是假活，正在准备介入",
+            )
+
+    monkeypatch.setattr(
+        observer_session.ProjectRunnerObserverSession,
+        "get_or_create",
+        classmethod(lambda cls, project_id, *, audit_version, provider=None: _FakeObserverSession()),
+    )
+
+    state_transitions.append_run_event(
+        "proj-observer-fallback",
+        1,
+        step_key="dimension",
+        event_kind="runner_turn_retrying",
+        message="尺寸审查Agent 这一轮长时间没有新进展，Runner 正在重试",
+        meta={"provider_name": "sdk", "provider_mode": "sdk"},
+    )
+
+    db = session_local()
+    try:
+        rows = (
+            db.query(models.AuditRunEvent)
+            .filter(
+                models.AuditRunEvent.project_id == "proj-observer-fallback",
+                models.AuditRunEvent.audit_version == 1,
+            )
+            .order_by(models.AuditRunEvent.id.asc())
+            .all()
+        )
+    finally:
+        db.close()
+
+    event_kinds = [row.event_kind for row in rows]
+    assert "runner_observer_decision" in event_kinds
