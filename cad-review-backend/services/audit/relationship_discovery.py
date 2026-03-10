@@ -27,7 +27,7 @@ from services.audit_runtime.evidence_planner import plan_deep, plan_evidence_req
 from services.audit_runtime.evidence_service import EvidenceService
 from services.audit_runtime.finding_schema import Finding
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
-from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
+from services.audit_runtime.providers.factory import build_runner_provider
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
 from services.audit_runtime.state_transitions import append_run_event
@@ -53,7 +53,7 @@ def _get_relationship_runner(
     return ProjectAuditAgentRunner.get_or_create(
         project_id,
         audit_version=audit_version,
-        provider=KimiApiProvider(
+        provider=build_runner_provider(
             run_once_func=call_kimi,
             run_stream_func=call_kimi_stream,
         ),
@@ -205,6 +205,23 @@ def _relationship_below_threshold(
     )
     threshold = floor if floor > 0 else 0.75
     return confidence < threshold
+
+
+def _should_skip_relationship_candidate_review(
+    source_sheet: Dict[str, Any],
+    target_sheet: Dict[str, Any],
+) -> bool:
+    source_sheet_no = str(source_sheet.get("sheet_no") or "").strip()
+    target_sheet_no = str(target_sheet.get("sheet_no") or "").strip()
+    if not source_sheet_no or not target_sheet_no:
+        return True
+    if normalize_sheet_no(source_sheet_no) == normalize_sheet_no(target_sheet_no):
+        return True
+    if not source_sheet.get("pdf_path") or source_sheet.get("page_index") is None:
+        return True
+    if not target_sheet.get("pdf_path") or target_sheet.get("page_index") is None:
+        return True
+    return False
 
 
 def relationship_to_finding(
@@ -588,6 +605,9 @@ async def _discover_relationship_task_v2(
     feedback_profile: Dict[str, Any],
     hot_sheet_registry: HotSheetRegistry | None = None,
 ) -> List[Dict[str, Any]]:
+    if _should_skip_relationship_candidate_review(source_sheet, target_sheet):
+        return []
+
     plans = plan_lite(
         task_type="relationship",
         source_sheet_no=source_sheet["sheet_no"],

@@ -24,7 +24,7 @@ from services.audit_runtime.evidence_planner import plan_evidence_requests
 from services.audit_runtime.evidence_service import get_evidence_service
 from services.audit_runtime.finding_schema import Finding, apply_finding_to_audit_result
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
-from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
+from services.audit_runtime.providers.factory import build_runner_provider
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
 from services.audit_runtime.state_transitions import append_run_event
@@ -47,7 +47,7 @@ def _get_index_runner(
     return ProjectAuditAgentRunner.get_or_create(
         project_id,
         audit_version=audit_version,
-        provider=KimiApiProvider(
+        provider=build_runner_provider(
             run_once_func=call_kimi,
             run_stream_func=call_kimi_stream,
         ),
@@ -171,6 +171,16 @@ def _index_finding_type(review_kind: str) -> str:
         "orphan_index_without_target": "missing_ref",
     }
     return mapping.get(review_kind, "missing_ref")
+
+
+def _should_skip_index_review_candidate(candidate: Dict[str, Any]) -> bool:
+    source_sheet_no = str(candidate.get("source_sheet_no") or "").strip()
+    target_sheet_no = str(candidate.get("target_sheet_no") or "").strip()
+    if not source_sheet_no or not target_sheet_no:
+        return True
+    if normalize_sheet_no(source_sheet_no) == normalize_sheet_no(target_sheet_no):
+        return True
+    return False
 
 
 def _apply_index_finding(issue: AuditResult, candidate: Dict[str, Any]) -> AuditResult:
@@ -344,6 +354,8 @@ async def _review_index_issue_candidates_async(
     kept: List[Dict[str, Any]] = []
     filtered_count = 0
     for candidate in candidates:
+        if _should_skip_index_review_candidate(candidate):
+            continue
         try:
             result = await _run_index_ai_review(
                 candidate,
