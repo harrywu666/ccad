@@ -70,3 +70,4 @@ def test_observer_session_updates_memory_after_observe():
     assert decision.suggested_action == "observe_only"
     assert session.memory.project_summary == "尺寸复核 正常推进"
     assert session.memory.recent_events[-1]["event_kind"] == "runner_broadcast"
+    assert session.memory.recent_decisions[-1]["suggested_action"] == "observe_only"

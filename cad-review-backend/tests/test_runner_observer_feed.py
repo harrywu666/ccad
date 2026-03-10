@@ -34,3 +34,21 @@ def test_observer_snapshot_summarizes_project_state_and_recent_events():
     assert snapshot.current_step == "尺寸复核"
     assert snapshot.recent_events[0]["event_kind"] == "runner_broadcast"
     assert "observe_only" in snapshot.available_actions
+
+
+def test_observer_snapshot_exposes_repeated_risk_summary_and_intervention_hint():
+    snapshot = build_observer_snapshot(
+        project_id="proj-2",
+        audit_version=4,
+        runtime_status={"status": "running", "current_step": "关系复核"},
+        recent_events=[
+            {"event_kind": "output_validation_failed", "message": "第一次输出不稳"},
+            {"event_kind": "output_repair_succeeded", "message": "第一次修复成功"},
+            {"event_kind": "output_validation_failed", "message": "第二次输出不稳"},
+            {"event_kind": "output_validation_failed", "message": "第三次输出不稳"},
+        ],
+    )
+
+    assert snapshot.risk_summary["output_validation_failed_count"] == 3
+    assert snapshot.risk_summary["output_unstable_streak"] == 2
+    assert "不要继续只做 observe_only" in snapshot.intervention_hint
