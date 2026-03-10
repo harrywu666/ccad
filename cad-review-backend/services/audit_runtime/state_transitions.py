@@ -208,6 +208,7 @@ def append_agent_status_report(
 
     meta = {
         "stream_layer": "internal_agent_report",
+        "report_scope": "internal_only",
         "batch_summary": str(getattr(report, "batch_summary", "") or "").strip(),
         "confirmed_count": len(list(getattr(report, "confirmed_findings", None) or [])),
         "suspected_count": len(list(getattr(report, "suspected_findings", None) or [])),
@@ -239,6 +240,7 @@ def append_agent_status_report(
         message=build_runner_broadcast_from_agent_report(agent_name, report),
         meta={
             "stream_layer": "user_facing",
+            "report_scope": "progress_only",
             "source": "agent_status_report",
             "source_agent_key": agent_key,
         },
@@ -318,6 +320,7 @@ def _execute_agent_help_request(
         message=f"Runner 已收到 {agent_name} 的求助请求，正在尝试处理",
         meta={
             "stream_layer": "internal_agent_help",
+            "report_scope": "internal_only",
             "source_agent_key": agent_key,
             "requested_action_name": requested_action_name,
             "action_name": action_name,
@@ -350,6 +353,7 @@ def _execute_agent_help_request(
         message=f"Runner 已处理 {agent_name} 的求助请求：{result.get('action_name') or action_name}",
         meta={
             "stream_layer": "internal_agent_help",
+            "report_scope": "internal_only",
             "source_agent_key": agent_key,
             "requested_action_name": requested_action_name,
             "action_name": result.get("action_name") or action_name,
