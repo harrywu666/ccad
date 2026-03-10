@@ -36,5 +36,8 @@ class BaseRunnerProvider(ABC):
         should_cancel=None,  # noqa: ANN001
     ) -> RunnerTurnResult: ...
 
+    async def cancel(self, subsession: RunnerSubsession) -> bool:
+        return False
+
 
 __all__ = ["BaseRunnerProvider", "StreamCallback"]
