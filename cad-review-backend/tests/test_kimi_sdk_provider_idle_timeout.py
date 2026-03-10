@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+import pytest
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+
+from services.audit_runtime.providers.kimi_sdk_provider import (
+    KimiSdkProvider,
+    SdkStreamIdleTimeoutError,
+)
+from services.audit_runtime.runner_types import RunnerSubsession, RunnerTurnRequest
+
+
+class _FakeText:
+    def __init__(self, text: str):
+        self.text = text
+
+
+class _IdleSession:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    async def prompt(self, _user_input, merge_wire_messages=True):
+        yield _FakeText("hello")
+        await asyncio.sleep(0.05)
+        yield _FakeText(" world")
+
+    def cancel(self):
+        self.cancelled = True
+
+    async def close(self):
+        return None
+
+
+def test_sdk_provider_times_out_when_stream_has_no_new_delta(monkeypatch):
+    monkeypatch.setenv("AUDIT_SDK_STREAM_IDLE_TIMEOUT_SECONDS", "0.01")
+    session = _IdleSession()
+
+    async def _fake_session_factory(**_kwargs):
+        return session
+
+    async def _run():
+        provider = KimiSdkProvider(session_factory=_fake_session_factory)
+        request = RunnerTurnRequest(
+            agent_key="relationship_review_agent",
+            agent_name="关系审查Agent",
+            turn_kind="relationship_candidate_review",
+            system_prompt="你是助手",
+            user_prompt="请输出 JSON",
+        )
+        subsession = RunnerSubsession(
+            project_id="proj-sdk-timeout",
+            audit_version=1,
+            agent_key=request.agent_key,
+            session_key="proj-sdk-timeout:1:relationship_review_agent",
+            shared_context={},
+        )
+
+        with pytest.raises(SdkStreamIdleTimeoutError):
+            await provider.run_stream(request, subsession)
+
+        assert session.cancelled is True
+
+    asyncio.run(_run())
