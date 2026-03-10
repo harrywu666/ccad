@@ -10,6 +10,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 
 from services.audit_runtime.runner_broadcasts import build_runner_broadcast_message
+from services.audit_runtime.agent_reports import DimensionAgentReport
 from services.audit_runtime.runner_types import RunnerSubsession, RunnerTurnRequest
 
 
@@ -51,16 +52,34 @@ def test_runner_broadcast_summarizes_provider_state_into_plain_language():
     assert "正在复核第 15 组候选关系" in message
 
 
-def test_runner_broadcast_covers_waiting_repair_retry_and_needs_review_states():
+def test_runner_broadcast_covers_waiting_repair_retry_and_deferred_states():
     request = _build_request()
     subsession = _build_subsession()
 
     waiting = build_runner_broadcast_message(request, subsession, state="waiting")
     repairing = build_runner_broadcast_message(request, subsession, state="repairing")
     retrying = build_runner_broadcast_message(request, subsession, state="retrying")
-    needs_review = build_runner_broadcast_message(request, subsession, state="needs_review")
+    deferred = build_runner_broadcast_message(request, subsession, state="deferred")
 
     assert "分析时间较长" in waiting
     assert "正在自动整理" in repairing
     assert "正在重试" in retrying
-    assert "待人工确认" in needs_review
+    assert "先记下并继续处理" in deferred
+
+
+def test_runner_broadcast_hides_internal_dimension_report_raw_details():
+    from services.audit_runtime.runner_broadcasts import build_runner_broadcast_from_agent_report
+
+    message = build_runner_broadcast_from_agent_report(
+        "尺寸审查Agent",
+        DimensionAgentReport(
+            batch_summary="第 2 批尺寸关系结果不稳",
+            blocking_issues=[{"kind": "unstable_output", "stage": "pair_compare"}],
+            runner_help_request="restart_subsession",
+            agent_confidence=0.35,
+            next_recommended_action="rerun_current_batch",
+        ),
+    )
+
+    assert "这批结果有点不稳" in message
+    assert "unstable_output" not in message

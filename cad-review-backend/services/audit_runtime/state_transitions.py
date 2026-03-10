@@ -69,6 +69,7 @@ _OBSERVER_TRIGGER_EVENT_KINDS = {
     "provider_stream_delta",
     "output_validation_failed",
     "runner_turn_retrying",
+    "runner_turn_deferred",
     "runner_turn_needs_review",
 }
 
@@ -190,6 +191,61 @@ def append_run_event(
         )
 
 
+def append_agent_status_report(
+    project_id: str,
+    audit_version: int,
+    *,
+    step_key: Optional[str],
+    agent_key: str,
+    agent_name: str,
+    progress_hint: Optional[int],
+    report,  # noqa: ANN001
+    dispatch_observer: bool = False,
+) -> None:
+    from services.audit_runtime.runner_broadcasts import (
+        build_runner_broadcast_from_agent_report,
+    )
+
+    meta = {
+        "stream_layer": "internal_agent_report",
+        "batch_summary": str(getattr(report, "batch_summary", "") or "").strip(),
+        "confirmed_count": len(list(getattr(report, "confirmed_findings", None) or [])),
+        "suspected_count": len(list(getattr(report, "suspected_findings", None) or [])),
+        "blocking_issues": list(getattr(report, "blocking_issues", None) or []),
+        "runner_help_request": str(getattr(report, "runner_help_request", "") or "").strip(),
+        "agent_confidence": float(getattr(report, "agent_confidence", 0.0) or 0.0),
+        "next_recommended_action": str(getattr(report, "next_recommended_action", "") or "").strip(),
+    }
+    append_run_event(
+        project_id,
+        audit_version,
+        step_key=step_key,
+        agent_key=agent_key,
+        agent_name=agent_name,
+        event_kind="agent_status_reported",
+        progress_hint=progress_hint,
+        message=meta["batch_summary"] or f"{agent_name} 已提交一份内部工作汇报",
+        meta=meta,
+        dispatch_observer=dispatch_observer,
+    )
+    append_run_event(
+        project_id,
+        audit_version,
+        step_key=step_key,
+        agent_key="runner_observer_agent",
+        agent_name="Runner观察Agent",
+        event_kind="runner_broadcast",
+        progress_hint=progress_hint,
+        message=build_runner_broadcast_from_agent_report(agent_name, report),
+        meta={
+            "stream_layer": "user_facing",
+            "source": "agent_status_report",
+            "source_agent_key": agent_key,
+        },
+        dispatch_observer=False,
+    )
+
+
 def _run_async(coro):  # noqa: ANN001
     try:
         loop = asyncio.get_running_loop()
@@ -264,12 +320,14 @@ def _load_observer_runtime_status(project_id: str, audit_version: int) -> Dict[s
                 "current_step": current_step,
                 "progress": progress,
                 "provider_mode": provider_mode,
+                "has_persisted_run": False,
             }
         return {
             "status": getattr(run, "status", None),
             "current_step": getattr(run, "current_step", None),
             "progress": getattr(run, "progress", None),
             "provider_mode": getattr(run, "provider_mode", None),
+            "has_persisted_run": True,
         }
     finally:
         db.close()
@@ -319,24 +377,6 @@ def _find_target_agent_key(recent_events: List[Dict[str, Any]]) -> Optional[str]
     return None
 
 
-def _mark_observer_needs_review(
-    project_id: str,
-    audit_version: int,
-    *,
-    runtime_status: Dict[str, Any],
-    reason: str,
-) -> str:
-    update_run_progress(
-        project_id,
-        audit_version,
-        status="needs_review",
-        current_step=runtime_status.get("current_step") or None,
-        progress=runtime_status.get("progress"),
-        error=reason or None,
-    )
-    return "needs_review"
-
-
 def _restart_runner_subsession(
     project_id: str,
     audit_version: int,
@@ -367,6 +407,19 @@ def _restart_runner_subsession(
     return restarted
 
 
+def _rewrite_observer_action(
+    requested_action: str,
+    *,
+    recent_events: List[Dict[str, Any]],
+) -> Tuple[str, str]:
+    normalized = str(requested_action or "").strip()
+    if normalized != "mark_needs_review":
+        return normalized, ""
+    if _find_target_agent_key(recent_events):
+        return "restart_subsession", "mid_run_needs_review_blocked"
+    return "broadcast_update", "mid_run_needs_review_blocked"
+
+
 def _execute_observer_action(
     project_id: str,
     audit_version: int,
@@ -382,17 +435,15 @@ def _execute_observer_action(
 
     reason = str(getattr(decision, "reason", "") or "").strip()
     gate = RunnerActionGate(project_root=".")
-    action_name = str(getattr(decision, "suggested_action", "") or "").strip()
+    requested_action_name = str(getattr(decision, "suggested_action", "") or "").strip()
+    action_name, rewrite_reason = _rewrite_observer_action(
+        requested_action_name,
+        recent_events=recent_events,
+    )
     result = gate.execute(
         action_name,
         context={
             "broadcast_message": str(getattr(decision, "user_facing_broadcast", "") or "").strip(),
-            "mark_needs_review": lambda: _mark_observer_needs_review(
-                project_id,
-                audit_version,
-                runtime_status=runtime_status,
-                reason=reason,
-            ),
             "restart_subsession": lambda: _restart_runner_subsession(
                 project_id,
                 audit_version,
@@ -408,14 +459,16 @@ def _execute_observer_action(
         agent_name="Runner观察Agent",
         event_kind="runner_observer_action",
         progress_hint=runtime_status.get("progress") or 0,
-        message=f"Runner 已执行观察动作：{action_name or 'observe_only'}",
+        message=f"Runner 已执行观察动作：{result.get('action_name') or action_name or 'observe_only'}",
         meta={
             "stream_layer": "observer_action",
             "action_name": result.get("action_name"),
+            "requested_action_name": requested_action_name or action_name,
             "allowed": bool(result.get("allowed")),
             "executed": bool(result.get("executed")),
             "result": result.get("result"),
             "reason": result.get("reason", ""),
+            "rewrite_reason": rewrite_reason,
         },
         dispatch_observer=False,
     )
@@ -439,10 +492,13 @@ def _dispatch_runner_observer(
     runtime_status = _load_observer_runtime_status(project_id, audit_version)
     recent_events = _load_recent_observer_events(project_id, audit_version)
     provider_mode = str(runtime_status.get("provider_mode") or "").strip() or None
+    use_active_provider = bool(runtime_status.get("has_persisted_run"))
     observer = ProjectRunnerObserverSession.get_or_create(
         project_id,
         audit_version=audit_version,
-        provider=build_runner_provider(requested_mode=provider_mode) if provider_mode else _PassiveObserverProvider(),
+        provider=build_runner_provider(requested_mode=provider_mode)
+        if (use_active_provider and provider_mode)
+        else _PassiveObserverProvider(),
     )
     try:
         decision = _run_async(

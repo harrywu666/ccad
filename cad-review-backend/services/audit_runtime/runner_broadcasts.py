@@ -28,9 +28,23 @@ def build_runner_broadcast_message(
         return f"{_agent_name(request)} 的输出格式不太稳定，Runner 正在自动整理"
     if normalized_state == "retrying":
         return f"{_agent_name(request)} 这一步刚刚卡住，Runner 正在重试"
-    if normalized_state == "needs_review":
-        return f"{_agent_name(request)} 这一步仍然不稳定，已转为待人工确认"
+    if normalized_state in {"deferred", "needs_review"}:
+        return f"{_agent_name(request)} 这一步暂时还没拿到稳定结果，Runner 先记下并继续处理后续步骤"
     return f"{_agent_name(request)} 正在继续处理当前步骤"
+
+
+def build_runner_broadcast_from_agent_report(agent_name: str, report) -> str:  # noqa: ANN001
+    name = str(agent_name or "审图系统").strip() or "审图系统"
+    blocking_issues = list(getattr(report, "blocking_issues", None) or [])
+    help_request = str(getattr(report, "runner_help_request", "") or "").strip()
+    next_action = str(getattr(report, "next_recommended_action", "") or "").strip()
+    if blocking_issues:
+        if help_request == "restart_subsession":
+            return f"{name} 这批结果有点不稳，Runner 正在帮它重启当前子会话后继续推进"
+        if next_action == "rerun_current_batch":
+            return f"{name} 这批结果有点不稳，Runner 正在帮它重新跑这一批"
+        return f"{name} 这一步暂时还没拿到稳定结果，Runner 正在接手整理"
+    return f"{name} 已提交一批新的审查进展，Runner 正在继续汇总"
 
 
 def _agent_name(request: RunnerTurnRequest) -> str:
@@ -62,4 +76,7 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
-__all__ = ["build_runner_broadcast_message"]
+__all__ = [
+    "build_runner_broadcast_from_agent_report",
+    "build_runner_broadcast_message",
+]

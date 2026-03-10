@@ -37,7 +37,7 @@ from services.audit_runtime.runner_types import (
     RunnerTurnResult,
 )
 from services.audit_runtime.cancel_registry import is_cancel_requested
-from services.audit_runtime.state_transitions import append_run_event
+from services.audit_runtime.state_transitions import append_agent_status_report, append_run_event
 from services.coordinate_service import cad_to_global_pct, enrich_json_with_coordinates
 from services.feedback_runtime_service import load_feedback_runtime_profile
 from services.kimi_service import call_kimi_stream
@@ -718,14 +718,16 @@ async def _execute_sheet_jobs(
             stage="sheet_semantic",
         )
         if report.blocking_issues:
-            logger.info(
-                "dimension_agent_report project=%s version=%s stage=%s help=%s sheet=%s",
-                project_id,
-                audit_version,
-                "sheet_semantic",
-                report.runner_help_request,
-                job.get("sheet_no"),
-            )
+            if project_id is not None and audit_version is not None:
+                append_agent_status_report(
+                    project_id,
+                    audit_version,
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    progress_hint=29,
+                    report=report,
+                )
         await asyncio.to_thread(
             _save_cache_json, cache_dir, "sheet", job["cache_key"], cleaned
         )
@@ -946,15 +948,16 @@ async def _execute_pair_jobs(
             stage="pair_compare",
         )
         if report.blocking_issues:
-            logger.info(
-                "dimension_agent_report project=%s version=%s stage=%s help=%s source=%s target=%s",
-                project_id,
-                audit_version,
-                "pair_compare",
-                report.runner_help_request,
-                job.get("a_sheet_no"),
-                job.get("b_sheet_no"),
-            )
+            if project_id is not None and audit_version is not None:
+                append_agent_status_report(
+                    project_id,
+                    audit_version,
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    progress_hint=31,
+                    report=report,
+                )
         await asyncio.to_thread(
             _save_cache_json, cache_dir, "pair", job["cache_key"], cleaned
         )
