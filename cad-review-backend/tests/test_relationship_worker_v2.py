@@ -5,10 +5,12 @@ import json
 import sys
 from pathlib import Path
 
-
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+
+
+from services.audit_runtime.cancel_registry import AuditCancellationRequested
 
 
 def _clear_backend_modules() -> None:
@@ -217,3 +219,89 @@ def test_relationship_worker_v2_produces_compatible_findings(monkeypatch, tmp_pa
     legacy_pairs = {(item["source_key"], item["target_key"]) for item in legacy}
     v2_pairs = {(item["source_key"], item["target_key"]) for item in v2}
     assert legacy_pairs == v2_pairs == {("A101", "A401")}
+
+
+def test_relationship_worker_v2_emits_stream_events(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUDIT_KIMI_STREAM_ENABLED", "1")
+    database, models, relationship_discovery = _load_modules(monkeypatch, tmp_path)
+    db = _seed_project(database, models, tmp_path)
+
+    captured_events: list[dict[str, object]] = []
+
+    class _FakeEvidenceService:
+        async def get_evidence_pack(self, request):
+            return relationship_discovery.EvidencePack(
+                pack_type=request.pack_type,
+                images={"source_full": b"source", "target_full": b"target"},
+                source_pdf_path=request.source_pdf_path,
+                source_page_index=request.source_page_index,
+                target_pdf_path=request.target_pdf_path,
+                target_page_index=request.target_page_index,
+            )
+
+    async def fake_call_kimi(**kwargs):
+        raise AssertionError("stream path should be used")
+
+    async def fake_call_kimi_stream(**kwargs):
+        await kwargs["on_delta"]("先对照源图，再确认目标图。")
+        await kwargs["on_retry"]({"attempt": 2, "reason": "429", "retry_delay_seconds": 1.5})
+        return [{"source": "A1.01", "target": "A4.01", "confidence": 0.92}]
+
+    monkeypatch.setattr(relationship_discovery, "get_evidence_service", lambda: _FakeEvidenceService())
+    monkeypatch.setattr(relationship_discovery, "call_kimi_stream", fake_call_kimi_stream)
+    monkeypatch.setattr(
+        "services.audit_runtime.state_transitions.append_run_event",
+        lambda *args, **kwargs: captured_events.append(kwargs),
+    )
+
+    try:
+        result = relationship_discovery.asyncio.run(
+            relationship_discovery.discover_relationships_v2_async(
+                "proj-rel-v2",
+                db,
+                fake_call_kimi,
+                audit_version=2,
+            )
+        )
+    finally:
+        db.close()
+
+    assert len(result) == 1
+    assert any(
+        event.get("event_kind") == "provider_stream_delta"
+        and event.get("message") == "先对照源图，再确认目标图。"
+        for event in captured_events
+    )
+    assert any(
+        event.get("event_kind") == "phase_event"
+        and "第 2 次重试" in str(event.get("message") or "")
+        for event in captured_events
+    )
+
+
+def test_relationship_discovery_async_propagates_cancel_request(monkeypatch, tmp_path):
+    database, models, relationship_discovery = _load_modules(monkeypatch, tmp_path)
+    db = _seed_project(database, models, tmp_path)
+
+    async def fake_discover_group(*args, **kwargs):
+        raise AuditCancellationRequested("用户手动中断审核")
+
+    monkeypatch.setattr(relationship_discovery, "_discover_group", fake_discover_group)
+
+    try:
+        try:
+            relationship_discovery.asyncio.run(
+                relationship_discovery.discover_relationships_async(
+                    "proj-rel-v2",
+                    db,
+                    lambda **kwargs: [],
+                    audit_version=1,
+                    concurrency=1,
+                )
+            )
+        except AuditCancellationRequested as exc:
+            assert "用户手动中断审核" in str(exc)
+        else:
+            raise AssertionError("expected AuditCancellationRequested")
+    finally:
+        db.close()

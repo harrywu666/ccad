@@ -21,11 +21,18 @@ from services.ai_prompt_service import (
 )
 from services.audit.image_pipeline import pdf_page_to_5images
 from services.coordinate_service import enrich_json_with_coordinates
-from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidenceRequest
-from services.audit_runtime.evidence_planner import plan_evidence_requests
+from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidencePlanItem, EvidenceRequest
+from services.audit_runtime.evidence_planner import plan_deep, plan_evidence_requests, plan_lite
 from services.audit_runtime.evidence_service import EvidenceService
+from services.audit_runtime.finding_schema import Finding
+from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
+from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
+from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
+from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
 from services.audit_runtime.state_transitions import append_run_event
 from services.feedback_runtime_service import load_feedback_runtime_profile
+from services.kimi_service import call_kimi_stream
 from services.skill_pack_service import load_runtime_skill_profile
 
 logger = logging.getLogger(__name__)
@@ -35,6 +42,23 @@ _DEFAULT_GROUP_SIZE = 4
 
 def get_evidence_service():
     return EvidenceService(renderer=pdf_page_to_5images)
+
+
+def _get_relationship_runner(
+    project_id: str,
+    audit_version: int,
+    *,
+    call_kimi,  # noqa: ANN001
+) -> ProjectAuditAgentRunner:
+    return ProjectAuditAgentRunner.get_or_create(
+        project_id,
+        audit_version=audit_version,
+        provider=KimiApiProvider(
+            run_once_func=call_kimi,
+            run_stream_func=call_kimi_stream,
+        ),
+        shared_context={"project_id": project_id, "audit_version": audit_version},
+    )
 
 
 def _env_float(name: str, default: float) -> float:
@@ -67,6 +91,37 @@ def _relationship_render_options() -> Dict[str, float | int]:
     }
 
 
+def _relationship_stream_enabled() -> bool:
+    raw = os.getenv("AUDIT_KIMI_STREAM_ENABLED")
+    if raw is None:
+        return True
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _append_relationship_stream_event(
+    project_id: str,
+    audit_version: int,
+    *,
+    level: str,
+    event_kind: str,
+    message: str,
+    progress_hint: int,
+    meta: Dict[str, Any] | None = None,
+) -> None:
+    append_run_event(
+        project_id,
+        audit_version,
+        level=level,
+        step_key="relationship_discovery",
+        agent_key="relationship_review_agent",
+        agent_name="关系审查Agent",
+        event_kind=event_kind,
+        progress_hint=progress_hint,
+        message=message,
+        meta=meta or {},
+    )
+
+
 def _relationship_confidence_floor(
     *,
     skill_profile: Dict[str, Any] | None,
@@ -76,6 +131,11 @@ def _relationship_confidence_floor(
     skill_policy = ((skill_profile or {}).get("judgement_policy") or {}).get("relationship")
     if isinstance(skill_policy, dict):
         raw = skill_policy.get("confidence_floor")
+        if isinstance(raw, (int, float)):
+            floor = max(floor, float(raw))
+    hint = feedback_profile.get("experience_hint") if isinstance(feedback_profile, dict) else None
+    if isinstance(hint, dict):
+        raw = hint.get("confidence_floor")
         if isinstance(raw, (int, float)):
             floor = max(floor, float(raw))
     feedback_floor = feedback_profile.get("confidence_floor") if isinstance(feedback_profile, dict) else None
@@ -106,6 +166,100 @@ def apply_relationship_runtime_policy(
         if confidence >= confidence_floor:
             filtered.append(rel)
     return filtered
+
+
+def _relationship_status_from_confidence(confidence: float, *, review_round: int) -> str:
+    if review_round >= 3:
+        return "needs_review"
+    if confidence >= 0.75:
+        return "confirmed"
+    return "suspected"
+
+
+def _relationship_needs_more_evidence(
+    confidence: float,
+    *,
+    skill_profile: Dict[str, Any] | None,
+    feedback_profile: Dict[str, Any] | None,
+    review_round: int,
+) -> bool:
+    if review_round >= 2:
+        return False
+    floor = _relationship_confidence_floor(
+        skill_profile=skill_profile,
+        feedback_profile=feedback_profile,
+    )
+    threshold = floor if floor > 0 else 0.75
+    return confidence < threshold
+
+
+def _relationship_below_threshold(
+    confidence: float,
+    *,
+    skill_profile: Dict[str, Any] | None,
+    feedback_profile: Dict[str, Any] | None,
+) -> bool:
+    floor = _relationship_confidence_floor(
+        skill_profile=skill_profile,
+        feedback_profile=feedback_profile,
+    )
+    threshold = floor if floor > 0 else 0.75
+    return confidence < threshold
+
+
+def relationship_to_finding(
+    relationship: Dict[str, Any],
+    *,
+    review_round: int = 1,
+    triggered_by: str | None = None,
+) -> Finding:
+    source_sheet = str(relationship.get("source") or relationship.get("source_key") or "").strip() or "UNKNOWN"
+    target_sheet = str(relationship.get("target") or relationship.get("target_key") or "").strip()
+    relation = str(relationship.get("relation") or "ai_visual").strip() or "ai_visual"
+    visual_evidence = str(relationship.get("visual_evidence") or "").strip()
+    try:
+        confidence = float(relationship.get("confidence") or 0.5)
+    except (TypeError, ValueError):
+        confidence = 0.5
+    confidence = max(0.0, min(1.0, confidence))
+    location = f"{source_sheet} -> {target_sheet or '待确认目标图'}"
+    description = (
+        visual_evidence
+        or f"关系审查Agent 发现 {source_sheet} 与 {target_sheet or '目标图'} 之间存在 {relation} 线索"
+    )
+    evidence_pack_id = str(relationship.get("evidence_pack_id") or "paired_overview_pack").strip() or "paired_overview_pack"
+    return Finding(
+        sheet_no=source_sheet,
+        location=location,
+        rule_id="relationship_visual_review",
+        finding_type="missing_ref",
+        severity="warning",
+        status=_relationship_status_from_confidence(confidence, review_round=review_round),  # type: ignore[arg-type]
+        confidence=confidence,
+        source_agent="relationship_review_agent",
+        evidence_pack_id=evidence_pack_id,
+        review_round=review_round,
+        triggered_by=triggered_by,
+        description=description,
+    )
+
+
+def attach_relationship_findings(
+    relationships: List[Dict[str, Any]],
+    *,
+    review_round: int = 1,
+    triggered_by: str | None = None,
+) -> List[Dict[str, Any]]:
+    enriched: List[Dict[str, Any]] = []
+    for relationship in relationships:
+        item = dict(relationship)
+        item["finding"] = relationship_to_finding(
+            relationship,
+            review_round=review_round,
+            triggered_by=triggered_by,
+        ).model_dump()
+        enriched.append(item)
+    return enriched
 
 
 def _build_relationship_task_prompt(source_sheet: Dict[str, Any], target_sheet: Dict[str, Any]) -> str:
@@ -313,6 +467,9 @@ async def _discover_group(
     group_sheets: List[Dict[str, Any]],
     all_catalog_entries: List[Dict[str, str]],
     call_kimi,
+    *,
+    project_id: str | None = None,
+    audit_version: int | None = None,
 ) -> List[Dict[str, Any]]:
     """Run AI discovery for one group of sheets."""
     # Render images for all sheets in this group
@@ -361,13 +518,53 @@ async def _discover_group(
     max_tokens = _env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192)
 
     try:
-        result = await call_kimi(
-            system_prompt=system_prompt,
-            user_prompt=prompts["user_prompt"],
-            images=all_images,
-            temperature=0.0,
-            max_tokens=max_tokens,
-        )
+        if project_id is not None and audit_version is not None and _relationship_stream_enabled():
+            runner = _get_relationship_runner(
+                project_id,
+                audit_version,
+                call_kimi=call_kimi,
+            )
+            turn_result: RunnerTurnResult = await runner.run_stream(
+                RunnerTurnRequest(
+                    agent_key="relationship_review_agent",
+                    agent_name="关系审查Agent",
+                    step_key="relationship_discovery",
+                    progress_hint=15,
+                    turn_kind="relationship_group_discovery",
+                    system_prompt=system_prompt,
+                    user_prompt=prompts["user_prompt"],
+                    images=all_images,
+                    temperature=0.0,
+                    max_tokens=max_tokens,
+                    meta={"mode": "legacy_group", "sheet_count": len(group_sheets)},
+                ),
+                should_cancel=lambda: is_cancel_requested(project_id),
+            )
+            result = turn_result.output if turn_result.status != "needs_review" else []
+        else:
+            runner = _get_relationship_runner(
+                project_id or "__adhoc_relationship__",
+                audit_version or 0,
+                call_kimi=call_kimi,
+            )
+            turn_result: RunnerTurnResult = await runner.run_once(
+                RunnerTurnRequest(
+                    agent_key="relationship_review_agent",
+                    agent_name="关系审查Agent",
+                    step_key="relationship_discovery",
+                    progress_hint=15,
+                    turn_kind="relationship_group_discovery",
+                    system_prompt=system_prompt,
+                    user_prompt=prompts["user_prompt"],
+                    images=all_images,
+                    temperature=0.0,
+                    max_tokens=max_tokens,
+                    meta={"mode": "legacy_group", "sheet_count": len(group_sheets)},
+                )
+            )
+            result = turn_result.output if turn_result.status != "needs_review" else []
+    except AuditCancellationRequested:
+        raise
     except Exception as exc:
         logger.warning("关系发现 AI 调用失败: %s", exc)
         return []
@@ -384,47 +581,176 @@ async def _discover_relationship_task_v2(
     source_sheet: Dict[str, Any],
     target_sheet: Dict[str, Any],
     call_kimi,
+    project_id: str | None,
+    audit_version: int | None,
     evidence_service,
     skill_profile: Dict[str, Any],
     feedback_profile: Dict[str, Any],
+    hot_sheet_registry: HotSheetRegistry | None = None,
 ) -> List[Dict[str, Any]]:
-    plans = plan_evidence_requests(
+    plans = plan_lite(
         task_type="relationship",
         source_sheet_no=source_sheet["sheet_no"],
         target_sheet_no=target_sheet["sheet_no"],
         skill_profile=skill_profile,
         feedback_profile=feedback_profile,
+        priority="high",
     )
     if not plans:
         return []
 
     plan = plans[0]
-    pack = await evidence_service.get_evidence_pack(
-        EvidenceRequest(
-            pack_type=plan.pack_type,
-            source_pdf_path=source_sheet["pdf_path"],
-            source_page_index=source_sheet["page_index"],
-            target_pdf_path=target_sheet["pdf_path"],
-            target_page_index=target_sheet["page_index"],
-            render_options=_relationship_render_options(),
+
+    async def _run_plan(plan_item: EvidencePlanItem) -> List[Dict[str, Any]]:
+        pack = await evidence_service.get_evidence_pack(
+            EvidenceRequest(
+                pack_type=plan_item.pack_type,
+                source_pdf_path=source_sheet["pdf_path"],
+                source_page_index=source_sheet["page_index"],
+                target_pdf_path=target_sheet["pdf_path"],
+                target_page_index=target_sheet["page_index"],
+                render_options=_relationship_render_options(),
+            )
         )
-    )
-    result = await call_kimi(
-        system_prompt=resolve_stage_system_prompt_with_skills(
-            "sheet_relationship_discovery",
-            "index",
-        ),
-        user_prompt=_build_relationship_task_prompt(source_sheet, target_sheet),
-        images=list(pack.images.values()),
-        temperature=0.0,
-        max_tokens=_env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192),
-    )
-    if not isinstance(result, list):
+        if project_id is not None and audit_version is not None and _relationship_stream_enabled():
+            runner = _get_relationship_runner(
+                project_id,
+                audit_version,
+                call_kimi=call_kimi,
+            )
+            turn_result: RunnerTurnResult = await runner.run_stream(
+                RunnerTurnRequest(
+                    agent_key="relationship_review_agent",
+                    agent_name="关系审查Agent",
+                    step_key="relationship_discovery",
+                    progress_hint=15,
+                    turn_kind="relationship_candidate_review",
+                    system_prompt=resolve_stage_system_prompt_with_skills(
+                        "sheet_relationship_discovery",
+                        "index",
+                    ),
+                    user_prompt=_build_relationship_task_prompt(source_sheet, target_sheet),
+                    images=list(pack.images.values()),
+                    temperature=0.0,
+                    max_tokens=_env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192),
+                    meta={
+                        "candidate_source_sheet_no": source_sheet["sheet_no"],
+                        "candidate_target_sheet_no": target_sheet["sheet_no"],
+                        "pack_type": plan_item.pack_type.value,
+                    },
+                ),
+                should_cancel=lambda: is_cancel_requested(project_id),
+            )
+            result = turn_result.output if turn_result.status != "needs_review" else []
+        else:
+            runner = _get_relationship_runner(
+                project_id or "__adhoc_relationship__",
+                audit_version or 0,
+                call_kimi=call_kimi,
+            )
+            turn_result: RunnerTurnResult = await runner.run_once(
+                RunnerTurnRequest(
+                    agent_key="relationship_review_agent",
+                    agent_name="关系审查Agent",
+                    step_key="relationship_discovery",
+                    progress_hint=15,
+                    turn_kind="relationship_candidate_review",
+                    system_prompt=resolve_stage_system_prompt_with_skills(
+                        "sheet_relationship_discovery",
+                        "index",
+                    ),
+                    user_prompt=_build_relationship_task_prompt(source_sheet, target_sheet),
+                    images=list(pack.images.values()),
+                    temperature=0.0,
+                    max_tokens=_env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192),
+                    meta={
+                        "candidate_source_sheet_no": source_sheet["sheet_no"],
+                        "candidate_target_sheet_no": target_sheet["sheet_no"],
+                        "pack_type": plan_item.pack_type.value,
+                    },
+                )
+            )
+            result = turn_result.output if turn_result.status != "needs_review" else []
+        if not isinstance(result, list):
+            return []
+        normalized = apply_relationship_runtime_policy(
+            [item for item in result if isinstance(item, dict)],
+            skill_profile=skill_profile,
+            feedback_profile=feedback_profile,
+        )
+        for item in normalized:
+            item["evidence_pack_id"] = plan_item.pack_type.value
+            if hot_sheet_registry is not None:
+                confidence = float(item.get("confidence") or 0.0)
+                hot_sheet_registry.publish(
+                    item.get("source"),
+                    finding_type="relationship_candidate",
+                    confidence=confidence,
+                    source_agent="relationship_review_agent",
+                )
+                hot_sheet_registry.publish(
+                    item.get("target"),
+                    finding_type="relationship_candidate",
+                    confidence=confidence,
+                    source_agent="relationship_review_agent",
+                )
+        return normalized
+
+    first_round = await _run_plan(plan)
+    if not first_round:
         return []
-    return apply_relationship_runtime_policy(
-        [item for item in result if isinstance(item, dict)],
+
+    max_confidence = max(float(item.get("confidence") or 0.0) for item in first_round)
+    if not _relationship_needs_more_evidence(
+        max_confidence,
         skill_profile=skill_profile,
         feedback_profile=feedback_profile,
+        review_round=1,
+    ):
+        return attach_relationship_findings(first_round, review_round=1)
+
+    deep_plans = plan_deep(
+        task_type="relationship",
+        source_sheet_no=source_sheet["sheet_no"],
+        target_sheet_no=target_sheet["sheet_no"],
+        current_pack_type=plan.pack_type,
+        current_round=1,
+        triggered_by="confidence_low",
+        skill_profile=skill_profile,
+        feedback_profile=feedback_profile,
+        priority="high",
+    )
+    if not deep_plans:
+        return attach_relationship_findings(
+            first_round,
+            review_round=3,
+            triggered_by="confidence_low",
+        )
+
+    second_round = await _run_plan(deep_plans[0])
+    if not second_round:
+        return attach_relationship_findings(
+            first_round,
+            review_round=3,
+            triggered_by="confidence_low",
+        )
+
+    second_confidence = max(float(item.get("confidence") or 0.0) for item in second_round)
+    if _relationship_below_threshold(
+        second_confidence,
+        skill_profile=skill_profile,
+        feedback_profile=feedback_profile,
+    ):
+        return attach_relationship_findings(
+            second_round,
+            review_round=3,
+            triggered_by="confidence_low",
+        )
+
+    return attach_relationship_findings(
+        second_round,
+        review_round=2,
+        triggered_by="confidence_low",
     )
 
 
@@ -467,6 +793,8 @@ def _validate_and_normalize(
             "index_label": str(rel.get("index_label", "")).strip(),
             "confidence": float(rel.get("confidence", 0.5)),
             "visual_evidence": str(rel.get("visual_evidence", "")).strip(),
+            "evidence_pack_id": str(rel.get("evidence_pack_id") or "").strip() or None,
+            "finding": rel.get("finding") if isinstance(rel.get("finding"), dict) else None,
         })
 
     return validated
@@ -512,7 +840,11 @@ async def discover_relationships_async(
             audit_version,
             level="info",
             step_key="relationship_discovery",
-            message=f"开始分析跨图关系，共 {len(sheets)} 张图纸",
+            agent_key="relationship_review_agent",
+            agent_name="关系审查Agent",
+            event_kind="phase_started",
+            progress_hint=12,
+            message=f"关系审查Agent 开始分析跨图关系，共 {len(sheets)} 张图纸待处理",
             meta={"sheet_count": len(sheets), "group_count": len(groups)},
         )
 
@@ -533,6 +865,10 @@ async def discover_relationships_async(
                     audit_version,
                     level="warning",
                     step_key="relationship_discovery",
+                    agent_key="relationship_review_agent",
+                    agent_name="关系审查Agent",
+                    event_kind="heartbeat",
+                    progress_hint=13,
                     message=f"第 {group_index} 组图纸分析时间较长，系统仍在继续",
                     meta={"group_index": group_index, "group_count": group_count},
                 )
@@ -545,7 +881,11 @@ async def discover_relationships_async(
                     audit_version,
                     level="info",
                     step_key="relationship_discovery",
-                    message=f"正在处理第 {group_index} 组图纸，共 {len(groups)} 组",
+                    agent_key="relationship_review_agent",
+                    agent_name="关系审查Agent",
+                    event_kind="phase_progress",
+                    progress_hint=14,
+                    message=f"关系审查Agent 正在处理第 {group_index} 组图纸，共 {len(groups)} 组",
                     meta={"group_index": group_index, "group_count": len(groups)},
                 )
 
@@ -553,7 +893,15 @@ async def discover_relationships_async(
             heartbeat_task = asyncio.create_task(_heartbeat(group_index, len(groups), stop_signal))
             started_at = time.monotonic()
             try:
-                result = await _discover_group(group, all_catalog_entries, call_kimi)
+                result = await _discover_group(
+                    group,
+                    all_catalog_entries,
+                    call_kimi,
+                    project_id=project_id,
+                    audit_version=audit_version,
+                )
+            except AuditCancellationRequested:
+                raise
             except Exception:
                 if audit_version is not None:
                     append_run_event(
@@ -561,7 +909,11 @@ async def discover_relationships_async(
                         audit_version,
                         level="warning",
                         step_key="relationship_discovery",
-                        message=f"第 {group_index} 组图纸暂时没有得到可用结果，系统已继续后续分析",
+                        agent_key="relationship_review_agent",
+                        agent_name="关系审查Agent",
+                        event_kind="warning",
+                        progress_hint=15,
+                        message=f"关系审查Agent 暂时没拿到第 {group_index} 组的可用结果，已经继续后续分析",
                         meta={"group_index": group_index, "group_count": len(groups)},
                     )
                 raise
@@ -582,6 +934,10 @@ async def discover_relationships_async(
                     audit_version,
                     level="success",
                     step_key="relationship_discovery",
+                    agent_key="relationship_review_agent",
+                    agent_name="关系审查Agent",
+                    event_kind="phase_completed",
+                    progress_hint=16,
                     message=message,
                     meta={
                         "group_index": group_index,
@@ -599,6 +955,8 @@ async def discover_relationships_async(
 
     all_raw: List[Dict[str, Any]] = []
     for i, result in enumerate(group_results):
+        if isinstance(result, AuditCancellationRequested):
+            raise result
         if isinstance(result, Exception):
             logger.warning("关系发现 group %s 失败: %s", i, result)
             continue
@@ -615,7 +973,11 @@ async def discover_relationships_async(
             audit_version,
             level="success",
             step_key="relationship_discovery",
-            message=f"跨图关系分析完成，已整理 {len(validated)} 处跨图关联",
+            agent_key="relationship_review_agent",
+            agent_name="关系审查Agent",
+            event_kind="phase_completed",
+            progress_hint=16,
+            message=f"关系审查Agent 已完成跨图关系分析，共整理出 {len(validated)} 处跨图关联",
             meta={"validated": len(validated), "raw": len(all_raw)},
         )
     return validated
@@ -627,6 +989,7 @@ async def discover_relationships_v2_async(
     call_kimi,
     *,
     audit_version: int | None = None,
+    hot_sheet_registry: HotSheetRegistry | None = None,
 ) -> List[Dict[str, Any]]:
     sheets = _load_ready_sheets(project_id, db)
     if not sheets:
@@ -650,26 +1013,100 @@ async def discover_relationships_v2_async(
     feedback_profile = load_feedback_runtime_profile(db, issue_type="index")
     evidence_service = get_evidence_service()
 
+    if audit_version is not None:
+        append_run_event(
+            project_id,
+            audit_version,
+            level="info",
+            step_key="relationship_discovery",
+            agent_key="relationship_review_agent",
+            agent_name="关系审查Agent",
+            event_kind="phase_started",
+            progress_hint=12,
+            message=f"关系审查Agent 已整理出 {len(candidate_tasks)} 组候选关系，准备逐组复核",
+            meta={"candidate_tasks": len(candidate_tasks), "sheet_count": len(sheets)},
+        )
+
     all_raw: List[Dict[str, Any]] = []
-    for source_sheet, target_sheet in candidate_tasks:
+    for index, (source_sheet, target_sheet) in enumerate(candidate_tasks, start=1):
         if not source_sheet.get("pdf_path") or not target_sheet.get("pdf_path"):
             continue
+        if audit_version is not None:
+            append_run_event(
+                project_id,
+                audit_version,
+                level="info",
+                step_key="relationship_discovery",
+                agent_key="relationship_review_agent",
+                agent_name="关系审查Agent",
+                event_kind="phase_progress",
+                progress_hint=14,
+                message=(
+                    f"关系审查Agent 正在复核第 {index} 组候选关系，"
+                    f"当前核对 {source_sheet['sheet_no']} 和 {target_sheet['sheet_no']}"
+                ),
+                meta={
+                    "candidate_index": index,
+                    "candidate_total": len(candidate_tasks),
+                    "source_sheet_no": source_sheet["sheet_no"],
+                    "target_sheet_no": target_sheet["sheet_no"],
+                },
+            )
         result = await _discover_relationship_task_v2(
             source_sheet=source_sheet,
             target_sheet=target_sheet,
             call_kimi=call_kimi,
+            project_id=project_id,
+            audit_version=audit_version,
             evidence_service=evidence_service,
             skill_profile=skill_profile,
             feedback_profile=feedback_profile,
+            hot_sheet_registry=hot_sheet_registry,
         )
         all_raw.extend(result)
+        if audit_version is not None:
+            append_run_event(
+                project_id,
+                audit_version,
+                level="success",
+                step_key="relationship_discovery",
+                agent_key="relationship_review_agent",
+                agent_name="关系审查Agent",
+                event_kind="phase_progress",
+                progress_hint=15,
+                message=(
+                    f"关系审查Agent 已完成第 {index} 组候选关系复核，"
+                    f"本组整理出 {len(result)} 处关联"
+                ),
+                meta={
+                    "candidate_index": index,
+                    "candidate_total": len(candidate_tasks),
+                    "relation_count": len(result),
+                },
+            )
 
     validated = _validate_and_normalize(all_raw, valid_sheet_nos)
-    return apply_relationship_runtime_policy(
+    validated = apply_relationship_runtime_policy(
         validated,
         skill_profile=skill_profile,
         feedback_profile=feedback_profile,
     )
+    if not all(isinstance(item.get("finding"), dict) for item in validated):
+        validated = attach_relationship_findings(validated, review_round=1)
+    if audit_version is not None:
+        append_run_event(
+            project_id,
+            audit_version,
+            level="success",
+            step_key="relationship_discovery",
+            agent_key="relationship_review_agent",
+            agent_name="关系审查Agent",
+            event_kind="phase_completed",
+            progress_hint=16,
+            message=f"关系审查Agent 已完成候选关系复核，共整理出 {len(validated)} 处跨图关联",
+            meta={"validated": len(validated), "candidate_tasks": len(candidate_tasks)},
+        )
+    return validated
 
 
 def discover_relationships(project_id: str, db, *, audit_version: int | None = None) -> List[Dict[str, Any]]:
@@ -680,7 +1117,13 @@ def discover_relationships(project_id: str, db, *, audit_version: int | None = N
     return asyncio.run(discover_relationships_async(project_id, db, call_kimi, audit_version=audit_version))
 
 
-def discover_relationships_v2(project_id: str, db, *, audit_version: int | None = None) -> List[Dict[str, Any]]:
+def discover_relationships_v2(
+    project_id: str,
+    db,
+    *,
+    audit_version: int | None = None,
+    hot_sheet_registry: HotSheetRegistry | None = None,
+) -> List[Dict[str, Any]]:
     from services.kimi_service import call_kimi
     return asyncio.run(
         discover_relationships_v2_async(
@@ -688,6 +1131,7 @@ def discover_relationships_v2(project_id: str, db, *, audit_version: int | None 
             db,
             call_kimi,
             audit_version=audit_version,
+            hot_sheet_registry=hot_sheet_registry,
         )
     )
 

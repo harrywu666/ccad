@@ -16,15 +16,84 @@ from models import AuditResult, Drawing, JsonData
 from services.ai_prompt_service import resolve_stage_system_prompt_with_skills
 from services.audit.common import build_anchor, to_evidence_json
 from services.audit.prompt_builder import build_material_review_prompt, compact_material_rows
+from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
 from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidenceRequest
 from services.audit_runtime.evidence_planner import plan_evidence_requests
 from services.audit_runtime.evidence_service import get_evidence_service
+from services.audit_runtime.finding_schema import Finding, apply_finding_to_audit_result
+from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
+from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
+from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
+from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
+from services.audit_runtime.state_transitions import append_run_event
 from services.coordinate_service import enrich_json_with_coordinates
 from services.feedback_runtime_service import load_feedback_runtime_profile
-from services.kimi_service import call_kimi
+from services.kimi_service import call_kimi, call_kimi_stream
 from services.skill_pack_service import load_runtime_skill_profile
 
 logger = logging.getLogger(__name__)
+
+
+def _get_material_runner(
+    project_id: str,
+    audit_version: int,
+) -> ProjectAuditAgentRunner:
+    return ProjectAuditAgentRunner.get_or_create(
+        project_id,
+        audit_version=audit_version,
+        provider=KimiApiProvider(
+            run_once_func=call_kimi,
+            run_stream_func=call_kimi_stream,
+        ),
+        shared_context={"project_id": project_id, "audit_version": audit_version},
+    )
+
+
+def _material_confidence_for_severity(severity: str) -> float:
+    normalized = str(severity or "warning").strip().lower()
+    if normalized == "error":
+        return 0.85
+    if normalized == "info":
+        return 0.6
+    return 0.72
+
+
+def _material_rule_id(location: Optional[str], description: Optional[str]) -> str:
+    text = f"{location or ''} {description or ''}"
+    if "未找到定义" in text:
+        return "material_missing_definition"
+    if "未使用" in text:
+        return "material_unused_table_entry"
+    if "命名不一致" in text:
+        return "material_name_conflict"
+    if "高度相似" in text:
+        return "material_similarity_conflict"
+    return "material_consistency_review"
+
+
+def _apply_material_finding(
+    issue: AuditResult,
+    *,
+    review_round: int = 1,
+    triggered_by: str | None = None,
+) -> AuditResult:
+    confidence = _material_confidence_for_severity(issue.severity or "warning")
+    status = "confirmed" if confidence >= 0.75 else "suspected"
+    finding = Finding(
+        sheet_no=str(issue.sheet_no_a or issue.sheet_no_b or "UNKNOWN").strip() or "UNKNOWN",
+        location=str(issue.location or "未定位").strip() or "未定位",
+        rule_id=_material_rule_id(issue.location, issue.description),
+        finding_type="material_conflict",
+        severity=str(issue.severity or "warning").strip().lower() or "warning",
+        status=status,  # type: ignore[arg-type]
+        confidence=confidence,
+        source_agent="material_review_agent",
+        evidence_pack_id="focus_pack",
+        review_round=review_round,
+        triggered_by=triggered_by,
+        description=str(issue.description or "").strip(),
+    )
+    return apply_finding_to_audit_result(issue, finding)
 
 
 def _material_v2_enabled() -> bool:
@@ -34,6 +103,37 @@ def _material_v2_enabled() -> bool:
         "yes",
         "on",
     }
+
+
+def _material_stream_enabled() -> bool:
+    raw = os.getenv("AUDIT_KIMI_STREAM_ENABLED")
+    if raw is None:
+        return True
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _append_material_stream_event(
+    project_id: str,
+    audit_version: int,
+    *,
+    event_kind: str,
+    message: str,
+    progress_hint: int,
+    level: str = "info",
+    meta: Dict[str, Any] | None = None,
+) -> None:
+    append_run_event(
+        project_id,
+        audit_version,
+        level=level,
+        step_key="material",
+        agent_key="material_review_agent",
+        agent_name="材料审查Agent",
+        event_kind=event_kind,
+        progress_hint=progress_hint,
+        message=message,
+        meta=meta or {},
+    )
 
 
 def _material_agent_concurrency() -> int:
@@ -62,6 +162,10 @@ def resolve_material_issue_severity(
         raw_override = str((feedback_profile or {}).get("severity_override") or "").strip().lower()
         if raw_override:
             override = raw_override
+    if not override:
+        hint = (feedback_profile or {}).get("experience_hint")
+        if isinstance(hint, dict) and str(hint.get("intervention_level") or "").strip().lower() in {"soft", "hard"}:
+            override = "warning"
     return override or base
 
 
@@ -70,6 +174,8 @@ async def _run_material_ai_review(
     sheet_no: str,
     material_table: List[Dict[str, Any]],
     material_used: List[Dict[str, Any]],
+    project_id: str | None = None,
+    audit_version: int | None = None,
     pdf_path: Optional[str] = None,
     page_index: Optional[int] = None,
     images_override: Optional[List[bytes]] = None,
@@ -83,6 +189,7 @@ async def _run_material_ai_review(
                     task_type="material",
                     source_sheet_no=sheet_no,
                     requires_visual=True,
+                    priority="normal",
                 )
                 if plans:
                     pack_type = plans[0].pack_type
@@ -98,19 +205,55 @@ async def _run_material_ai_review(
         except Exception:
             pass
 
-    result = await call_kimi(
-        system_prompt=resolve_stage_system_prompt_with_skills(
-            "material_consistency_review",
-            "material",
-        ),
-        user_prompt=build_material_review_prompt(
-            sheet_no,
-            compact_material_rows(material_table),
-            compact_material_rows(material_used),
-        ),
-        images=images,
-        temperature=0.0,
-    )
+    if project_id is not None and audit_version is not None and _material_stream_enabled():
+        runner = _get_material_runner(project_id, audit_version)
+        turn_result: RunnerTurnResult = await runner.run_stream(
+            RunnerTurnRequest(
+                agent_key="material_review_agent",
+                agent_name="材料审查Agent",
+                step_key="material",
+                progress_hint=36,
+                turn_kind="material_consistency_review",
+                system_prompt=resolve_stage_system_prompt_with_skills(
+                    "material_consistency_review",
+                    "material",
+                ),
+                user_prompt=build_material_review_prompt(
+                    sheet_no,
+                    compact_material_rows(material_table),
+                    compact_material_rows(material_used),
+                ),
+                images=images or [],
+                temperature=0.0,
+                meta={"sheet_no": sheet_no, "material_rows": len(material_table), "used_rows": len(material_used)},
+            ),
+            should_cancel=lambda: is_cancel_requested(project_id),
+        )
+        result = turn_result.output if turn_result.status != "needs_review" else []
+    else:
+        runner = _get_material_runner(project_id or "__adhoc_material__", audit_version or 0)
+        turn_result: RunnerTurnResult = await runner.run_once(
+            RunnerTurnRequest(
+                agent_key="material_review_agent",
+                agent_name="材料审查Agent",
+                step_key="material",
+                progress_hint=36,
+                turn_kind="material_consistency_review",
+                system_prompt=resolve_stage_system_prompt_with_skills(
+                    "material_consistency_review",
+                    "material",
+                ),
+                user_prompt=build_material_review_prompt(
+                    sheet_no,
+                    compact_material_rows(material_table),
+                    compact_material_rows(material_used),
+                ),
+                images=images or [],
+                temperature=0.0,
+                meta={"sheet_no": sheet_no, "material_rows": len(material_table), "used_rows": len(material_used)},
+            )
+        )
+        result = turn_result.output if turn_result.status != "needs_review" else []
     if not isinstance(result, list):
         return []
     return [item for item in result if isinstance(item, dict)]
@@ -128,6 +271,7 @@ async def _prepare_material_images(job: Dict[str, Any]) -> Optional[List[bytes]]
             task_type="material",
             source_sheet_no=job["sheet_no"],
             requires_visual=True,
+            priority="normal",
         )
         if plans:
             pack_type = plans[0].pack_type
@@ -162,6 +306,8 @@ async def _run_material_ai_reviews_bounded(
                 sheet_no=job["sheet_no"],
                 material_table=job["material_table"],
                 material_used=job["material_used"],
+                project_id=job.get("project_id"),
+                audit_version=job.get("audit_version"),
                 pdf_path=job.get("pdf_path"),
                 page_index=job.get("page_index"),
                 images_override=images_override,
@@ -170,6 +316,8 @@ async def _run_material_ai_reviews_bounded(
     results = await asyncio.gather(*[_worker(job) for job in ai_review_jobs], return_exceptions=True)
     out: List[List[Dict[str, Any]]] = []
     for r in results:
+        if isinstance(r, AuditCancellationRequested):
+            raise r
         if isinstance(r, Exception):
             logger.warning("材料 AI 审核降级为规则模式：error=%s", r)
             out.append([])
@@ -184,6 +332,7 @@ def audit_materials(
     audit_version: int,
     db,
     sheet_filters: Optional[List[str]] = None,
+    hot_sheet_registry: HotSheetRegistry | None = None,
 ) -> List[AuditResult]:
     skill_profile = load_runtime_skill_profile(
         db,
@@ -207,6 +356,11 @@ def audit_materials(
         )
         .all()
     )
+    if hot_sheet_registry is not None:
+        json_list = hot_sheet_registry.sort_sheet_items(
+            json_list,
+            lambda item: getattr(item, "sheet_no", None),
+        )
 
     issues: List[AuditResult] = []
     seen_keys: set[tuple[str, str, str]] = set()
@@ -248,6 +402,7 @@ def audit_materials(
         if key in seen_keys:
             return
         seen_keys.add(key)
+        _apply_material_finding(issue)
         db.add(issue)
         issues.append(issue)
 
@@ -441,6 +596,8 @@ def audit_materials(
 
         if raw_table or raw_used:
             ai_review_jobs.append({
+                "project_id": project_id,
+                "audit_version": audit_version,
                 "sheet_no": json_data.sheet_no or "",
                 "material_table": raw_table,
                 "material_used": raw_used,
@@ -491,4 +648,12 @@ def audit_materials(
                 append_issue(issue)
 
     db.commit()
+    if hot_sheet_registry is not None:
+        for issue in issues:
+            hot_sheet_registry.publish(
+                issue.sheet_no_a,
+                finding_type=getattr(issue, "finding_type", None) or "material_conflict",
+                confidence=float(getattr(issue, "confidence", None) or _material_confidence_for_severity(issue.severity)),
+                source_agent="material_review_agent",
+            )
     return issues

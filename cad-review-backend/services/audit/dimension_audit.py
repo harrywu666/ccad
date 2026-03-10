@@ -602,15 +602,28 @@ async def _execute_sheet_jobs(
             )
             semantic_result = turn_result.output if turn_result.status != "needs_review" else []
         else:
-            semantic_result = await call_kimi(
-                system_prompt=resolve_stage_system_prompt_with_skills(
-                    stage_key,
-                    "dimension",
-                ),
-                user_prompt=job["prompt"],
-                images=images,
-                temperature=0.0,
+            runner = _get_dimension_runner(
+                project_id or "__adhoc_dimension__",
+                audit_version or 0,
+                call_kimi=call_kimi,
             )
+            turn_result: RunnerTurnResult = await runner.run_once(
+                RunnerTurnRequest(
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    step_key="dimension",
+                    progress_hint=29,
+                    turn_kind="dimension_sheet_semantic",
+                    system_prompt=resolve_stage_system_prompt_with_skills(
+                        stage_key,
+                        "dimension",
+                    ),
+                    user_prompt=job["prompt"],
+                    images=images,
+                    temperature=0.0,
+                )
+            )
+            semantic_result = turn_result.output if turn_result.status != "needs_review" else []
         if not isinstance(semantic_result, list):
             raise RuntimeError(
                 f"尺寸语义分析返回格式异常：{job['sheet_no']}，返回类型={type(semantic_result).__name__}"
@@ -794,22 +807,35 @@ async def _execute_pair_jobs(
             )
             compare_result = turn_result.output if turn_result.status != "needs_review" else []
         else:
-            compare_result = await call_kimi(
-                system_prompt=resolve_stage_system_prompt_with_skills(
-                    "dimension_pair_compare",
-                    "dimension",
-                ),
-                user_prompt=build_pair_compare_prompt(
-                    a_sheet_no=job["a_sheet_no"],
-                    a_sheet_name=job["a_sheet_name"],
-                    a_semantic=job["semantic_a"],
-                    b_sheet_no=job["b_sheet_no"],
-                    b_sheet_name=job["b_sheet_name"],
-                    b_semantic=job["semantic_b"],
-                ),
-                images=pair_images if pair_images else None,
-                temperature=0.0,
+            runner = _get_dimension_runner(
+                project_id or "__adhoc_dimension__",
+                audit_version or 0,
+                call_kimi=call_kimi,
             )
+            turn_result: RunnerTurnResult = await runner.run_once(
+                RunnerTurnRequest(
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    step_key="dimension",
+                    progress_hint=31,
+                    turn_kind="dimension_pair_compare",
+                    system_prompt=resolve_stage_system_prompt_with_skills(
+                        "dimension_pair_compare",
+                        "dimension",
+                    ),
+                    user_prompt=build_pair_compare_prompt(
+                        a_sheet_no=job["a_sheet_no"],
+                        a_sheet_name=job["a_sheet_name"],
+                        a_semantic=job["semantic_a"],
+                        b_sheet_no=job["b_sheet_no"],
+                        b_sheet_name=job["b_sheet_name"],
+                        b_semantic=job["semantic_b"],
+                    ),
+                    images=pair_images if pair_images else [],
+                    temperature=0.0,
+                )
+            )
+            compare_result = turn_result.output if turn_result.status != "needs_review" else []
         if not isinstance(compare_result, list):
             raise RuntimeError(
                 f"尺寸图对比对返回格式异常：{job['a_sheet_no']} vs {job['b_sheet_no']}，"

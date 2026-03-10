@@ -2,21 +2,427 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 import re
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from domain.sheet_normalization import normalize_index_no, normalize_sheet_no
-from models import AuditResult, Catalog, JsonData
+from models import AuditResult, Catalog, Drawing, JsonData
+from services.ai_prompt_service import (
+    resolve_stage_prompts,
+    resolve_stage_system_prompt_with_skills,
+)
 from services.audit.common import build_anchor, to_evidence_json
 from services.audit.issue_preview import ensure_issue_drawing_matches
+from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+from services.audit_runtime.contracts import EvidenceRequest
+from services.audit_runtime.evidence_planner import plan_evidence_requests
+from services.audit_runtime.evidence_service import get_evidence_service
+from services.audit_runtime.finding_schema import Finding, apply_finding_to_audit_result
+from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
+from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
+from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
+from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
+from services.audit_runtime.state_transitions import append_run_event
+from services.feedback_runtime_service import load_feedback_runtime_profile
+from services.kimi_service import call_kimi, call_kimi_stream
 from services.layout_json_service import load_enriched_layout_json
 from services.skill_pack_service import (
     build_index_alias_map,
     canonicalize_index_key,
     canonicalize_sheet_key,
     load_active_skill_rules,
+    load_runtime_skill_profile,
 )
+
+
+def _get_index_runner(
+    project_id: str,
+    audit_version: int,
+) -> ProjectAuditAgentRunner:
+    return ProjectAuditAgentRunner.get_or_create(
+        project_id,
+        audit_version=audit_version,
+        provider=KimiApiProvider(
+            run_once_func=call_kimi,
+            run_stream_func=call_kimi_stream,
+        ),
+        shared_context={"project_id": project_id, "audit_version": audit_version},
+    )
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _index_ai_review_enabled() -> bool:
+    return _env_bool(
+        "AUDIT_INDEX_AI_REVIEW_ENABLED",
+        default=_env_bool("AUDIT_ORCHESTRATOR_V2_ENABLED", False),
+    )
+
+
+def _index_stream_enabled() -> bool:
+    raw = os.getenv("AUDIT_KIMI_STREAM_ENABLED")
+    if raw is None:
+        return True
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _find_pdf_in_png_dir(png_path: str) -> Optional[str]:
+    if not png_path:
+        return None
+    try:
+        folder = Path(png_path).expanduser().resolve().parent
+    except Exception:
+        return None
+    if not folder.exists() or not folder.is_dir():
+        return None
+    pdfs = sorted(folder.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not pdfs:
+        return None
+    return str(pdfs[0])
+
+
+def _collect_page_asset_map(rows: List[Drawing]) -> Dict[str, Dict[str, Any]]:
+    asset_map: Dict[str, Dict[str, Any]] = {}
+    by_key: Dict[str, List[Drawing]] = defaultdict(list)
+    for row in rows:
+        if not row.sheet_no:
+            continue
+        by_key[normalize_sheet_no(row.sheet_no)].append(row)
+    for key, items in by_key.items():
+        items_sorted = sorted(
+            items,
+            key=lambda x: (x.data_version or 0, 1 if x.status == "matched" else 0),
+            reverse=True,
+        )
+        latest = items_sorted[0]
+        asset_map[key] = {
+            "pdf_path": _find_pdf_in_png_dir(latest.png_path or ""),
+            "page_index": latest.page_index,
+        }
+    return asset_map
+
+
+def _run_async(coro):  # noqa: ANN001
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+
+def _reviewable_index_issue(kind: str) -> bool:
+    return kind in {
+        "missing_target_index_no",
+        "missing_reverse_link",
+        "orphan_index_without_target",
+    }
+
+
+def _resolve_index_review_policy(
+    *,
+    skill_profile: Dict[str, Any] | None = None,
+    feedback_profile: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    floor = 0.0
+    severity_override = (feedback_profile or {}).get("severity_override")
+    skill_policy = ((skill_profile or {}).get("judgement_policy") or {}).get("index")
+    if isinstance(skill_policy, dict):
+        raw_floor = skill_policy.get("confidence_floor")
+        if isinstance(raw_floor, (int, float)):
+            floor = max(floor, float(raw_floor))
+        raw_override = str(skill_policy.get("severity_override") or "").strip().lower()
+        if raw_override in {"warning", "error", "info"}:
+            severity_override = raw_override
+    hint = (feedback_profile or {}).get("experience_hint")
+    if isinstance(hint, dict):
+        raw_floor = hint.get("confidence_floor")
+        if isinstance(raw_floor, (int, float)):
+            floor = max(floor, float(raw_floor))
+        if not severity_override and str(hint.get("intervention_level") or "").strip().lower() in {"soft", "hard"}:
+            severity_override = "warning"
+    raw_feedback_floor = (feedback_profile or {}).get("confidence_floor")
+    if isinstance(raw_feedback_floor, (int, float)):
+        floor = max(floor, float(raw_feedback_floor))
+    return {
+        "confidence_floor": floor,
+        "severity_override": severity_override,
+        "reason_template": hint.get("reason_template") if isinstance(hint, dict) else None,
+    }
+
+
+def _index_finding_type(review_kind: str) -> str:
+    mapping = {
+        "missing_target_sheet": "missing_ref",
+        "missing_target_index_no": "missing_ref",
+        "missing_reverse_link": "missing_ref",
+        "orphan_index_without_target": "missing_ref",
+    }
+    return mapping.get(review_kind, "missing_ref")
+
+
+def _apply_index_finding(issue: AuditResult, candidate: Dict[str, Any]) -> AuditResult:
+    review_round = int(candidate.get("review_round") or 1)
+    confidence = float(candidate.get("review_confidence") or (0.85 if issue.severity == "error" else 0.65))
+    status = "needs_review" if review_round >= 3 else ("confirmed" if confidence >= 0.8 else "suspected")
+    finding = Finding(
+        sheet_no=str(issue.sheet_no_a or issue.sheet_no_b or "UNKNOWN").strip() or "UNKNOWN",
+        location=str(issue.location or "未定位").strip() or "未定位",
+        rule_id=str(candidate.get("review_kind") or "index_review").strip(),
+        finding_type=_index_finding_type(str(candidate.get("review_kind") or "")),
+        severity=str(issue.severity or "warning").strip().lower() or "warning",
+        status=status,  # type: ignore[arg-type]
+        confidence=max(0.0, min(1.0, confidence)),
+        source_agent="index_review_agent",
+        evidence_pack_id=str(candidate.get("evidence_pack_id") or "overview_pack"),
+        review_round=review_round,
+        triggered_by=candidate.get("triggered_by"),
+        description=str(issue.description or "").strip(),
+    )
+    return apply_finding_to_audit_result(issue, finding)
+
+
+def _merge_index_ai_review(issue: AuditResult, result: Dict[str, Any]) -> None:
+    try:
+        payload = json.loads(issue.evidence_json or "{}")
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload["ai_review"] = {
+        "decision": str(result.get("decision") or "").strip().lower(),
+        "confidence": result.get("confidence"),
+        "reason": str(result.get("reason") or "").strip(),
+    }
+    issue.evidence_json = json.dumps(payload, ensure_ascii=False)
+
+
+async def _run_index_ai_review(
+    candidate: Dict[str, Any],
+    *,
+    project_id: str | None = None,
+    audit_version: int | None = None,
+    asset_map: Dict[str, Dict[str, Any]],
+    skill_profile: Dict[str, Any],
+) -> Dict[str, Any] | None:
+    source_asset = asset_map.get(candidate["source_key"]) or {}
+    source_pdf_path = source_asset.get("pdf_path")
+    source_page_index = source_asset.get("page_index")
+    if not source_pdf_path or source_page_index is None:
+        return None
+
+    target_pdf_path = None
+    target_page_index = None
+    if candidate.get("target_sheet_no"):
+        target_asset = asset_map.get(candidate.get("target_key") or "") or {}
+        target_pdf_path = target_asset.get("pdf_path")
+        target_page_index = target_asset.get("page_index")
+        if not target_pdf_path or target_page_index is None:
+            return None
+
+    plans = plan_evidence_requests(
+        task_type="index",
+        source_sheet_no=candidate["source_sheet_no"],
+        target_sheet_no=candidate.get("target_sheet_no"),
+        reason=candidate["issue"].description,
+    )
+    if not plans:
+        return None
+
+    pack = await get_evidence_service().get_evidence_pack(
+        EvidenceRequest(
+            pack_type=plans[0].pack_type,
+            source_pdf_path=source_pdf_path,
+            source_page_index=int(source_page_index),
+            target_pdf_path=target_pdf_path,
+            target_page_index=int(target_page_index) if target_page_index is not None else None,
+        )
+    )
+    prompts = resolve_stage_prompts(
+        "index_visual_review",
+        {
+            "source_sheet_no": candidate["source_sheet_no"],
+            "target_sheet_no": candidate.get("target_sheet_no") or "",
+            "index_no": candidate["index_no"],
+            "issue_kind": candidate["review_kind"],
+            "issue_description": candidate["issue"].description,
+        },
+    )
+    if project_id is not None and audit_version is not None and _index_stream_enabled():
+        runner = _get_index_runner(project_id, audit_version)
+        turn_result: RunnerTurnResult = await runner.run_stream(
+            RunnerTurnRequest(
+                agent_key="index_review_agent",
+                agent_name="索引审查Agent",
+                step_key="index",
+                progress_hint=24,
+                turn_kind="index_visual_review",
+                system_prompt=resolve_stage_system_prompt_with_skills("index_visual_review", "index"),
+                user_prompt=prompts["user_prompt"],
+                images=list(pack.images.values()),
+                temperature=0.0,
+                max_tokens=1200,
+                meta={
+                    "source_sheet_no": candidate["source_sheet_no"],
+                    "target_sheet_no": candidate.get("target_sheet_no"),
+                    "index_no": candidate["index_no"],
+                },
+            ),
+            should_cancel=lambda: is_cancel_requested(project_id),
+        )
+        result = turn_result.output if turn_result.status != "needs_review" else None
+    else:
+        runner = _get_index_runner(project_id or "__adhoc_index__", audit_version or 0)
+        turn_result = await runner.run_once(
+            RunnerTurnRequest(
+                agent_key="index_review_agent",
+                agent_name="索引审查Agent",
+                step_key="index",
+                progress_hint=24,
+                turn_kind="index_visual_review",
+                system_prompt=resolve_stage_system_prompt_with_skills("index_visual_review", "index"),
+                user_prompt=prompts["user_prompt"],
+                images=list(pack.images.values()),
+                temperature=0.0,
+                max_tokens=1200,
+                meta={
+                    "source_sheet_no": candidate["source_sheet_no"],
+                    "target_sheet_no": candidate.get("target_sheet_no"),
+                    "index_no": candidate["index_no"],
+                },
+            )
+        )
+        result = turn_result.output if turn_result.status != "needs_review" else None
+    return result if isinstance(result, dict) else None
+
+
+async def _review_index_issue_candidates_async(
+    project_id: str,
+    db,
+    candidates: List[Dict[str, Any]],
+    *,
+    audit_version: int | None = None,
+    skill_profile: Dict[str, Any],
+    feedback_profile: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    if not candidates:
+        return []
+
+    if audit_version is not None:
+        append_run_event(
+            project_id,
+            audit_version,
+            level="info",
+            step_key="index",
+            agent_key="index_review_agent",
+            agent_name="索引审查Agent",
+            event_kind="phase_progress",
+            progress_hint=24,
+            message=f"索引审查Agent 发现 {len(candidates)} 条高歧义索引，正在做 AI 复核",
+            meta={"review_candidates": len(candidates)},
+        )
+
+    asset_map = _collect_page_asset_map(
+        db.query(Drawing).filter(Drawing.project_id == project_id).all()
+    )
+    policy = _resolve_index_review_policy(
+        skill_profile=skill_profile,
+        feedback_profile=feedback_profile,
+    )
+    kept: List[Dict[str, Any]] = []
+    filtered_count = 0
+    for candidate in candidates:
+        try:
+            result = await _run_index_ai_review(
+                candidate,
+                project_id=project_id,
+                audit_version=audit_version,
+                asset_map=asset_map,
+                skill_profile=skill_profile,
+            )
+        except AuditCancellationRequested:
+            raise
+        except Exception:
+            kept.append(candidate)
+            continue
+
+        if not result:
+            kept.append(candidate)
+            continue
+
+        decision = str(result.get("decision") or "").strip().lower()
+        try:
+            confidence = float(result.get("confidence"))
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        if decision == "reject" and confidence >= float(policy["confidence_floor"]):
+            filtered_count += 1
+            continue
+
+        severity_override = str(
+            result.get("severity_override") or policy.get("severity_override") or ""
+        ).strip().lower()
+        if severity_override in {"warning", "error", "info"}:
+            candidate["issue"].severity = severity_override
+        candidate["review_round"] = 2
+        candidate["triggered_by"] = "confidence_low"
+        candidate["review_confidence"] = confidence
+        candidate["evidence_pack_id"] = "overview_pack"
+        _merge_index_ai_review(candidate["issue"], result)
+        kept.append(candidate)
+
+    if audit_version is not None:
+        append_run_event(
+            project_id,
+            audit_version,
+            level="success",
+            step_key="index",
+            agent_key="index_review_agent",
+            agent_name="索引审查Agent",
+            event_kind="phase_progress",
+            progress_hint=25,
+            message=f"索引审查Agent 已完成 AI 复核，保留 {len(kept)} 条问题，排除了 {filtered_count} 条疑似误报",
+            meta={
+                "review_candidates": len(candidates),
+                "kept": len(kept),
+                "filtered": filtered_count,
+            },
+        )
+    return kept
+
+
+def _review_index_issue_candidates(
+    project_id: str,
+    db,
+    candidates: List[Dict[str, Any]],
+    *,
+    audit_version: int | None = None,
+    skill_profile: Dict[str, Any],
+    feedback_profile: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    return _run_async(
+        _review_index_issue_candidates_async(
+            project_id,
+            db,
+            candidates,
+            audit_version=audit_version,
+            skill_profile=skill_profile,
+            feedback_profile=feedback_profile,
+        )
+    )
 
 
 def _build_sheet_validator(catalog_sheet_nos: List[str]) -> Callable[[str], bool]:
@@ -131,8 +537,15 @@ def audit_indexes(
     audit_version: int,
     db,
     source_sheet_filters: Optional[List[str]] = None,
+    hot_sheet_registry: HotSheetRegistry | None = None,
 ) -> List[AuditResult]:
     alias_map = build_index_alias_map(load_active_skill_rules(db, skill_type="index"))
+    skill_profile = load_runtime_skill_profile(
+        db,
+        skill_type="index",
+        stage_key="index_visual_review",
+    )
+    feedback_profile = load_feedback_runtime_profile(db, issue_type="index")
 
     # 从目录中学习本项目的图号命名规律，用于过滤分图号假阳性
     catalog_sheet_nos = [
@@ -237,7 +650,7 @@ def audit_indexes(
 
         sheet_detail_label_defs[src_key].update(_collect_target_reference_labels(data, alias_map))
 
-    issues: List[AuditResult] = []
+    issue_candidates: List[Dict[str, Any]] = []
     existing_sheets = set(sheet_map.keys())
     referenced_targets = {
         (item["target_key"], item["index_key"])
@@ -271,10 +684,17 @@ def audit_indexes(
                     anchors, unlocated_reason=None if anchors else "missing_target_sheet"
                 ),
             )
-            db.add(issue)
-            db.flush()
-            ensure_issue_drawing_matches(issue, db)
-            issues.append(issue)
+            issue_candidates.append(
+                {
+                    "issue": issue,
+                    "review_kind": "missing_target_sheet",
+                    "source_sheet_no": rel["source_raw"],
+                    "target_sheet_no": rel["target_raw"] or None,
+                    "source_key": rel["source_key"],
+                    "target_key": rel["target_key"],
+                    "index_no": rel["index_raw"] or "?",
+                }
+            )
 
     for rel in forward_links:
         if allowed_source_keys is not None and rel["source_key"] not in allowed_source_keys:
@@ -303,10 +723,17 @@ def audit_indexes(
                     anchors, unlocated_reason=None if anchors else "missing_target_index_no"
                 ),
             )
-            db.add(issue)
-            db.flush()
-            ensure_issue_drawing_matches(issue, db)
-            issues.append(issue)
+            issue_candidates.append(
+                {
+                    "issue": issue,
+                    "review_kind": "missing_target_index_no",
+                    "source_sheet_no": rel["source_raw"],
+                    "target_sheet_no": target_raw or rel["target_raw"] or None,
+                    "source_key": rel["source_key"],
+                    "target_key": rel["target_key"],
+                    "index_no": rel["index_raw"] or "?",
+                }
+            )
 
     for rel in forward_links:
         if allowed_source_keys is not None and rel["source_key"] not in allowed_source_keys:
@@ -315,7 +742,11 @@ def audit_indexes(
         tgt_key = rel["target_key"]
         if not src_key or not tgt_key or src_key == tgt_key or tgt_key not in existing_sheets:
             continue
-        if rel["index_key"] and rel["index_key"] in sheet_detail_label_defs.get(tgt_key, set()):
+        target_index_defs = sheet_index_defs.get(tgt_key, set())
+        target_detail_labels = sheet_detail_label_defs.get(tgt_key, set())
+        if rel["index_key"] and rel["index_key"] in target_detail_labels:
+            continue
+        if rel["index_key"] and rel["index_key"] not in target_index_defs and rel["index_key"] not in target_detail_labels:
             continue
         if (tgt_key, src_key) in reverse_link_keys:
             continue
@@ -343,10 +774,17 @@ def audit_indexes(
                 anchors, unlocated_reason=None if anchors else "missing_reverse_link"
             ),
         )
-        db.add(issue)
-        db.flush()
-        ensure_issue_drawing_matches(issue, db)
-        issues.append(issue)
+        issue_candidates.append(
+            {
+                "issue": issue,
+                "review_kind": "missing_reverse_link",
+                "source_sheet_no": rel["source_raw"],
+                "target_sheet_no": target_raw or rel["target_raw"] or None,
+                "source_key": rel["source_key"],
+                "target_key": rel["target_key"],
+                "index_no": rel["index_raw"] or "?",
+            }
+        )
 
     for orphan in orphan_candidates:
         if allowed_source_keys is not None and orphan["source_key"] not in allowed_source_keys:
@@ -369,10 +807,64 @@ def audit_indexes(
                 anchors, unlocated_reason=None if anchors else "orphan_index_without_target"
             ),
         )
+        issue_candidates.append(
+            {
+                "issue": issue,
+                "review_kind": "orphan_index_without_target",
+                "source_sheet_no": orphan["source_raw"],
+                "target_sheet_no": None,
+                "source_key": orphan["source_key"],
+                "target_key": "",
+                "index_no": orphan["index_raw"] or "?",
+            }
+        )
+
+    reviewable_candidates = [
+        candidate
+        for candidate in issue_candidates
+        if _reviewable_index_issue(candidate["review_kind"])
+    ]
+    final_candidates = [
+        candidate
+        for candidate in issue_candidates
+        if not _reviewable_index_issue(candidate["review_kind"])
+    ]
+
+    if _index_ai_review_enabled():
+        final_candidates.extend(
+            _review_index_issue_candidates(
+                project_id,
+                db,
+                reviewable_candidates,
+                audit_version=audit_version,
+                skill_profile=skill_profile,
+                feedback_profile=feedback_profile,
+            )
+        )
+    else:
+        final_candidates.extend(reviewable_candidates)
+
+    issues: List[AuditResult] = []
+    for candidate in final_candidates:
+        issue = _apply_index_finding(candidate["issue"], candidate)
         db.add(issue)
         db.flush()
         ensure_issue_drawing_matches(issue, db)
         issues.append(issue)
+        if hot_sheet_registry is not None:
+            confidence = float(getattr(issue, "confidence", None) or (0.85 if issue.severity == "error" else 0.65))
+            hot_sheet_registry.publish(
+                issue.sheet_no_a,
+                finding_type=candidate.get("review_kind") or "index_review",
+                confidence=confidence,
+                source_agent="index_review_agent",
+            )
+            hot_sheet_registry.publish(
+                issue.sheet_no_b,
+                finding_type=candidate.get("review_kind") or "index_review",
+                confidence=confidence,
+                source_agent="index_review_agent",
+            )
 
     db.commit()
     return issues

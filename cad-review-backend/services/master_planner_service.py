@@ -385,14 +385,21 @@ def plan_with_master_llm(
             )
             result = turn_result.output
         else:
-            result = _run_async(
-                call_kimi(
-                    system_prompt=prompts["system_prompt"],
-                    user_prompt=prompts["user_prompt"],
-                    temperature=0.0,
-                    max_tokens=max_tokens,
-                )
+            runner = _get_master_runner(project_id, audit_version or 0)
+            request = RunnerTurnRequest(
+                agent_key="master_planner_agent",
+                agent_name="总控规划Agent",
+                step_key="task_planning",
+                progress_hint=18,
+                turn_kind="planning",
+                system_prompt=prompts["system_prompt"],
+                user_prompt=prompts["user_prompt"],
+                temperature=0.0,
+                max_tokens=max_tokens,
+                meta={"source": "master_planner_once"},
             )
+            turn_result = _run_async(runner.run_once(request))
+            result = turn_result.output
         logger.info(
             "master_planner llm completed project=%s elapsed=%.2fs",
             project_id,
