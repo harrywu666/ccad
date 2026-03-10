@@ -11,6 +11,11 @@ from services.audit_runtime.runner_types import (
     RunnerTurnRequest,
     RunnerTurnResult,
 )
+from services.audit_runtime.runner_observer_types import (
+    RunnerObserverDecision,
+    RunnerObserverFeedSnapshot,
+    RunnerObserverMemory,
+)
 
 
 StreamCallback = Callable[[ProviderStreamEvent], Optional[Awaitable[None]]]
@@ -38,6 +43,13 @@ class BaseRunnerProvider(ABC):
 
     async def cancel(self, subsession: RunnerSubsession) -> bool:
         return False
+
+    async def observe_once(
+        self,
+        snapshot: RunnerObserverFeedSnapshot,
+        memory: RunnerObserverMemory,
+    ) -> RunnerObserverDecision:
+        raise NotImplementedError("observe_once is not implemented for this provider")
 
 
 __all__ = ["BaseRunnerProvider", "StreamCallback"]
