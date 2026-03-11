@@ -92,7 +92,8 @@ class KimiSdkProvider(BaseRunnerProvider):
         yolo: bool = True,
         session_factory=Session.create,  # noqa: ANN001
     ) -> None:
-        self.work_dir = Path(work_dir or Path.cwd())
+        self.work_dir = Path(work_dir or Path.cwd()).expanduser()
+        self.work_dir.mkdir(parents=True, exist_ok=True)
         self.yolo = yolo
         self._session_factory = session_factory
         self._sessions = {}

@@ -46,6 +46,19 @@ class EvidenceService:
             target_page_index=request.target_page_index,
         )
 
+    def build_request_key(self, request: EvidenceRequest) -> str:
+        normalized_options = self._normalize_render_options(request.render_options)
+        parts = [
+            request.pack_type.value,
+            str(request.source_pdf_path or "").strip(),
+            str(int(request.source_page_index)),
+            str(request.target_pdf_path or "").strip(),
+            "" if request.target_page_index is None else str(int(request.target_page_index)),
+            str(request.focus_hint or "").strip(),
+            repr(normalized_options),
+        ]
+        return "|".join(parts)
+
     async def _get_page_images(
         self,
         pdf_path: str,

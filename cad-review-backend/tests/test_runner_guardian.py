@@ -31,6 +31,7 @@ def test_runner_guardian_recovers_session_from_snapshot(tmp_path, monkeypatch):
         "proj-guardian",
         9,
         {
+            "run_mode": "shadow_chief_review",
             "memory": {
                 "project_summary": "Runner 之前已经判断总控在原地打转",
                 "current_focus": "规划审核任务图",
@@ -52,5 +53,6 @@ def test_runner_guardian_recovers_session_from_snapshot(tmp_path, monkeypatch):
     )
 
     assert result["restarted"] is True
+    assert result["run_mode"] == "shadow_chief_review"
     assert session.memory.project_summary == "Runner 之前已经判断总控在原地打转"
     assert session.memory.master_status_summary["current_step"] == "规划审核任务图"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Optional
 
 from services.audit_runtime.providers.codex_sdk_provider import CodexSdkProvider
@@ -50,6 +51,7 @@ def build_runner_provider(
     *,
     cli_binary: Optional[str] = None,
     requested_mode: Optional[str] = None,
+    work_dir: str | Path | None = None,
     run_once_func=None,  # noqa: ANN001
     run_stream_func=None,  # noqa: ANN001
 ):
@@ -60,7 +62,7 @@ def build_runner_provider(
         return CodexSdkProvider()
 
     cli_provider = KimiCliProvider(binary=cli_binary or os.getenv("KIMI_CLI_BINARY", "kimi"))
-    sdk_provider = KimiSdkProvider()
+    sdk_provider = KimiSdkProvider(work_dir=Path(work_dir).expanduser() if work_dir else None)
 
     if explicit_mode:
         if mode in {"kimi_sdk", "sdk"}:

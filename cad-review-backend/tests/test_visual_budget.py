@@ -47,3 +47,9 @@ def test_visual_budget_retry_pool_is_consumable():
 
     assert budget.consume_retry() is True
     assert budget.consume_retry() is False
+
+
+def test_visual_budget_snapshot_keeps_run_mode():
+    budget = VisualBudget(run_mode="shadow_legacy")
+
+    assert budget.snapshot()["run_mode"] == "shadow_legacy"

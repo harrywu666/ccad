@@ -100,22 +100,32 @@ class ProjectAuditAgentRunner:
             cls._registry.pop((project_id, int(audit_version)), None)
 
     def resolve_subsession(self, request: RunnerTurnRequest) -> RunnerSubsession:
+        lookup_key = self._subsession_lookup_key(request)
         with self._subsession_lock:
-            subsession = self._subsessions.get(request.agent_key)
+            subsession = self._subsessions.get(lookup_key)
             if subsession is None:
+                session_key = f"{self.project_id}:{self.audit_version}:{request.agent_key}"
+                if lookup_key != request.agent_key:
+                    session_key = f"{session_key}:{lookup_key}"
                 subsession = RunnerSubsession(
                     project_id=self.project_id,
                     audit_version=self.audit_version,
                     agent_key=request.agent_key,
-                    session_key=f"{self.project_id}:{self.audit_version}:{request.agent_key}",
+                    session_key=session_key,
                     shared_context=self.shared_context,
                 )
-                self._subsessions[request.agent_key] = subsession
+                self._subsessions[lookup_key] = subsession
             return subsession
 
     def get_existing_subsession(self, agent_key: str) -> Optional[RunnerSubsession]:
         with self._subsession_lock:
             return self._subsessions.get(agent_key)
+
+    @staticmethod
+    def _subsession_lookup_key(request: RunnerTurnRequest) -> str:
+        raw = request.meta.get("subsession_key") if isinstance(request.meta, dict) else None
+        value = str(raw or "").strip()
+        return value or request.agent_key
 
     async def _cancel_active_turns_async(self) -> bool:
         cancelled = False

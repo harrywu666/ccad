@@ -29,6 +29,9 @@ import httpx
 from fastapi.testclient import TestClient
 
 
+RUN_MODES = ("legacy", "chief_review", "shadow_compare")
+
+
 class ClientResponse:
     def __init__(self, status_code: int, text: str, payload: Any = None):
         self.status_code = status_code
@@ -285,6 +288,83 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
+def resolve_run_modes(run_mode: Optional[str]) -> List[str]:
+    normalized = str(run_mode or "legacy").strip().lower() or "legacy"
+    if normalized == "shadow_compare":
+        return ["legacy", "chief_review"]
+    if normalized in {"legacy", "chief_review"}:
+        return [normalized]
+    return ["legacy"]
+
+
+def _finding_signature(item: Dict[str, Any]) -> str:
+    return "|".join(
+        [
+            str(item.get("rule_id") or "").strip(),
+            str(item.get("finding_type") or "").strip(),
+            str(item.get("location") or "").strip(),
+            str(item.get("sheet_no_a") or "").strip(),
+            str(item.get("sheet_no_b") or "").strip(),
+        ]
+    )
+
+
+def build_shadow_compare_summary(reports: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    legacy = reports.get("legacy") or {}
+    chief_review = reports.get("chief_review") or {}
+    legacy_results = list((legacy.get("artifacts") or {}).get("runtime_results") or [])
+    chief_results = list((chief_review.get("artifacts") or {}).get("runtime_results") or [])
+    legacy_signatures = {_finding_signature(item) for item in legacy_results}
+    chief_signatures = {_finding_signature(item) for item in chief_results}
+
+    overlap = legacy_signatures & chief_signatures
+    legacy_only = legacy_signatures - chief_signatures
+    chief_only = chief_signatures - legacy_signatures
+
+    legacy_audit = ((legacy.get("checks") or {}).get("runtime_audit") or {})
+    chief_audit = ((chief_review.get("checks") or {}).get("runtime_audit") or {})
+
+    return {
+        "legacy_audit_version": legacy_audit.get("audit_version"),
+        "chief_review_audit_version": chief_audit.get("audit_version"),
+        "legacy_result_count": len(legacy_results),
+        "chief_review_result_count": len(chief_results),
+        "overlap_count": len(overlap),
+        "legacy_only_count": len(legacy_only),
+        "chief_review_only_count": len(chief_only),
+        "overlap_ratio": round(len(overlap) / len(legacy_signatures | chief_signatures), 3)
+        if (legacy_signatures or chief_signatures)
+        else 1.0,
+    }
+
+
+def _run_mode_env(run_mode: str) -> Dict[str, Optional[str]]:
+    normalized = resolve_run_modes(run_mode)[0]
+    shadow_label = None
+    chief_enabled = None
+    if normalized == "chief_review":
+        shadow_label = "shadow_chief_review"
+        chief_enabled = "1"
+    elif normalized == "legacy":
+        shadow_label = "shadow_legacy"
+    return {
+        "AUDIT_CHIEF_REVIEW_ENABLED": chief_enabled,
+        "AUDIT_SHADOW_RUN_MODE": shadow_label,
+    }
+
+
+def _build_output_name(args: argparse.Namespace, effective_run_mode: str) -> str:
+    output_name = f"{args.project_id}-{effective_run_mode}-runner-supervisor-check.json"
+    if args.provider_mode:
+        output_name = f"{args.project_id}-{effective_run_mode}-{args.provider_mode}-codex-switch-check.json"
+    if args.base_url:
+        safe_host = args.base_url.replace("://", "_").replace("/", "_").replace(":", "_")
+        output_name = f"{args.project_id}-{effective_run_mode}-{safe_host}-runner-supervisor-check.json"
+        if args.provider_mode:
+            output_name = f"{args.project_id}-{effective_run_mode}-{args.provider_mode}-{safe_host}-codex-switch-check.json"
+    return output_name
+
+
 def wait_for_tasks(
     client,
     project_id: str,
@@ -393,6 +473,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable-evidence-planner", action="store_true", help="Mark evidence planner enabled for this run")
     parser.add_argument("--enable-feedback-runtime", action="store_true", help="Mark feedback runtime injection enabled for this run")
     parser.add_argument("--provider-mode", choices=["kimi_sdk", "codex_sdk"], help="Per-audit provider mode to request")
+    parser.add_argument("--run-mode", choices=list(RUN_MODES), default="legacy", help="Audit run mode: legacy, chief_review, or shadow_compare")
     return parser.parse_args()
 
 
@@ -416,25 +497,19 @@ def temporary_env(overrides: Dict[str, Optional[str]]):
                 os.environ[key] = value
 
 
-def main() -> int:
-    args = parse_args()
-
+def _run_single_check(
+    args: argparse.Namespace,
+    *,
+    effective_run_mode: str,
+) -> tuple[int, Dict[str, Any], Path]:
     backend_dir = Path(__file__).resolve().parents[1]
     output_dir = backend_dir.parent / ".artifacts" / "manual-checks"
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    output_name = f"{args.project_id}-runner-supervisor-check.json"
-    if args.provider_mode:
-        output_name = f"{args.project_id}-{args.provider_mode}-codex-switch-check.json"
-    if args.base_url:
-        safe_host = args.base_url.replace("://", "_").replace("/", "_").replace(":", "_")
-        output_name = f"{args.project_id}-{safe_host}-runner-supervisor-check.json"
-        if args.provider_mode:
-            output_name = f"{args.project_id}-{args.provider_mode}-{safe_host}-codex-switch-check.json"
-    output_path = output_dir / output_name
+    output_path = output_dir / _build_output_name(args, effective_run_mode)
 
     report: Dict[str, Any] = {
         "project_id": args.project_id,
+        "run_mode": effective_run_mode,
         "checked_at": datetime.now().isoformat(),
         "inputs": {
             "start_audit": args.start_audit,
@@ -444,6 +519,7 @@ def main() -> int:
             "base_url": args.base_url,
             "request_timeout": args.request_timeout,
             "provider_mode": args.provider_mode,
+            "run_mode": effective_run_mode,
             "enable_orchestrator_v2": args.enable_orchestrator_v2,
             "enable_evidence_planner": args.enable_evidence_planner,
             "enable_feedback_runtime": args.enable_feedback_runtime,
@@ -464,15 +540,18 @@ def main() -> int:
                 "mode": "http",
                 "applied": False,
                 "provider_mode": args.provider_mode,
+                "run_mode": effective_run_mode,
                 "detail": "HTTP 模式不会远程改服务环境变量，仅记录本次验收期望开关。",
             }
         else:
+            run_mode_env = _run_mode_env(effective_run_mode)
             sys.path.insert(0, str(backend_dir))
             env_context = temporary_env(
                 {
                     "AUDIT_ORCHESTRATOR_V2_ENABLED": "1" if args.enable_orchestrator_v2 else None,
                     "AUDIT_EVIDENCE_PLANNER_ENABLED": "1" if args.enable_evidence_planner else None,
                     "AUDIT_FEEDBACK_RUNTIME_ENABLED": "1" if args.enable_feedback_runtime else None,
+                    **run_mode_env,
                 }
             )
             env_context.__enter__()
@@ -487,10 +566,13 @@ def main() -> int:
                 "mode": "local",
                 "applied": True,
                 "provider_mode": args.provider_mode,
+                "run_mode": effective_run_mode,
                 "values": {
                     "AUDIT_ORCHESTRATOR_V2_ENABLED": args.enable_orchestrator_v2,
                     "AUDIT_EVIDENCE_PLANNER_ENABLED": args.enable_evidence_planner,
                     "AUDIT_FEEDBACK_RUNTIME_ENABLED": args.enable_feedback_runtime,
+                    "AUDIT_CHIEF_REVIEW_ENABLED": run_mode_env["AUDIT_CHIEF_REVIEW_ENABLED"] == "1",
+                    "AUDIT_SHADOW_RUN_MODE": run_mode_env["AUDIT_SHADOW_RUN_MODE"],
                 },
             }
 
@@ -503,7 +585,7 @@ def main() -> int:
             }
             save_report(output_path, report)
             print(f"[ERROR] project not found, report saved: {output_path}")
-            return 2
+            return 2, report, output_path
         report["checks"]["project_lookup"] = {"ok": True}
 
         prompts_resp = client.get("/api/settings/ai-prompts")
@@ -515,7 +597,7 @@ def main() -> int:
             }
             save_report(output_path, report)
             print(f"[ERROR] failed to load prompts, report saved: {output_path}")
-            return 3
+            return 3, report, output_path
 
         stages = prompts_resp.json().get("stages", [])
         relationship_stage = next((s for s in stages if s.get("stage_key") == "sheet_relationship_discovery"), None)
@@ -540,7 +622,7 @@ def main() -> int:
             }
             save_report(output_path, report)
             print(f"[ERROR] task planning timed out, report saved: {output_path}")
-            return 4
+            return 4, report, output_path
 
         if plan_resp.status_code != 200:
             report["checks"]["plan_preview"] = {
@@ -550,7 +632,7 @@ def main() -> int:
             }
             save_report(output_path, report)
             print(f"[ERROR] task planning failed, report saved: {output_path}")
-            return 4
+            return 4, report, output_path
 
         plan_payload = plan_resp.json()
         planned_version = int(plan_payload["audit_version"])
@@ -675,12 +757,54 @@ def main() -> int:
         print("[INFO] plan preview check:", json.dumps(report["checks"]["plan_preview"], ensure_ascii=False, indent=2))
         if "runtime_audit" in report["checks"]:
             print("[INFO] runtime audit check:", json.dumps(report["checks"]["runtime_audit"], ensure_ascii=False, indent=2))
-        return 0
+        return 0, report, output_path
     finally:
         if client is not None:
             client.close()
         if env_context is not None:
             env_context.__exit__(None, None, None)
+
+
+def main() -> int:
+    args = parse_args()
+    effective_modes = resolve_run_modes(args.run_mode)
+    if args.run_mode == "shadow_compare":
+        reports: Dict[str, Dict[str, Any]] = {}
+        combined_exit_code = 0
+        artifact_paths: Dict[str, str] = {}
+        for mode in effective_modes:
+            exit_code, report, output_path = _run_single_check(args, effective_run_mode=mode)
+            reports[mode] = report
+            artifact_paths[mode] = str(output_path)
+            combined_exit_code = combined_exit_code or exit_code
+
+        backend_dir = Path(__file__).resolve().parents[1]
+        output_dir = backend_dir.parent / ".artifacts" / "manual-checks"
+        combined_output_path = output_dir / _build_output_name(args, "shadow_compare")
+        combined_report = {
+            "project_id": args.project_id,
+            "run_mode": "shadow_compare",
+            "checked_at": datetime.now().isoformat(),
+            "inputs": {
+                "provider_mode": args.provider_mode,
+                "base_url": args.base_url,
+                "start_audit": args.start_audit,
+            },
+            "checks": {
+                "shadow_compare": build_shadow_compare_summary(reports),
+            },
+            "artifacts": {
+                "runs": reports,
+                "run_reports": artifact_paths,
+            },
+        }
+        save_report(combined_output_path, combined_report)
+        print(f"[INFO] shadow compare report saved: {combined_output_path}")
+        print("[INFO] shadow compare summary:", json.dumps(combined_report["checks"]["shadow_compare"], ensure_ascii=False, indent=2))
+        return combined_exit_code
+
+    exit_code, _report, _output_path = _run_single_check(args, effective_run_mode=effective_modes[0])
+    return exit_code
 
 
 if __name__ == "__main__":

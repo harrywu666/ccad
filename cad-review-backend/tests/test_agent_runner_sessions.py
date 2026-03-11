@@ -42,3 +42,28 @@ def test_runner_factory_returns_same_instance_for_same_project():
     runner_2 = ProjectAuditAgentRunner.get_or_create("proj-1", audit_version=1, provider=None)
 
     assert runner_1 is runner_2
+
+
+def test_runner_can_isolate_worker_subsessions_with_same_agent_key():
+    runner = ProjectAuditAgentRunner(project_id="proj-1", audit_version=1, provider=None)
+
+    worker_a = runner.resolve_subsession(
+        RunnerTurnRequest(
+            agent_key="review_worker_agent",
+            turn_kind="worker",
+            system_prompt="s",
+            user_prompt="u",
+            meta={"subsession_key": "review_worker_agent:task-a"},
+        )
+    )
+    worker_b = runner.resolve_subsession(
+        RunnerTurnRequest(
+            agent_key="review_worker_agent",
+            turn_kind="worker",
+            system_prompt="s",
+            user_prompt="u",
+            meta={"subsession_key": "review_worker_agent:task-b"},
+        )
+    )
+
+    assert worker_a.session_key != worker_b.session_key

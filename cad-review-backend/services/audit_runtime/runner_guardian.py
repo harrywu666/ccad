@@ -54,6 +54,7 @@ class RunnerGuardian:
         touch_runner_heartbeat(project_id, audit_version)
         return {
             "restarted": True,
+            "run_mode": snapshot.get("run_mode") or memory_payload.get("run_mode"),
             "memory": asdict(memory),
         }
 

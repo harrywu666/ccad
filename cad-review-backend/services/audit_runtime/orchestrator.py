@@ -8,7 +8,7 @@ from dataclasses import replace
 import inspect
 
 from database import SessionLocal
-from models import AuditResult
+from models import AuditResult, SheetContext, SheetEdge
 from services.audit_runtime.cancel_registry import (
     AuditCancellationRequested,
     clear_cancel_request,
@@ -17,6 +17,7 @@ from services.audit_runtime.cancel_registry import (
 from services.audit import audit_dimensions, audit_indexes, audit_materials
 from services.audit_service import match_three_lines
 from services.audit_runtime.evidence_planner import build_default_evidence_policy
+from services.audit_runtime.finding_schema import apply_finding_to_audit_result
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.visual_budget import VisualBudget, set_active_visual_budget
 from services.audit_runtime.state_transitions import (
@@ -295,6 +296,79 @@ def _orchestrator_v2_enabled() -> bool:
     }
 
 
+def _chief_review_enabled() -> bool:
+    return str(os.getenv("AUDIT_CHIEF_REVIEW_ENABLED", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _build_default_hypotheses(sheet_graph) -> list[dict]:  # noqa: ANN001
+    hypotheses: list[dict] = []
+    for index, (source_sheet_no, target_sheet_nos) in enumerate(sorted(sheet_graph.linked_targets.items())):
+        targets = [str(item).strip() for item in list(target_sheet_nos or []) if str(item).strip()]
+        if not targets:
+            continue
+        hypotheses.append(
+            {
+                "id": f"hyp-{index + 1}",
+                "topic": "跨图一致性",
+                "objective": f"复核 {source_sheet_no} 与 {', '.join(targets[:3])} 的跨图一致性",
+                "source_sheet_no": source_sheet_no,
+                "target_sheet_nos": targets,
+                "context": {},
+            }
+        )
+    return hypotheses
+
+
+async def _default_chief_worker_runner(task):  # noqa: ANN001
+    from services.audit_runtime.review_task_schema import WorkerResultCard
+
+    return WorkerResultCard(
+        task_id=task.id,
+        hypothesis_id=task.hypothesis_id,
+        worker_kind=task.worker_kind,
+        status="rejected",
+        confidence=0.35,
+        summary=f"{task.worker_kind} worker 模板已接入，但真实核查链路尚未启用",
+        meta={
+            "sheet_no": task.source_sheet_no,
+            "location": task.objective,
+            "rule_id": "CHIEF-BOOTSTRAP",
+            "evidence_pack_id": "chief_review_pack",
+        },
+    )
+
+
+def _persist_chief_findings(
+    project_id: str,
+    audit_version: int,
+    findings: list,  # noqa: ANN001
+) -> None:
+    if not findings:
+        return
+    db = SessionLocal()
+    try:
+        for finding in findings:
+            row = AuditResult(
+                project_id=project_id,
+                audit_version=audit_version,
+                type="chief_review",
+                severity=finding.severity,
+                sheet_no_a=finding.sheet_no,
+                location=finding.location,
+                description=finding.description,
+            )
+            apply_finding_to_audit_result(row, finding)
+            db.add(row)
+        db.commit()
+    finally:
+        db.close()
+
+
 def _read_budget_env(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None:
@@ -347,6 +421,19 @@ def execute_pipeline(
     worker_generation: int | None = None,
     is_current_worker=None,  # noqa: ANN001
 ) -> None:
+    if _chief_review_enabled():
+        _invoke_pipeline_impl(
+            execute_pipeline_chief_review,
+            project_id,
+            audit_version,
+            allow_incomplete=allow_incomplete,
+            clear_running=clear_running,
+            resume_existing=resume_existing,
+            worker_generation=worker_generation,
+            is_current_worker=is_current_worker,
+        )
+        return
+
     if _orchestrator_v2_enabled():
         _invoke_pipeline_impl(
             execute_pipeline_v2,
@@ -370,6 +457,284 @@ def execute_pipeline(
         worker_generation=worker_generation,
         is_current_worker=is_current_worker,
     )
+
+
+def execute_pipeline_chief_review(
+    project_id: str,
+    audit_version: int,
+    *,
+    allow_incomplete: bool = False,
+    clear_running,
+    resume_existing: bool = False,
+    worker_generation: int | None = None,
+    is_current_worker=None,  # noqa: ANN001
+) -> None:
+    from services.audit_runtime.chief_review_session import ChiefReviewSession
+    from services.audit_runtime.finding_synthesizer import synthesize_findings
+    from services.audit_runtime.review_worker_pool import ReviewWorkerPool
+    from services.audit_runtime.sheet_graph_builder import build_sheet_graph
+    from services.chief_review_memory_service import load_project_memory, save_project_memory
+
+    chief_budget = VisualBudget(
+        run_mode="chief_review",
+        image_budget=_read_budget_env("AUDIT_IMAGE_BUDGET", 200_000),
+        request_budget=_read_budget_env("AUDIT_REQUEST_BUDGET", 120),
+        retry_budget=_read_budget_env("AUDIT_RETRY_BUDGET", 20),
+        priority_reserve_budget=_read_budget_env("AUDIT_PRIORITY_RESERVE_BUDGET", 40_000),
+    )
+    set_active_visual_budget(chief_budget)
+    try:
+        _raise_if_cancelled(project_id, worker_generation=worker_generation, is_current_worker=is_current_worker)
+        _append_master_event(
+            project_id,
+            audit_version,
+            level="info",
+            step_key="prepare",
+            event_kind="phase_started",
+            progress_hint=5,
+            message="主审 Agent 正在整理这次审图需要的基础数据",
+            meta={"planner": "chief_review_agent"},
+        )
+        update_run_progress(
+            project_id,
+            audit_version,
+            status="running",
+            current_step="主审校验三线匹配",
+            progress=5,
+        )
+
+        db = SessionLocal()
+        try:
+            match_result = match_three_lines(project_id, db)
+            summary = match_result["summary"]
+            if summary["total"] == 0:
+                raise RuntimeError(
+                    "三线匹配未完成："
+                    f"总数{summary['total']}，就绪{summary['ready']}，"
+                    f"缺PNG{summary['missing_png']}，缺JSON{summary['missing_json']}，"
+                    f"都缺{summary['missing_all']}"
+                )
+            if summary["ready"] != summary["total"] and not allow_incomplete:
+                raise RuntimeError(
+                    "三线匹配未完成："
+                    f"总数{summary['total']}，就绪{summary['ready']}，"
+                    f"缺PNG{summary['missing_png']}，缺JSON{summary['missing_json']}，"
+                    f"都缺{summary['missing_all']}"
+                )
+            _append_master_event(
+                project_id,
+                audit_version,
+                level="success",
+                step_key="prepare",
+                event_kind="phase_completed",
+                progress_hint=8,
+                message=f"主审 Agent 已整理好基础数据，共 {summary['ready']} 张图纸可进入审图",
+                meta={"ready": summary["ready"], "total": summary["total"]},
+            )
+        finally:
+            db.close()
+
+        update_run_progress(
+            project_id,
+            audit_version,
+            current_step="主审构建图纸上下文",
+            progress=10,
+        )
+        db = SessionLocal()
+        try:
+            context_summary = build_sheet_contexts(project_id, db)
+            ready_count = int((context_summary or {}).get("ready_contexts", (context_summary or {}).get("ready", 0)))
+            _append_master_event(
+                project_id,
+                audit_version,
+                level="success",
+                step_key="context",
+                event_kind="phase_completed",
+                progress_hint=12,
+                message=f"主审 Agent 已整理好图纸上下文，当前有 {ready_count} 张图纸可继续分析",
+                meta=context_summary if isinstance(context_summary, dict) else None,
+            )
+
+            contexts = (
+                db.query(SheetContext)
+                .filter(SheetContext.project_id == project_id)
+                .all()
+            )
+            edges = (
+                db.query(SheetEdge)
+                .filter(SheetEdge.project_id == project_id)
+                .all()
+            )
+            sheet_graph = build_sheet_graph(sheet_contexts=contexts, sheet_edges=edges)
+            memory = load_project_memory(
+                db,
+                project_id=project_id,
+                audit_version=audit_version,
+            )
+            if not memory.get("active_hypotheses"):
+                memory = save_project_memory(
+                    db,
+                    project_id=project_id,
+                    audit_version=audit_version,
+                    payload={
+                        **memory,
+                        "sheet_graph_version": f"chief-review-{audit_version}",
+                        "sheet_summaries": [
+                            {
+                                "sheet_no": ctx.sheet_no,
+                                "sheet_name": ctx.sheet_name,
+                                "sheet_type": sheet_graph.sheet_types.get(ctx.sheet_no or "", "unknown"),
+                            }
+                            for ctx in contexts
+                        ],
+                        "confirmed_links": [
+                            {"source_sheet_no": source, "target_sheet_nos": list(targets)}
+                            for source, targets in sheet_graph.linked_targets.items()
+                        ],
+                        "active_hypotheses": _build_default_hypotheses(sheet_graph),
+                    },
+                )
+        finally:
+            db.close()
+
+        update_run_progress(
+            project_id,
+            audit_version,
+            current_step="主审规划副审任务",
+            progress=18,
+        )
+        chief_session = ChiefReviewSession(project_id=project_id, audit_version=audit_version)
+        worker_tasks = chief_session.plan_worker_tasks(memory=memory)
+        _append_master_event(
+            project_id,
+            audit_version,
+            level="info",
+            step_key="chief_planning",
+            event_kind="phase_completed",
+            progress_hint=20,
+            message=f"主审 Agent 已生成 {len(worker_tasks)} 张副审任务卡",
+            meta={"planner": "chief_review_agent", "worker_tasks": len(worker_tasks)},
+        )
+
+        worker_results = []
+        if worker_tasks:
+            pool = ReviewWorkerPool(max_concurrency=4, worker_runner=_default_chief_worker_runner)
+            worker_results = _run_async(pool.run_batch(worker_tasks)) or []
+
+        findings, escalations = synthesize_findings(worker_results=worker_results)
+        _persist_chief_findings(project_id, audit_version, findings)
+
+        if escalations:
+            _append_master_event(
+                project_id,
+                audit_version,
+                level="warning",
+                step_key="chief_review",
+                event_kind="warning",
+                progress_hint=92,
+                message=f"主审 Agent 发现 {len(escalations)} 组副审结果冲突，已升级回主审待复核",
+                meta={"escalations": escalations[:10]},
+            )
+
+        update_run_progress(
+            project_id,
+            audit_version,
+            status="done",
+            current_step="主审汇总完成",
+            progress=100,
+            total_issues=len(findings),
+            finished=True,
+        )
+        _append_master_event(
+            project_id,
+            audit_version,
+            step_key="done",
+            level="success",
+            event_kind="phase_completed",
+            progress_hint=100,
+            message=f"主审 Agent 已整理完成审核报告，共汇总 {len(findings)} 处问题",
+            meta={"planner": "chief_review_agent", "total_issues": len(findings), "escalations": len(escalations)},
+        )
+        append_result_summary_event(project_id, audit_version)
+        set_project_status(project_id, "done")
+
+        db = SessionLocal()
+        try:
+            increment_cache_version(project_id, db)
+        finally:
+            db.close()
+    except AuditSupersededError as exc:
+        _append_master_event(
+            project_id,
+            audit_version,
+            step_key="handoff",
+            level="warning",
+            event_kind="master_handoff",
+            progress_hint=0,
+            message="主审 Agent 已把现场交给新的恢复线程，当前线程准备退出",
+            meta={"reason": str(exc), "planner": "chief_review_agent"},
+        )
+    except (AuditCancelledError, AuditCancellationRequested) as exc:
+        mark_running_tasks_failed(project_id, audit_version, "cancelled_by_user")
+        db = SessionLocal()
+        try:
+            (
+                db.query(AuditResult)
+                .filter(
+                    AuditResult.project_id == project_id,
+                    AuditResult.audit_version == audit_version,
+                )
+                .delete(synchronize_session=False)
+            )
+            db.commit()
+        finally:
+            db.close()
+        update_run_progress(
+            project_id,
+            audit_version,
+            status="failed",
+            current_step="主审流程已中断",
+            error=str(exc),
+            finished=True,
+        )
+        _append_master_event(
+            project_id,
+            audit_version,
+            step_key="cancelled",
+            level="warning",
+            event_kind="warning",
+            progress_hint=100,
+            message="主审 Agent 已停止本次审图，后台任务已经结束",
+            meta={"error": str(exc), "planner": "chief_review_agent"},
+        )
+        append_result_summary_event(project_id, audit_version)
+        set_project_status(project_id, "ready")
+    except Exception as exc:  # noqa: BLE001
+        mark_running_tasks_failed(project_id, audit_version, f"chief_review_failed:{str(exc)}")
+        update_run_progress(
+            project_id,
+            audit_version,
+            status="failed",
+            current_step="主审流程失败",
+            error=str(exc),
+            finished=True,
+        )
+        _append_master_event(
+            project_id,
+            audit_version,
+            step_key="failed",
+            level="error",
+            event_kind="error",
+            progress_hint=100,
+            message="主审 Agent 在整理本次审图时遇到问题，任务已停止",
+            meta={"error": str(exc), "planner": "chief_review_agent"},
+        )
+        append_result_summary_event(project_id, audit_version)
+        set_project_status(project_id, "ready")
+    finally:
+        set_active_visual_budget(None)
+        clear_cancel_request(project_id)
+        clear_running(project_id)
 
 
 def execute_pipeline_v2(

@@ -56,6 +56,7 @@ class Project(Base):
     feedback_message_attachments = relationship("FeedbackMessageAttachment", back_populates="project", cascade="all, delete-orphan")
     feedback_learning_records = relationship("FeedbackLearningRecord", back_populates="project", cascade="all, delete-orphan")
     layout_registrations = relationship("DrawingLayoutRegistration", back_populates="project", cascade="all, delete-orphan")
+    project_memory_records = relationship("ProjectMemoryRecord", back_populates="project", cascade="all, delete-orphan")
 
 
 class AIPromptSetting(Base):
@@ -199,6 +200,23 @@ class AuditRun(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     project = relationship("Project", back_populates="audit_runs")
+
+
+class ProjectMemoryRecord(Base):
+    """主审运行记忆表"""
+    __tablename__ = "project_memory_records"
+    __table_args__ = (
+        UniqueConstraint("project_id", "audit_version", name="uq_project_memory_project_version"),
+    )
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    audit_version = Column(Integer, default=1, nullable=False)
+    memory_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    project = relationship("Project", back_populates="project_memory_records")
 
 
 class AuditRunEvent(Base):

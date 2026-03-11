@@ -21,16 +21,16 @@ def build_runner_broadcast_message(
         payload.update(meta)
 
     if normalized_state in {"started", "progress", "streaming", "completed"}:
-        return _progress_message(request, payload)
+        return _decorate_with_run_mode(_progress_message(request, payload), payload)
     if normalized_state == "waiting":
-        return f"{_progress_message(request, payload)}，这一组图纸分析时间较长，Runner 正在继续等待"
+        return _decorate_with_run_mode(f"{_progress_message(request, payload)}，这一组图纸分析时间较长，Runner 正在继续等待", payload)
     if normalized_state == "repairing":
-        return f"{_agent_name(request)} 的输出格式不太稳定，Runner 正在自动整理"
+        return _decorate_with_run_mode(f"{_agent_name(request)} 的输出格式不太稳定，Runner 正在自动整理", payload)
     if normalized_state == "retrying":
-        return f"{_agent_name(request)} 这一步刚刚卡住，Runner 正在重试"
+        return _decorate_with_run_mode(f"{_agent_name(request)} 这一步刚刚卡住，Runner 正在重试", payload)
     if normalized_state in {"deferred", "needs_review"}:
-        return f"{_agent_name(request)} 这一步暂时还没拿到稳定结果，Runner 先记下并继续处理后续步骤"
-    return f"{_agent_name(request)} 正在继续处理当前步骤"
+        return _decorate_with_run_mode(f"{_agent_name(request)} 这一步暂时还没拿到稳定结果，Runner 先记下并继续处理后续步骤", payload)
+    return _decorate_with_run_mode(f"{_agent_name(request)} 正在继续处理当前步骤", payload)
 
 
 def build_runner_broadcast_from_agent_report(agent_name: str, report) -> str:  # noqa: ANN001
@@ -67,6 +67,19 @@ def _progress_message(request: RunnerTurnRequest, meta: Dict[str, Any]) -> str:
     if turn_kind in {"planning", "task_planning"}:
         return f"{_agent_name(request)} 正在整理这次审图的基础信息"
     return f"{_agent_name(request)} 正在继续推进当前审图步骤"
+
+
+def _decorate_with_run_mode(message: str, meta: Dict[str, Any]) -> str:
+    run_mode = str(meta.get("run_mode") or "").strip().lower()
+    prefixes = {
+        "shadow_legacy": "影子旧路径：",
+        "shadow_chief_review": "影子主审路径：",
+        "chief_review": "主审路径：",
+    }
+    prefix = prefixes.get(run_mode)
+    if not prefix:
+        return message
+    return f"{prefix}{message}"
 
 
 def _int_or_none(value: Any) -> int | None:

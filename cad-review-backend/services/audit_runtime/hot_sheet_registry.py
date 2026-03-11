@@ -48,6 +48,22 @@ class HotSheetRegistry:
             )
         )
 
+    def publish_many(
+        self,
+        sheet_nos: Iterable[str | None],
+        *,
+        finding_type: str,
+        confidence: float,
+        source_agent: str,
+    ) -> None:
+        for sheet_no in sheet_nos:
+            self.publish(
+                sheet_no,
+                finding_type=finding_type,
+                confidence=confidence,
+                source_agent=source_agent,
+            )
+
     def score(self, sheet_no: str | None) -> float:
         sheet_key = normalize_sheet_no(sheet_no or "")
         if not sheet_key:

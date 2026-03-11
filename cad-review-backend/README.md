@@ -41,3 +41,24 @@
 ./venv/bin/python utils/migrate_legacy_projects.py
 ./venv/bin/python utils/migrate_legacy_projects.py --dry-run
 ```
+
+## Chief Review 影子验收
+- 从 2026-03-11 起，影子验收脚本统一使用 `utils/manual_check_ai_review_flow.py`，建议显式带上 `--provider-mode kimi_sdk`，不要依赖默认 provider。
+- 推荐命令：
+
+```bash
+cd cad-review-backend
+./venv/bin/python utils/manual_check_ai_review_flow.py --project-id <project_id> --provider-mode kimi_sdk --run-mode legacy
+./venv/bin/python utils/manual_check_ai_review_flow.py --project-id <project_id> --provider-mode kimi_sdk --run-mode chief_review
+./venv/bin/python utils/manual_check_ai_review_flow.py --project-id <project_id> --provider-mode kimi_sdk --run-mode shadow_compare
+```
+
+- 已确认的本地证据：
+  - 项目 `proj_20260309231506_001af8d5` 的最近一次正式审图记录使用的是 `kimi_sdk`，`audit_version=1`，开始时间 `2026-03-10 23:44:16`，结束时间 `2026-03-11 00:39:35`。
+  - 现有 HTTP 验收报告 `[proj_20260309231506_001af8d5-kimi_sdk-http_127.0.0.1_7002-codex-switch-check.json](/Users/harry/@dev/ccad/.artifacts/manual-checks/proj_20260309231506_001af8d5-kimi_sdk-http_127.0.0.1_7002-codex-switch-check.json)` 证明 `provider_mode=kimi_sdk` 已经能打通到后端验收链路。
+  - 影子框架相关自动化测试已覆盖 `legacy / chief_review / shadow_compare` 三种运行模式。
+
+- 当前限制：
+  - `shadow_compare` 现在验证的是“影子框架 + Kimi SDK Runner 接通”，不是“新旧主流程已经分叉后的业务对比”。
+  - 原因是截至 `2026-03-11`，后端主流程还没有真正消费 `AUDIT_CHIEF_REVIEW_ENABLED`；也就是说，`chief_review` 模式的入口和报告链路已经有了，但 orchestrator 还没切到新的主审路径。
+  - 本地 `manual_check_ai_review_flow.py` 的“计划预览”会触发较重的关系发现，因此 `shadow_compare` 实跑可能耗时很长；如果要做真实人工对比，先完成主流程切换，再用更长的 `--wait-seconds` 跑。

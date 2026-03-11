@@ -83,3 +83,16 @@ def test_runner_broadcast_hides_internal_dimension_report_raw_details():
 
     assert "这批结果有点不稳" in message
     assert "unstable_output" not in message
+
+
+def test_runner_broadcast_marks_shadow_run_mode():
+    request = _build_request()
+    request.meta["run_mode"] = "shadow_chief_review"
+
+    message = build_runner_broadcast_message(
+        request,
+        _build_subsession(),
+        state="progress",
+    )
+
+    assert "影子主审路径" in message
