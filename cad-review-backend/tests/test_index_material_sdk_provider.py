@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -9,21 +10,21 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 
-from services.audit.index_audit import _get_index_runner
-from services.audit.material_audit import _get_material_runner
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
 
 
 def test_index_runner_uses_sdk_provider_when_enabled(monkeypatch):
+    index_audit = importlib.import_module("services.audit.index_audit")
     ProjectAuditAgentRunner.clear_registry()
     monkeypatch.setenv("AUDIT_RUNNER_PROVIDER", "sdk")
 
-    runner = _get_index_runner("proj-sdk-index", 6)
+    runner = index_audit._get_index_runner("proj-sdk-index", 6)
 
     assert runner.provider.provider_name == "sdk"
 
 
 def test_index_runner_prefers_audit_run_provider_mode(monkeypatch):
+    index_audit = importlib.import_module("services.audit.index_audit")
     ProjectAuditAgentRunner.clear_registry()
     monkeypatch.setenv("AUDIT_RUNNER_PROVIDER", "api")
     monkeypatch.setattr(
@@ -31,21 +32,23 @@ def test_index_runner_prefers_audit_run_provider_mode(monkeypatch):
         lambda project_id, audit_version: "kimi_sdk",
     )
 
-    runner = _get_index_runner("proj-sdk-index", 6)
+    runner = index_audit._get_index_runner("proj-sdk-index", 6)
 
     assert runner.provider.provider_name == "sdk"
 
 
 def test_material_runner_uses_sdk_provider_when_enabled(monkeypatch):
+    material_audit = importlib.import_module("services.audit.material_audit")
     ProjectAuditAgentRunner.clear_registry()
     monkeypatch.setenv("AUDIT_RUNNER_PROVIDER", "sdk")
 
-    runner = _get_material_runner("proj-sdk-material", 8)
+    runner = material_audit._get_material_runner("proj-sdk-material", 8)
 
     assert runner.provider.provider_name == "sdk"
 
 
 def test_material_runner_prefers_audit_run_provider_mode(monkeypatch):
+    material_audit = importlib.import_module("services.audit.material_audit")
     ProjectAuditAgentRunner.clear_registry()
     monkeypatch.setenv("AUDIT_RUNNER_PROVIDER", "api")
     monkeypatch.setattr(
@@ -53,6 +56,6 @@ def test_material_runner_prefers_audit_run_provider_mode(monkeypatch):
         lambda project_id, audit_version: "kimi_sdk",
     )
 
-    runner = _get_material_runner("proj-sdk-material", 8)
+    runner = material_audit._get_material_runner("proj-sdk-material", 8)
 
     assert runner.provider.provider_name == "sdk"

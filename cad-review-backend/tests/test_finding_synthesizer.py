@@ -39,6 +39,7 @@ def test_finding_synthesizer_promotes_confirmed_worker_cards_to_findings():
     assert escalations == []
     assert len(findings) == 1
     assert findings[0].source_agent == "chief_review_agent"
+    assert findings[0].meta["execution_mode"] == "worker_result"
 
 
 def test_finding_synthesizer_escalates_conflicting_worker_cards_to_chief():
@@ -101,3 +102,28 @@ def test_finding_synthesizer_resolves_high_confidence_majority_conflict():
     assert escalations == []
     assert len(findings) == 1
     assert findings[0].triggered_by == "hyp-3"
+
+
+def test_finding_synthesizer_preserves_worker_skill_metadata():
+    findings, escalations = synthesize_findings(
+        worker_results=[
+            WorkerResultCard(
+                task_id="task-skill",
+                hypothesis_id="hyp-skill",
+                worker_kind="index_reference",
+                status="confirmed",
+                confidence=0.9,
+                summary="索引引用成立",
+                meta={
+                    "severity": "warning",
+                    "skill_mode": "worker_skill",
+                    "skill_id": "index_reference",
+                    "skill_path": "/tmp/index_reference/SKILL.md",
+                },
+            )
+        ]
+    )
+
+    assert escalations == []
+    assert findings[0].meta["execution_mode"] == "worker_skill"
+    assert findings[0].meta["skill_id"] == "index_reference"

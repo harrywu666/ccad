@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from services.audit_runtime.review_task_schema import HypothesisCard, WorkerTaskCard
+from services.audit_runtime.worker_skill_registry import is_skillized_worker
 
 
 def _infer_worker_kind(hypothesis: HypothesisCard) -> str:
@@ -53,6 +54,15 @@ class ChiefReviewSession:
         for index, raw in enumerate(active_hypotheses):
             hypothesis = _normalize_hypothesis(dict(raw or {}), index)
             worker_kind = _infer_worker_kind(hypothesis)
+            context = {
+                "project_id": self.project_id,
+                "audit_version": self.audit_version,
+                "priority": hypothesis.priority,
+                **hypothesis.context,
+            }
+            if is_skillized_worker(worker_kind):
+                context.setdefault("execution_mode", "worker_skill")
+                context.setdefault("skill_id", worker_kind)
             tasks.append(
                 WorkerTaskCard(
                     id=f"{hypothesis.id}:{worker_kind}",
@@ -62,12 +72,7 @@ class ChiefReviewSession:
                     source_sheet_no=hypothesis.source_sheet_no,
                     target_sheet_nos=list(hypothesis.target_sheet_nos),
                     anchor_hint=dict(hypothesis.context.get("anchor_hint") or {}),
-                    context={
-                        "project_id": self.project_id,
-                        "audit_version": self.audit_version,
-                        "priority": hypothesis.priority,
-                        **hypothesis.context,
-                    },
+                    context=context,
                 )
             )
         return tasks

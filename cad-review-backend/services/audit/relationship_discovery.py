@@ -122,7 +122,17 @@ def _get_relationship_runner(
     call_kimi,  # noqa: ANN001
 ) -> ProjectAuditAgentRunner:
     provider_mode = _load_requested_provider_mode(project_id, audit_version)
-    shared_context = {"project_id": project_id, "audit_version": audit_version}
+    runner_signature = (
+        f"{provider_mode or 'env'}:{id(call_kimi)}:{id(call_kimi_stream)}"
+    )
+    existing = ProjectAuditAgentRunner.get_existing(project_id, audit_version=audit_version)
+    if existing and str(existing.shared_context.get("runner_signature") or "") != runner_signature:
+        ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
+    shared_context = {
+        "project_id": project_id,
+        "audit_version": audit_version,
+        "runner_signature": runner_signature,
+    }
     if provider_mode:
         shared_context["provider_mode"] = provider_mode
     return ProjectAuditAgentRunner.get_or_create(

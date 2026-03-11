@@ -324,6 +324,7 @@ def test_default_chief_worker_runner_prefers_native_worker(monkeypatch):
 
 def test_native_review_worker_returns_native_card_for_index_reference(monkeypatch):
     review_worker_runtime = importlib.import_module("services.audit_runtime.review_worker_runtime")
+    index_skill = importlib.import_module("services.audit_runtime.worker_skills.index_reference_skill")
     index_audit = importlib.import_module("services.audit.index_audit")
     review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
 
@@ -357,8 +358,8 @@ def test_native_review_worker_returns_native_card_for_index_reference(monkeypatc
     monkeypatch.setattr(index_audit, "_review_index_issue_candidates_async", lambda *args, **kwargs: [])
     monkeypatch.setattr(index_audit, "_reviewable_index_issue", lambda kind: True)
     monkeypatch.setattr(index_audit, "_apply_index_finding", lambda issue, candidate: issue)
-    monkeypatch.setattr(review_worker_runtime, "load_runtime_skill_profile", lambda *args, **kwargs: {})
-    monkeypatch.setattr(review_worker_runtime, "load_feedback_runtime_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(index_skill, "load_runtime_skill_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(index_skill, "load_feedback_runtime_profile", lambda *args, **kwargs: {})
     monkeypatch.setattr(
         index_audit,
         "_index_issue_evidence",
@@ -390,6 +391,8 @@ def test_native_review_worker_returns_native_card_for_index_reference(monkeypatc
     assert result is not None
     assert result.status == "confirmed"
     assert result.meta["compat_mode"] == "native_worker"
+    assert result.meta["skill_mode"] == "worker_skill"
+    assert result.meta["skill_id"] == "index_reference"
     assert result.meta["issue_count"] == 1
 
 
@@ -446,6 +449,7 @@ def test_default_chief_worker_runner_prefers_native_index_worker(monkeypatch):
 
 def test_native_review_worker_returns_native_card_for_material_semantic_consistency(monkeypatch):
     review_worker_runtime = importlib.import_module("services.audit_runtime.review_worker_runtime")
+    material_skill = importlib.import_module("services.audit_runtime.worker_skills.material_semantic_skill")
     material_audit = importlib.import_module("services.audit.material_audit")
     review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
 
@@ -475,8 +479,8 @@ def test_native_review_worker_returns_native_card_for_material_semantic_consiste
     )
     monkeypatch.setattr(material_audit, "_apply_material_finding", lambda issue: issue)
     monkeypatch.setattr(material_audit, "_run_material_ai_reviews_bounded", lambda *args, **kwargs: [])
-    monkeypatch.setattr(review_worker_runtime, "load_runtime_skill_profile", lambda *args, **kwargs: {})
-    monkeypatch.setattr(review_worker_runtime, "load_feedback_runtime_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(material_skill, "load_runtime_skill_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(material_skill, "load_feedback_runtime_profile", lambda *args, **kwargs: {})
     monkeypatch.setattr(
         material_audit,
         "_material_issue_evidence",
@@ -508,6 +512,8 @@ def test_native_review_worker_returns_native_card_for_material_semantic_consiste
     assert result is not None
     assert result.status == "confirmed"
     assert result.meta["compat_mode"] == "native_worker"
+    assert result.meta["skill_mode"] == "worker_skill"
+    assert result.meta["skill_id"] == "material_semantic_consistency"
     assert result.meta["issue_count"] == 1
 
 

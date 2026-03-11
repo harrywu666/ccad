@@ -53,6 +53,13 @@ def _to_finding(result: WorkerResultCard) -> Finding:
         review_round=max(1, int(result.meta.get("review_round") or 1)),
         triggered_by=result.hypothesis_id,
         description=result.summary,
+        meta={
+            "execution_mode": str(
+                result.meta.get("skill_mode") or result.meta.get("execution_mode") or "worker_result"
+            ).strip(),
+            "skill_id": str(result.meta.get("skill_id") or "").strip(),
+            "skill_path": str(result.meta.get("skill_path") or "").strip(),
+        },
     )
 
 

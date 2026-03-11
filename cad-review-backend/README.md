@@ -41,3 +41,8 @@
 ./venv/bin/python utils/migrate_legacy_projects.py
 ./venv/bin/python utils/migrate_legacy_projects.py --dry-run
 ```
+
+## Chief Review Worker Skills
+- 当前已 skill 化的副审能力：`index_reference`、`material_semantic_consistency`
+- skill 资源目录：`agents/review_worker/skills/*/SKILL.md`
+- 运行时骨架仍在 `services/audit_runtime/*`，这轮没有把 `chief_review / runner / observer / recovery` 抽成 skill
