@@ -762,10 +762,13 @@ def _dispatch_runner_observer(
     observer = ProjectRunnerObserverSession.get_or_create(
         project_id,
         audit_version=audit_version,
+        provider_mode=provider_mode,
         provider=build_runner_provider(requested_mode=provider_mode)
         if (use_active_provider and provider_mode)
         else _PassiveObserverProvider(),
     )
+    if hasattr(observer, "should_observe") and not observer.should_observe():
+        return
     try:
         decision = _run_async(
             observer.observe(

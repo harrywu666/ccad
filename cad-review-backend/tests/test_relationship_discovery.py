@@ -194,10 +194,7 @@ def test_group_sheets_honors_configured_group_size(monkeypatch, tmp_path):
 
 def test_discover_group_ignores_legacy_business_timeout_env(monkeypatch, tmp_path):
     _, _, relationship_discovery = _load_modules(monkeypatch, tmp_path)
-
-    async def slow_call_kimi(**kwargs):  # noqa: ANN001
-        await relationship_discovery.asyncio.sleep(0.05)
-        return [{"source": "A1.01", "target": "A4.01"}]
+    monkeypatch.setenv("AUDIT_KIMI_STREAM_ENABLED", "0")
 
     def fake_pdf_page_to_5images(pdf_path: str, page_index: int, overlap: float, **kwargs):
         return {
@@ -214,6 +211,20 @@ def test_discover_group_ignores_legacy_business_timeout_env(monkeypatch, tmp_pat
         "pdf_page_to_5images",
         fake_pdf_page_to_5images,
     )
+    class _FakeRunner:
+        async def run_once(self, request):  # noqa: ANN001
+            return relationship_discovery.RunnerTurnResult(
+                provider_name="api",
+                output=[{"source": "A1.01", "target": "A4.01"}],
+                status="ok",
+                raw_output="[]",
+            )
+
+    monkeypatch.setattr(
+        relationship_discovery,
+        "_get_relationship_runner",
+        lambda *args, **kwargs: _FakeRunner(),
+    )
 
     result = relationship_discovery.asyncio.run(
         relationship_discovery._discover_group(
@@ -227,11 +238,133 @@ def test_discover_group_ignores_legacy_business_timeout_env(monkeypatch, tmp_pat
                 }
             ],
             [{"图号": "A1.01", "图名": "平面布置图"}],
-            slow_call_kimi,
+            lambda **kwargs: [],
+            project_id="proj-rel-timeout",
+            audit_version=1,
         )
     )
 
     assert result == [{"source": "A1.01", "target": "A4.01"}]
+
+
+def test_discover_group_stream_uses_unique_subsession_key(monkeypatch, tmp_path):
+    _, _, relationship_discovery = _load_modules(monkeypatch, tmp_path)
+    monkeypatch.setenv("AUDIT_KIMI_STREAM_ENABLED", "1")
+
+    captured_meta: list[dict[str, object]] = []
+
+    class _FakeRunner:
+        async def run_stream(self, request, should_cancel=None):  # noqa: ANN001
+            del should_cancel
+            captured_meta.append(dict(request.meta or {}))
+            return relationship_discovery.RunnerTurnResult(
+                provider_name="sdk",
+                output=[],
+                status="ok",
+                raw_output="[]",
+            )
+
+    monkeypatch.setattr(
+        relationship_discovery,
+        "_get_relationship_runner",
+        lambda *args, **kwargs: _FakeRunner(),
+    )
+    monkeypatch.setattr(
+        relationship_discovery,
+        "pdf_page_to_5images",
+        lambda *args, **kwargs: {
+            "full": b"full",
+            "top_left": b"top_left",
+            "top_right": b"top_right",
+            "bottom_left": b"bottom_left",
+            "bottom_right": b"bottom_right",
+        },
+    )
+
+    result = relationship_discovery.asyncio.run(
+        relationship_discovery._discover_group(
+            [
+                {
+                    "sheet_no": "A1.01",
+                    "sheet_name": "平面布置图",
+                    "pdf_path": "/tmp/a101.pdf",
+                    "page_index": 0,
+                    "indexes_json": [],
+                },
+                {
+                    "sheet_no": "A4.01",
+                    "sheet_name": "节点详图",
+                    "pdf_path": "/tmp/a401.pdf",
+                    "page_index": 1,
+                    "indexes_json": [],
+                },
+            ],
+            [{"图号": "A1.01", "图名": "平面布置图"}, {"图号": "A4.01", "图名": "节点详图"}],
+            lambda **kwargs: [],
+            project_id="proj-rel-stream",
+            audit_version=7,
+        )
+    )
+
+    assert result == []
+    assert captured_meta[0]["subsession_key"].startswith("legacy_group:")
+
+
+def test_relationship_candidate_review_stream_uses_unique_subsession_key(monkeypatch, tmp_path):
+    _, _, relationship_discovery = _load_modules(monkeypatch, tmp_path)
+    monkeypatch.setenv("AUDIT_KIMI_STREAM_ENABLED", "1")
+
+    captured_meta: list[dict[str, object]] = []
+
+    class _FakeEvidenceService:
+        async def get_evidence_pack(self, request):
+            return relationship_discovery.EvidencePack(
+                pack_type=request.pack_type,
+                images={"source_full": b"source", "target_full": b"target"},
+                source_pdf_path=request.source_pdf_path,
+                source_page_index=request.source_page_index,
+                target_pdf_path=request.target_pdf_path,
+                target_page_index=request.target_page_index,
+            )
+
+    class _FakeRunner:
+        async def run_stream(self, request, should_cancel=None):  # noqa: ANN001
+            del should_cancel
+            captured_meta.append(dict(request.meta or {}))
+            return relationship_discovery.RunnerTurnResult(
+                provider_name="sdk",
+                output=[],
+                status="ok",
+                raw_output="[]",
+            )
+
+    monkeypatch.setattr(relationship_discovery, "_get_relationship_runner", lambda *args, **kwargs: _FakeRunner())
+
+    result = relationship_discovery.asyncio.run(
+        relationship_discovery._discover_relationship_task_v2(
+            source_sheet={
+                "sheet_no": "A1.01",
+                "sheet_name": "平面图",
+                "pdf_path": "/tmp/a101.pdf",
+                "page_index": 0,
+            },
+            target_sheet={
+                "sheet_no": "A4.01",
+                "sheet_name": "节点详图",
+                "pdf_path": "/tmp/a401.pdf",
+                "page_index": 1,
+            },
+            call_kimi=lambda **kwargs: [],
+            project_id="proj-rel-stream",
+            audit_version=7,
+            evidence_service=_FakeEvidenceService(),
+            skill_profile={},
+            feedback_profile={},
+        )
+    )
+
+    assert result == []
+    assert captured_meta[0]["subsession_key"].startswith("candidate_review:")
 
 
 def test_discover_relationships_ignores_legacy_total_timeout_env(monkeypatch, tmp_path):
@@ -304,3 +437,68 @@ def test_load_ready_sheets_uses_png_path_when_drawing_has_no_file_path(monkeypat
     assert len(sheets) == 1
     assert sheets[0]["pdf_path"] == str(pdf_path)
     assert sheets[0]["page_index"] == 2
+
+
+def test_load_ready_sheets_honors_worker_sheet_filters(monkeypatch, tmp_path):
+    database, models, relationship_discovery = _load_modules(monkeypatch, tmp_path)
+
+    pdf_dir = tmp_path / "pngs-filter"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = pdf_dir / "sheet.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    for name in ("a101.png", "a401.png", "a501.png"):
+        (pdf_dir / name).write_bytes(b"fake-png")
+
+    empty_json = tmp_path / "empty-filter.json"
+    empty_json.write_text('{"indexes":[]}', encoding="utf-8")
+
+    db = database.SessionLocal()
+    try:
+        db.add(models.Project(id="proj-rel-filter", name="Relationship Filter"))
+        for index, (sheet_no, png_name) in enumerate(
+            [("A1.01", "a101.png"), ("A4.01", "a401.png"), ("A5.01", "a501.png")],
+            start=1,
+        ):
+            catalog_id = f"cat-{index}"
+            db.add(
+                models.Catalog(
+                    id=catalog_id,
+                    project_id="proj-rel-filter",
+                    sheet_no=sheet_no,
+                    sheet_name=f"图纸 {sheet_no}",
+                    status="locked",
+                    sort_order=index,
+                )
+            )
+            db.add(
+                models.JsonData(
+                    id=f"json-{index}",
+                    project_id="proj-rel-filter",
+                    catalog_id=catalog_id,
+                    sheet_no=sheet_no,
+                    json_path=str(empty_json),
+                    is_latest=1,
+                )
+            )
+            db.add(
+                models.Drawing(
+                    id=f"drawing-{index}",
+                    project_id="proj-rel-filter",
+                    catalog_id=catalog_id,
+                    sheet_no=sheet_no,
+                    png_path=str(pdf_dir / png_name),
+                    page_index=index - 1,
+                    status="matched",
+                )
+            )
+        db.commit()
+
+        sheets = relationship_discovery._load_ready_sheets(
+            "proj-rel-filter",
+            db,
+            sheet_filters=["A1.01", "A4.01"],
+        )
+    finally:
+        db.close()
+
+    assert [item["sheet_no"] for item in sheets] == ["A1.01", "A4.01"]

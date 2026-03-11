@@ -52,11 +52,11 @@ async def _maybe_await(result) -> None:  # noqa: ANN001
 def _idle_timeout_seconds() -> float:
     raw = os.getenv("AUDIT_SDK_STREAM_IDLE_TIMEOUT_SECONDS")
     if raw is None:
-        return 0.0
+        return 45.0
     try:
         value = float(str(raw).strip())
     except (TypeError, ValueError):
-        return 0.0
+        return 45.0
     return value if value > 0 else 0.0
 
 
@@ -69,6 +69,39 @@ def _cancel_poll_interval_seconds() -> float:
     except (TypeError, ValueError):
         return 0.25
     return max(0.05, value)
+
+
+def _sdk_max_concurrency() -> int:
+    raw = os.getenv("AUDIT_KIMI_SDK_MAX_CONCURRENCY")
+    if raw is None:
+        return 6
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 6
+    return max(1, min(30, value))
+
+
+def _sdk_rate_limit_cooldown_seconds() -> float:
+    raw = os.getenv("AUDIT_KIMI_SDK_RATE_LIMIT_COOLDOWN_SECONDS")
+    if raw is None:
+        return 20.0
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return 20.0
+    return max(1.0, min(300.0, value))
+
+
+def _sdk_rate_limit_retry_limit() -> int:
+    raw = os.getenv("AUDIT_KIMI_SDK_RATE_LIMIT_RETRY_LIMIT")
+    if raw is None:
+        return 8
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 8
+    return max(1, min(20, value))
 
 
 class SdkStreamIdleTimeoutError(RuntimeError):
@@ -84,6 +117,10 @@ class SdkStreamIdleTimeoutError(RuntimeError):
 
 class KimiSdkProvider(BaseRunnerProvider):
     provider_name = "sdk"
+    _global_limiters: dict[tuple[int, int], asyncio.Semaphore] = {}
+    _global_limiters_lock = threading.Lock()
+    _rate_limit_cooldown_until = 0.0
+    _rate_limit_cooldown_lock = threading.Lock()
 
     def __init__(
         self,
@@ -109,6 +146,52 @@ class KimiSdkProvider(BaseRunnerProvider):
         return await self.run_stream(request, subsession)
 
     async def run_stream(
+        self,
+        request: RunnerTurnRequest,
+        subsession: RunnerSubsession,
+        *,
+        on_event: Optional[StreamCallback] = None,
+        should_cancel=None,  # noqa: ANN001
+    ) -> RunnerTurnResult:
+        release_slot = await self._acquire_global_slot(should_cancel=should_cancel)
+        try:
+            retry_limit = _sdk_rate_limit_retry_limit()
+            attempt = 0
+            while True:
+                await self._wait_for_rate_limit_cooldown(should_cancel=should_cancel)
+                try:
+                    return await self._run_stream_impl(
+                        request,
+                        subsession,
+                        on_event=on_event,
+                        should_cancel=should_cancel,
+                    )
+                except Exception as exc:
+                    if not self._is_rate_limit_error(exc) or attempt >= retry_limit:
+                        raise
+                    attempt += 1
+                    delay = _sdk_rate_limit_cooldown_seconds() * attempt
+                    self._extend_rate_limit_cooldown(delay)
+                    await _emit_stream_event(
+                        on_event,
+                        ProviderStreamEvent(
+                            event_kind="phase_event",
+                            text=f"Kimi Code 当前限流，Runner 将在 {delay:.1f}s 后重试",
+                            meta={
+                                "reason": "429",
+                                "attempt": attempt,
+                                "retry_delay_seconds": delay,
+                            },
+                        ),
+                    )
+                    await self._sleep_with_cancel(
+                        delay,
+                        should_cancel=should_cancel,
+                    )
+        finally:
+            release_slot()
+
+    async def _run_stream_impl(
         self,
         request: RunnerTurnRequest,
         subsession: RunnerSubsession,
@@ -223,6 +306,80 @@ class KimiSdkProvider(BaseRunnerProvider):
             if raw_output
             else [],
         )
+
+    async def _acquire_global_slot(self, *, should_cancel=None):  # noqa: ANN001
+        limiter = self._global_semaphore()
+        acquire_task = asyncio.create_task(limiter.acquire())
+        acquired = False
+        poll_interval = _cancel_poll_interval_seconds()
+        try:
+            while not acquire_task.done():
+                done, _pending = await asyncio.wait(
+                    {acquire_task},
+                    timeout=poll_interval,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if done:
+                    break
+                if should_cancel and should_cancel():
+                    acquire_task.cancel()
+                    await asyncio.gather(acquire_task, return_exceptions=True)
+                    raise AuditCancellationRequested("用户手动中断审核")
+            await acquire_task
+            acquired = True
+        except Exception:
+            if acquired:
+                limiter.release()
+            raise
+
+        def _release() -> None:
+            limiter.release()
+
+        return _release
+
+    async def _wait_for_rate_limit_cooldown(self, *, should_cancel=None) -> None:  # noqa: ANN001
+        while True:
+            with self._rate_limit_cooldown_lock:
+                remaining = max(0.0, self._rate_limit_cooldown_until - time.monotonic())
+            if remaining <= 0:
+                return
+            await self._sleep_with_cancel(min(remaining, 1.0), should_cancel=should_cancel)
+
+    @classmethod
+    def _extend_rate_limit_cooldown(cls, delay_seconds: float) -> None:
+        until = time.monotonic() + max(0.0, delay_seconds)
+        with cls._rate_limit_cooldown_lock:
+            cls._rate_limit_cooldown_until = max(cls._rate_limit_cooldown_until, until)
+
+    async def _sleep_with_cancel(self, delay_seconds: float, *, should_cancel=None) -> None:  # noqa: ANN001
+        deadline = time.monotonic() + max(0.0, delay_seconds)
+        poll_interval = _cancel_poll_interval_seconds()
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            if should_cancel and should_cancel():
+                raise AuditCancellationRequested("用户手动中断审核")
+            await asyncio.sleep(min(poll_interval, remaining))
+
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        text = str(exc or "").strip().lower()
+        if "rate_limit_reached_error" in text:
+            return True
+        return "429" in text and "too many requests" in text
+
+    @classmethod
+    def _global_semaphore(cls) -> asyncio.Semaphore:
+        limit = _sdk_max_concurrency()
+        loop = asyncio.get_running_loop()
+        key = (id(loop), limit)
+        with cls._global_limiters_lock:
+            limiter = cls._global_limiters.get(key)
+            if limiter is None:
+                limiter = asyncio.Semaphore(limit)
+                cls._global_limiters[key] = limiter
+            return limiter
 
     async def observe_once(
         self,

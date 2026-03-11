@@ -71,3 +71,27 @@ def test_observer_session_updates_memory_after_observe():
     assert session.memory.project_summary == "尺寸复核 正常推进"
     assert session.memory.recent_events[-1]["event_kind"] == "runner_broadcast"
     assert session.memory.recent_decisions[-1]["suggested_action"] == "observe_only"
+
+
+def test_observer_session_debounces_frequent_llm_calls(monkeypatch):
+    ProjectRunnerObserverSession.clear_registry()
+    monkeypatch.setenv("AUDIT_RUNNER_OBSERVER_MIN_INTERVAL_SECONDS", "60")
+
+    session = ProjectRunnerObserverSession.get_or_create(
+        "proj-3",
+        audit_version=4,
+        provider=FakeObserverProvider(),
+        provider_mode="kimi_sdk",
+    )
+
+    assert session.should_observe() is True
+
+    snapshot = build_observer_snapshot(
+        project_id="proj-3",
+        audit_version=4,
+        runtime_status={"status": "running", "current_step": "关系复核"},
+        recent_events=[],
+    )
+    asyncio.run(session.observe(snapshot))
+
+    assert session.should_observe() is False

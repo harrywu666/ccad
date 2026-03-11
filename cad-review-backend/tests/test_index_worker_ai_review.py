@@ -264,3 +264,89 @@ def test_index_audit_reports_grounding_failure_to_runner(monkeypatch, tmp_path):
     assert issues == []
     assert len(captured_reports) == 1
     assert captured_reports[0].runner_help_request == "restart_subsession"
+
+
+def test_collect_index_issue_candidates_respects_target_sheet_filters(monkeypatch, tmp_path):
+    database, models, index_audit = _load_modules(monkeypatch, tmp_path)
+
+    source_json = tmp_path / "source-target-filter.json"
+    target_a_json = tmp_path / "target-a.json"
+    target_b_json = tmp_path / "target-b.json"
+    source_json.write_text(
+        (
+            '{"indexes":['
+            '{"index_no":"D1","target_sheet":"A4.01","grid":"F11"},'
+            '{"index_no":"D2","target_sheet":"A5.01","grid":"F12"},'
+            '{"index_no":"D3","target_sheet":"","grid":"F13"}'
+            '],"title_blocks":[]}'
+        ),
+        encoding="utf-8",
+    )
+    target_a_json.write_text('{"indexes":[],"title_blocks":[],"detail_titles":[]}', encoding="utf-8")
+    target_b_json.write_text('{"indexes":[],"title_blocks":[],"detail_titles":[]}', encoding="utf-8")
+
+    db = database.SessionLocal()
+    try:
+        db.add(models.Project(id="proj-index-target-filter", name="Index Target Filter"))
+        db.add_all(
+            [
+                models.Catalog(
+                    id="cat-source",
+                    project_id="proj-index-target-filter",
+                    sheet_no="A1.01",
+                    sheet_name="首层平面图",
+                    status="locked",
+                ),
+                models.Catalog(
+                    id="cat-target-a",
+                    project_id="proj-index-target-filter",
+                    sheet_no="A4.01",
+                    sheet_name="节点详图A",
+                    status="locked",
+                ),
+                models.Catalog(
+                    id="cat-target-b",
+                    project_id="proj-index-target-filter",
+                    sheet_no="A5.01",
+                    sheet_name="节点详图B",
+                    status="locked",
+                ),
+                models.JsonData(
+                    id="json-source-target-filter",
+                    project_id="proj-index-target-filter",
+                    sheet_no="A1.01",
+                    json_path=str(source_json),
+                    is_latest=1,
+                ),
+                models.JsonData(
+                    id="json-target-a",
+                    project_id="proj-index-target-filter",
+                    sheet_no="A4.01",
+                    json_path=str(target_a_json),
+                    is_latest=1,
+                ),
+                models.JsonData(
+                    id="json-target-b",
+                    project_id="proj-index-target-filter",
+                    sheet_no="A5.01",
+                    json_path=str(target_b_json),
+                    is_latest=1,
+                ),
+            ]
+        )
+        db.commit()
+
+        candidates = index_audit._collect_index_issue_candidates(
+            "proj-index-target-filter",
+            1,
+            db,
+            alias_map={},
+            source_sheet_filters=["A1.01"],
+            target_sheet_filters=["A4.01"],
+        )
+    finally:
+        db.close()
+
+    assert len(candidates) == 1
+    assert candidates[0]["target_sheet_no"] == "A4.01"
+    assert candidates[0]["review_kind"] == "missing_target_index_no"

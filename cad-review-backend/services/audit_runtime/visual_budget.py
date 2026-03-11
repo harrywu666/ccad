@@ -12,6 +12,7 @@ _ACTIVE_BUDGET = local()
 
 @dataclass
 class VisualBudget:
+    run_mode: str = "legacy"
     image_budget: int = 200_000
     request_budget: int = 120
     retry_budget: int = 20
@@ -52,6 +53,7 @@ class VisualBudget:
 
     def snapshot(self) -> dict[str, int]:
         return {
+            "run_mode": self.run_mode,
             "image_budget": self.image_budget,
             "request_budget": self.request_budget,
             "retry_budget": self.retry_budget,

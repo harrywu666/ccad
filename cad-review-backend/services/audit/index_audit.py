@@ -26,6 +26,7 @@ from services.audit_runtime.evidence_service import get_evidence_service
 from services.audit_runtime.finding_schema import Finding, GroundingRequiredError, apply_finding_to_audit_result
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider
+from services.audit_runtime.review_task_schema import WorkerResultCard, WorkerTaskCard
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
 from services.audit_runtime.state_transitions import (
@@ -45,19 +46,129 @@ from services.skill_pack_service import (
 )
 
 
+def _index_issue_evidence(issue: AuditResult) -> Dict[str, Any]:
+    try:
+        payload = json.loads(str(issue.evidence_json or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        payload = {}
+    anchors = list(payload.get("anchors") or [])
+    anchor = dict(anchors[0] or {}) if anchors else {}
+    return {
+        "sheet_no": str(anchor.get("sheet_no") or issue.sheet_no_a or "UNKNOWN").strip() or "UNKNOWN",
+        "location": str(anchor.get("grid") or issue.location or "未定位").strip() or "未定位",
+        "rule_id": str(issue.rule_id or "index_visual_review").strip() or "index_visual_review",
+        "evidence_pack_id": str(issue.evidence_pack_id or "paired_overview_pack").strip() or "paired_overview_pack",
+        "description": str(issue.description or "").strip(),
+        "severity": str(issue.severity or "warning").strip().lower() or "warning",
+    }
+
+
+def _index_worker_result_from_issues(task: WorkerTaskCard, issues: List[AuditResult]) -> WorkerResultCard:
+    if not issues:
+        return WorkerResultCard(
+            task_id=task.id,
+            hypothesis_id=task.hypothesis_id,
+            worker_kind=task.worker_kind,
+            status="rejected",
+            confidence=0.73,
+            summary=f"旧索引审查入口已作为 worker 包装层执行，{task.source_sheet_no} 未发现索引问题",
+            meta={
+                "compat_mode": "worker_wrapper",
+                "sheet_no": task.source_sheet_no,
+                "location": task.objective,
+                "rule_id": "index_visual_review",
+                "evidence_pack_id": "paired_overview_pack",
+                "issue_count": 0,
+            },
+        )
+
+    evidence = [_index_issue_evidence(issue) for issue in issues[:5]]
+    first = evidence[0]
+    confidence_values = [
+        float(issue.confidence)
+        for issue in issues
+        if isinstance(issue.confidence, (int, float))
+    ]
+    confidence = max(confidence_values) if confidence_values else 0.82
+    status = "confirmed"
+    if any(str(issue.finding_status or "").strip().lower() == "needs_review" for issue in issues):
+        status = "needs_review"
+    return WorkerResultCard(
+        task_id=task.id,
+        hypothesis_id=task.hypothesis_id,
+        worker_kind=task.worker_kind,
+        status=status,
+        confidence=confidence,
+        summary=str(issues[0].description or f"旧索引审查入口返回 {len(issues)} 处索引问题").strip(),
+        evidence=evidence,
+        escalate_to_chief=(status == "needs_review"),
+        meta={
+            "compat_mode": "worker_wrapper",
+            "sheet_no": first["sheet_no"],
+            "location": first["location"],
+            "rule_id": first["rule_id"],
+            "evidence_pack_id": first["evidence_pack_id"],
+            "severity": first["severity"],
+            "issue_count": len(issues),
+            "review_round": max(int(issue.review_round or 1) for issue in issues),
+        },
+    )
+
+
+def run_index_worker_wrapper(
+    project_id: str,
+    audit_version: int,
+    db,
+    task: WorkerTaskCard,
+) -> WorkerResultCard:
+    issues = audit_indexes(
+        project_id,
+        audit_version,
+        db,
+        source_sheet_filters=[task.source_sheet_no] if str(task.source_sheet_no or "").strip() else None,
+    )
+    return _index_worker_result_from_issues(task, issues)
+
+
 def _get_index_runner(
     project_id: str,
     audit_version: int,
 ) -> ProjectAuditAgentRunner:
+    provider_mode = _load_requested_provider_mode(project_id, audit_version)
+    shared_context = {"project_id": project_id, "audit_version": audit_version}
+    if provider_mode:
+        shared_context["provider_mode"] = provider_mode
     return ProjectAuditAgentRunner.get_or_create(
         project_id,
         audit_version=audit_version,
         provider=build_runner_provider(
+            requested_mode=provider_mode,
             run_once_func=call_kimi,
             run_stream_func=call_kimi_stream,
         ),
-        shared_context={"project_id": project_id, "audit_version": audit_version},
+        shared_context=shared_context,
     )
+
+
+def _load_requested_provider_mode(project_id: str, audit_version: int) -> Optional[str]:
+    from database import SessionLocal
+    from models import AuditRun
+
+    db = SessionLocal()
+    try:
+        run = (
+            db.query(AuditRun)
+            .filter(
+                AuditRun.project_id == project_id,
+                AuditRun.audit_version == audit_version,
+            )
+            .order_by(AuditRun.created_at.desc())
+            .first()
+        )
+        value = str(getattr(run, "provider_mode", "") or "").strip()
+        return value or None
+    finally:
+        db.close()
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -639,23 +750,16 @@ def _issue_index(
     )
 
 
-# 功能说明：执行图纸索引关系审核，检查索引指向的有效性和一致性
-def audit_indexes(
+def _collect_index_issue_candidates(
     project_id: str,
     audit_version: int,
     db,
+    *,
+    alias_map: Dict[str, str],
     source_sheet_filters: Optional[List[str]] = None,
-    hot_sheet_registry: HotSheetRegistry | None = None,
-) -> List[AuditResult]:
-    alias_map = build_index_alias_map(load_active_skill_rules(db, skill_type="index"))
-    skill_profile = load_runtime_skill_profile(
-        db,
-        skill_type="index",
-        stage_key="index_visual_review",
-    )
-    feedback_profile = load_feedback_runtime_profile(db, issue_type="index")
-
-    # 从目录中学习本项目的图号命名规律，用于过滤分图号假阳性
+    target_sheet_filters: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """构造索引问题候选，供主流程和原生 worker 共用。"""
     catalog_sheet_nos = [
         c.sheet_no
         for c in db.query(Catalog).filter(
@@ -676,6 +780,14 @@ def audit_indexes(
         }
         if not allowed_source_keys:
             return []
+
+    allowed_target_keys: Optional[set[str]] = None
+    if target_sheet_filters:
+        allowed_target_keys = {
+            canonicalize_sheet_key(item, alias_map)
+            for item in target_sheet_filters
+            if canonicalize_sheet_key(item, alias_map)
+        }
 
     json_list = (
         db.query(JsonData)
@@ -735,15 +847,12 @@ def audit_indexes(
                 if source_anchor and idx_key not in sheet_index_anchor_map[src_key]:
                     sheet_index_anchor_map[src_key][idx_key] = source_anchor
 
-            # 本图索引（下方为短横线）：不涉及跨图验证，直接跳过
             if idx.get("same_sheet"):
                 continue
 
             if not idx_key and not tgt_key:
                 continue
 
-            # 用目录学到的图号格式校验 target_sheet：
-            # 若 target 不像本项目的图号（如分图号 "A"、"01"），直接丢弃，不报错
             if raw_target_sheet and not is_plausible_sheet(raw_target_sheet):
                 continue
 
@@ -779,6 +888,8 @@ def audit_indexes(
     for rel in forward_links:
         if allowed_source_keys is not None and rel["source_key"] not in allowed_source_keys:
             continue
+        if allowed_target_keys is not None and rel["target_key"] not in allowed_target_keys:
+            continue
         tgt_key = rel["target_key"]
         if tgt_key not in existing_sheets:
             anchors = [rel["source_anchor"]] if rel.get("source_anchor") else []
@@ -811,6 +922,8 @@ def audit_indexes(
 
     for rel in forward_links:
         if allowed_source_keys is not None and rel["source_key"] not in allowed_source_keys:
+            continue
+        if allowed_target_keys is not None and rel["target_key"] not in allowed_target_keys:
             continue
         tgt_key = rel["target_key"]
         idx_key = rel["index_key"]
@@ -850,6 +963,8 @@ def audit_indexes(
 
     for rel in forward_links:
         if allowed_source_keys is not None and rel["source_key"] not in allowed_source_keys:
+            continue
+        if allowed_target_keys is not None and rel["target_key"] not in allowed_target_keys:
             continue
         src_key = rel["source_key"]
         tgt_key = rel["target_key"]
@@ -902,6 +1017,8 @@ def audit_indexes(
     for orphan in orphan_candidates:
         if allowed_source_keys is not None and orphan["source_key"] not in allowed_source_keys:
             continue
+        if allowed_target_keys is not None:
+            continue
         pair = (orphan["source_key"], orphan["index_key"])
         if pair in referenced_targets:
             continue
@@ -931,6 +1048,31 @@ def audit_indexes(
                 "index_no": orphan["index_raw"] or "?",
             }
         )
+    return issue_candidates
+
+
+# 功能说明：执行图纸索引关系审核，检查索引指向的有效性和一致性
+def audit_indexes(
+    project_id: str,
+    audit_version: int,
+    db,
+    source_sheet_filters: Optional[List[str]] = None,
+    hot_sheet_registry: HotSheetRegistry | None = None,
+) -> List[AuditResult]:
+    alias_map = build_index_alias_map(load_active_skill_rules(db, skill_type="index"))
+    skill_profile = load_runtime_skill_profile(
+        db,
+        skill_type="index",
+        stage_key="index_visual_review",
+    )
+    feedback_profile = load_feedback_runtime_profile(db, issue_type="index")
+    issue_candidates = _collect_index_issue_candidates(
+        project_id,
+        audit_version,
+        db,
+        alias_map=alias_map,
+        source_sheet_filters=source_sheet_filters,
+    )
 
     reviewable_candidates = [
         candidate
