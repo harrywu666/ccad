@@ -14,7 +14,17 @@ import type {
   ThreeLineMatch,
   AuditResultPreview,
 } from '@/types';
-import type { AuditEventsResponse, AuditProviderMode, SkillPackItem, SkillPackListResponse, SkillTypesResponse } from '@/types/api';
+import type {
+  AuditEventsResponse,
+  AuditProviderMode,
+  AuditRuntimeSummaryResponse,
+  FeedbackAgentPromptAssetsResponse,
+  FeedbackThread,
+  FeedbackThreadMessage,
+  SkillPackItem,
+  SkillPackListResponse,
+  SkillTypesResponse,
+} from '@/types/api';
 
 const API_BASE = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:7002').replace(/\/$/, '');
 
@@ -98,6 +108,16 @@ export const generateSkillPacks = (skillType: string) =>
   api.post<{ items: SkillPackItem[]; generated: number }>('/api/settings/skill-packs/generate', {
     skill_type: skillType,
   }).then(res => res.data);
+export const getAuditRuntimeSummaries = (limit = 10) =>
+  api.get<AuditRuntimeSummaryResponse>('/api/settings/audit-runtime-summaries', {
+    params: { limit },
+  }).then(res => res.data);
+export const getFeedbackAgentPromptAssets = () =>
+  api.get<FeedbackAgentPromptAssetsResponse>('/api/settings/feedback-agent-prompts').then(res => res.data);
+export const updateFeedbackAgentPromptAssets = (
+  items: Array<{ key: 'prompt' | 'agent' | 'soul'; content: string }>,
+) =>
+  api.put<FeedbackAgentPromptAssetsResponse>('/api/settings/feedback-agent-prompts', { items }).then(res => res.data);
 
 // Catalog
 export const getCatalog = (projectId: string) =>
@@ -219,11 +239,19 @@ export const getAuditHistory = (projectId: string) =>
   api.get<any[]>(`/api/projects/${projectId}/audit/history`).then(res => res.data);
 export const getAuditEvents = (
   projectId: string,
-  params?: { version?: number; since_id?: number; limit?: number },
+  params?: { version?: number; since_id?: number; limit?: number; event_kinds?: string },
 ) =>
   api.get<AuditEventsResponse>(`/api/projects/${projectId}/audit/events`, { params }).then(res => res.data);
 export const getAuditEventsStreamUrl = (projectId: string) =>
   `${API_BASE}/api/projects/${projectId}/audit/events/stream`;
+export const getAuditResultsStreamUrl = (projectId: string) =>
+  `${API_BASE}/api/projects/${projectId}/audit/results/stream`;
+
+export const getFeedbackThreadsStreamUrl = (projectId: string) =>
+  `${API_BASE}/api/projects/${projectId}/feedback-threads/stream`;
+
+export const getFeedbackAttachmentUrl = (fileUrl: string) =>
+  fileUrl.startsWith('http://') || fileUrl.startsWith('https://') ? fileUrl : `${API_BASE}${fileUrl}`;
 
 export interface AuditResultUpdatePayload {
   is_resolved?: boolean;
@@ -246,6 +274,68 @@ export const batchUpdateAuditResults = (
     result_ids: resultIds,
     ...payload,
   }).then(res => res.data);
+
+export const createFeedbackThread = (
+  projectId: string,
+  resultId: string,
+  payload: { message: string; images?: File[] },
+  options?: { auditVersion?: number | null },
+) => {
+  const params = options?.auditVersion != null ? { audit_version: options.auditVersion } : undefined;
+  if (payload.images?.length) {
+    const formData = new FormData();
+    formData.append('message', payload.message);
+    payload.images.forEach((file) => formData.append('images', file));
+    return api.post<FeedbackThread>(`/api/projects/${projectId}/audit/results/${resultId}/feedback-thread`, formData, {
+      params,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(res => res.data);
+  }
+  return api.post<FeedbackThread>(`/api/projects/${projectId}/audit/results/${resultId}/feedback-thread`, { message: payload.message }, {
+    params,
+  }).then(res => res.data);
+};
+
+export const getFeedbackThreadByResult = (
+  projectId: string,
+  resultId: string,
+  options?: { auditVersion?: number | null },
+) =>
+  api.get<FeedbackThread>(`/api/projects/${projectId}/audit/results/${resultId}/feedback-thread`, {
+    params: options?.auditVersion != null ? { audit_version: options.auditVersion } : undefined,
+  }).then(res => res.data);
+
+export const listFeedbackThreadsByResults = (
+  projectId: string,
+  resultIds: string[],
+  options?: { auditVersion?: number | null },
+) =>
+  api.post<FeedbackThread[]>(`/api/projects/${projectId}/feedback-threads/query`, {
+    audit_result_ids: resultIds,
+    audit_version: options?.auditVersion ?? null,
+  }).then(res => res.data);
+
+export const getFeedbackThread = (projectId: string, threadId: string) =>
+  api.get<FeedbackThread>(`/api/projects/${projectId}/feedback-threads/${threadId}`).then(res => res.data);
+
+export const getFeedbackThreadMessages = (projectId: string, threadId: string) =>
+  api.get<FeedbackThreadMessage[]>(`/api/projects/${projectId}/feedback-threads/${threadId}/messages`).then(res => res.data);
+
+export const appendFeedbackThreadMessage = (
+  projectId: string,
+  threadId: string,
+  payload: { content: string; images?: File[] },
+) => {
+  if (payload.images?.length) {
+    const formData = new FormData();
+    formData.append('content', payload.content);
+    payload.images.forEach((file) => formData.append('images', file));
+    return api.post<FeedbackThread>(`/api/projects/${projectId}/feedback-threads/${threadId}/messages`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(res => res.data);
+  }
+  return api.post<FeedbackThread>(`/api/projects/${projectId}/feedback-threads/${threadId}/messages`, { content: payload.content }).then(res => res.data);
+};
 export const startAudit = (
   projectId: string,
   payload?: { allow_incomplete?: boolean; provider_mode?: AuditProviderMode },
@@ -255,7 +345,14 @@ export const runAudit = (projectId: string) =>
   api.post<{ success: boolean; audit_version: number; total_issues: number }>(`/api/projects/${projectId}/audit/run`)
     .then(res => res.data);
 export const stopAudit = (projectId: string) =>
-  api.post<{ success: boolean; message: string; audit_version?: number }>(`/api/projects/${projectId}/audit/stop`).then(res => res.data);
+  api.post<{
+    success: boolean;
+    message: string;
+    audit_version?: number;
+    stopped?: boolean;
+    deleted?: { results: number; runs: number; tasks: number; events: number; feedback_samples: number; issue_drawings: number; annotations: number };
+    artifacts?: { cache_files: number; report_files: number };
+  }>(`/api/projects/${projectId}/audit/stop`).then(res => res.data);
 export const clearAuditReport = (projectId: string) =>
   api.post<{ success: boolean; deleted: { results: number; runs: number; tasks: number } }>(`/api/projects/${projectId}/audit/clear`)
     .then(res => res.data);

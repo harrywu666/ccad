@@ -144,3 +144,99 @@ export interface SkillPackItem {
 export interface SkillPackListResponse {
   items: SkillPackItem[];
 }
+
+export interface AuditRuntimeSummaryAgentItem {
+  agent_key: string;
+  agent_name: string;
+  report_count: number;
+  help_requested_count: number;
+  help_resolved_count: number;
+  output_unstable_count: number;
+}
+
+export interface AuditRuntimeSummaryNoteItem {
+  event_kind: string;
+  message: string;
+  agent_name?: string | null;
+  created_at?: string | null;
+}
+
+export interface AuditRuntimeSummaryItem {
+  project_id: string;
+  project_name: string;
+  audit_version: number;
+  status: string;
+  current_step?: string | null;
+  provider_mode?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_seconds?: number | null;
+  counts: {
+    agent_status_reported: number;
+    runner_help_requested: number;
+    runner_help_resolved: number;
+    output_validation_failed: number;
+    runner_observer_action: number;
+  };
+  agent_summaries: AuditRuntimeSummaryAgentItem[];
+  recent_notes: AuditRuntimeSummaryNoteItem[];
+}
+
+export interface AuditRuntimeSummaryResponse {
+  items: AuditRuntimeSummaryItem[];
+}
+
+export interface FeedbackAgentPromptAsset {
+  key: 'prompt' | 'agent' | 'soul';
+  title: string;
+  description: string;
+  file_name: string;
+  content: string;
+}
+
+export interface FeedbackAgentPromptAssetsResponse {
+  items: FeedbackAgentPromptAsset[];
+}
+
+export interface FeedbackThreadMessage {
+  attachments?: FeedbackThreadMessageAttachment[];
+  id: string;
+  thread_id: string;
+  role: 'user' | 'agent' | 'system';
+  message_type: 'claim' | 'question' | 'answer' | 'decision' | 'note';
+  content: string;
+  structured_json?: string | null;
+  created_at?: string | null;
+}
+
+export interface FeedbackThreadMessageAttachment {
+  id: string;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  file_url: string;
+  created_at?: string | null;
+}
+
+export interface FeedbackThread {
+  id: string;
+  project_id: string;
+  audit_result_id: string;
+  result_group_id?: string | null;
+  audit_version: number;
+  status: 'open' | 'agent_reviewing' | 'agent_needs_user_input' | 'resolved_incorrect' | 'resolved_not_incorrect' | 'agent_unavailable' | 'escalated_to_human' | 'closed';
+  learning_decision: 'pending' | 'accepted_for_learning' | 'rejected_for_learning' | 'needs_human_review' | 'record_only';
+  agent_decision?: string | null;
+  agent_confidence?: number | null;
+  opened_by?: string | null;
+  source_agent?: string | null;
+  rule_id?: string | null;
+  issue_type?: string | null;
+  summary?: string | null;
+  resolution_reason?: string | null;
+  escalation_reason?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  closed_at?: string | null;
+  messages: FeedbackThreadMessage[];
+}

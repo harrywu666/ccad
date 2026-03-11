@@ -26,9 +26,10 @@ def _clear_backend_modules() -> None:
         "routers.dwg",
         "routers.report",
         "routers.settings",
+        "services.feedback_review_queue_service",
     )
     for name in list(sys.modules):
-        if name in targets or name.startswith("routers."):
+        if name in targets or name.startswith("routers.") or name.startswith("services.feedback_review"):
             sys.modules.pop(name, None)
 
 
@@ -36,6 +37,7 @@ def _load_test_app(monkeypatch, tmp_path):
     """加载测试应用并将数据库隔离到临时 HOME 目录。"""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("CCAD_DB_PATH", str(tmp_path / "test.sqlite"))
+    monkeypatch.setenv("FEEDBACK_AGENT_MODE", "rule")
     _clear_backend_modules()
 
     database = importlib.import_module("database")

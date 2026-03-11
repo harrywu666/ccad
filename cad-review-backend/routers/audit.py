@@ -3,11 +3,9 @@
 提供审核启动、进度查询、结果查询接口
 """
 
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional
 from datetime import datetime
-import hashlib
 import os
-import re
 import time
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -21,10 +19,16 @@ from models import (
     AuditRun,
     AuditRunEvent,
     AuditTask,
+    AuditIssueDrawing,
+    DrawingAnnotation,
     FeedbackSample,
 )
 from services.audit.issue_preview import get_issue_preview
-from services.audit_runtime.finding_schema import finding_from_audit_result
+from services.audit_runtime.result_view import (
+    group_results_for_view,
+    normalize_feedback_status,
+    serialize_audit_result,
+)
 
 router = APIRouter()
 
@@ -227,58 +231,12 @@ class AuditIssuePreviewResponse(BaseModel):
     missing_reason: Optional[str] = None
 
 
-def _normalize_index_description(description: Optional[str]) -> str:
-    text = (description or "").strip()
-    if not text:
-        return ""
-    # 将“索引A1/索引6”这类位置标签归一，便于相似问题合并
-    text = re.sub(r"中的索引[^\s，。]+", "中的索引*", text)
-    text = re.sub(r"索引[\w\-.]+", "索引*", text)
-    return text
-
-
 def _serialize_audit_result(item: AuditResult) -> Dict[str, Any]:
-    finding = finding_from_audit_result(item)
-    location = (
-        item.location.strip() if isinstance(item.location, str) else item.location
-    )
-    feedback_status = _normalize_feedback_status(item.feedback_status)
-    return {
-        "id": item.id,
-        "project_id": item.project_id,
-        "audit_version": item.audit_version,
-        "type": item.type,
-        "severity": item.severity,
-        "sheet_no_a": item.sheet_no_a,
-        "sheet_no_b": item.sheet_no_b,
-        "location": location,
-        "locations": [location] if location else [],
-        "occurrence_count": 1,
-        "value_a": item.value_a,
-        "value_b": item.value_b,
-        "rule_id": finding.rule_id,
-        "finding_type": finding.finding_type,
-        "finding_status": finding.status,
-        "source_agent": finding.source_agent,
-        "evidence_pack_id": finding.evidence_pack_id,
-        "review_round": finding.review_round,
-        "triggered_by": finding.triggered_by,
-        "confidence": finding.confidence,
-        "description": item.description,
-        "evidence_json": item.evidence_json,
-        "is_resolved": bool(item.is_resolved),
-        "resolved_at": item.resolved_at,
-        "feedback_status": feedback_status,
-        "feedback_at": item.feedback_at if feedback_status == "incorrect" else None,
-        "feedback_note": item.feedback_note if feedback_status == "incorrect" else None,
-        "is_grouped": False,
-        "group_id": None,
-        "issue_ids": [item.id],
-    }
+    return serialize_audit_result(item)
 
 
 def _normalize_feedback_status(value: Optional[str]) -> AuditFeedbackStatus:
-    return "incorrect" if value == "incorrect" else "none"
+    return "incorrect" if normalize_feedback_status(value) == "incorrect" else "none"
 
 
 def _ensure_update_payload(
@@ -363,102 +321,7 @@ def _sync_feedback_samples(
 
 
 def _group_results_for_view(raw_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    groups: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
-    for item in raw_items:
-        if item.get("type") == "index":
-            key = (
-                "index",
-                item.get("sheet_no_a") or "",
-                item.get("sheet_no_b") or "",
-                _normalize_index_description(item.get("description")),
-            )
-        else:
-            # 仅对索引问题做合并，其他类型保留单条
-            key = ("single", item["id"])
-        groups.setdefault(key, []).append(item)
-
-    grouped: List[Dict[str, Any]] = []
-    for key, entries in groups.items():
-        if len(entries) == 1 and key[0] == "single":
-            grouped.append(entries[0])
-            continue
-
-        first = entries[0]
-        issue_ids = [entry["id"] for entry in entries]
-        all_locations: List[str] = []
-        for entry in entries:
-            for loc in entry.get("locations") or []:
-                if isinstance(loc, str) and loc and loc not in all_locations:
-                    all_locations.append(loc)
-
-        if not all_locations and first.get("location"):
-            all_locations = [first["location"]]
-
-        if len(all_locations) <= 4:
-            location_text = (
-                "、".join(all_locations) if all_locations else first.get("location")
-            )
-        else:
-            location_text = f"{'、'.join(all_locations[:4])} 等{len(all_locations)}处"
-
-        resolved_values = [bool(entry.get("is_resolved")) for entry in entries]
-        is_resolved = all(resolved_values) if resolved_values else False
-        resolved_candidates = [
-            entry.get("resolved_at") for entry in entries if entry.get("resolved_at")
-        ]
-        resolved_at = (
-            max(resolved_candidates) if (is_resolved and resolved_candidates) else None
-        )
-        feedback_values = [
-            _normalize_feedback_status(entry.get("feedback_status"))
-            for entry in entries
-        ]
-        feedback_status = (
-            "incorrect"
-            if any(value == "incorrect" for value in feedback_values)
-            else "none"
-        )
-        feedback_candidates = [
-            entry.get("feedback_at") for entry in entries if entry.get("feedback_at")
-        ]
-        feedback_at = (
-            max(feedback_candidates)
-            if (feedback_status == "incorrect" and feedback_candidates)
-            else None
-        )
-        feedback_notes = [
-            entry.get("feedback_note")
-            for entry in entries
-            if entry.get("feedback_note")
-        ]
-        feedback_note = (
-            feedback_notes[0]
-            if (feedback_status == "incorrect" and feedback_notes)
-            else None
-        )
-
-        key_text = "|".join(str(part) for part in key)
-        group_id = f"group_{hashlib.md5(key_text.encode('utf-8')).hexdigest()[:16]}"
-
-        grouped.append(
-            {
-                **first,
-                "id": group_id,
-                "location": location_text,
-                "locations": all_locations,
-                "occurrence_count": len(issue_ids),
-                "is_resolved": is_resolved,
-                "resolved_at": resolved_at,
-                "feedback_status": feedback_status,
-                "feedback_at": feedback_at,
-                "feedback_note": feedback_note,
-                "is_grouped": True,
-                "group_id": group_id,
-                "issue_ids": issue_ids,
-            }
-        )
-
-    return grouped
+    return group_results_for_view(raw_items)
 
 
 @router.get("/projects/{project_id}/audit/status", response_model=AuditStatusResponse)
@@ -475,12 +338,29 @@ def get_audit_status(project_id: str, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(project)
 
-    from services.audit_runtime_service import get_latest_run, build_run_snapshot
+    from services.audit_runtime_service import (
+        build_recent_event_snapshot,
+        build_run_snapshot,
+        get_audit_started_at_from_events,
+        get_latest_run,
+    )
 
     latest_run = get_latest_run(project_id, db)
-    snapshot = build_run_snapshot(latest_run)
+    snapshot = (
+        build_run_snapshot(latest_run)
+        if latest_run
+        else build_recent_event_snapshot(project_id, db)
+    )
+    response_status = project.status
+    if snapshot["status"] == "planning" and response_status in {"new", "ready", "matching", "catalog_locked"}:
+        response_status = "auditing"
 
     audit_version = snapshot["audit_version"]
+    first_event_started_at = get_audit_started_at_from_events(project_id, audit_version, db)
+    if first_event_started_at:
+        snapshot_started_at = snapshot.get("started_at")
+        if not snapshot_started_at or first_event_started_at < snapshot_started_at:
+            snapshot["started_at"] = first_event_started_at
     if audit_version is None:
         latest_result = (
             db.query(AuditResult)
@@ -503,10 +383,10 @@ def get_audit_status(project_id: str, db: Session = Depends(get_db)):
 
     return AuditStatusResponse(
         project_id=project_id,
-        status=project.status,
+        status=response_status,
         audit_version=audit_version,
         current_step=snapshot["current_step"],
-        progress=int(snapshot["progress"] or (100 if project.status == "done" else 0)),
+        progress=int(snapshot["progress"] or (100 if response_status == "done" else 0)),
         total_issues=total_issues,
         run_status=snapshot["status"],
         provider_mode=snapshot.get("provider_mode"),
@@ -720,6 +600,74 @@ def _iter_audit_events_stream(project_id: str, version: int, since_id: Optional[
                     "audit_version": version,
                     "event_kind": "heartbeat",
                     "message": "日志流连接正常，系统仍在等待新进展",
+                },
+                event_id=last_id if last_id > 0 else None,
+            )
+            if test_once:
+                break
+
+        if test_once and sent_any and sent_heartbeat:
+            break
+        time.sleep(poll_seconds)
+
+
+def _iter_audit_results_stream(project_id: str, version: int, since_id: Optional[int]):
+    last_id = int(since_id or 0)
+    heartbeat_seconds = _stream_env_float("AUDIT_STREAM_HEARTBEAT_SECONDS", 25.0)
+    poll_seconds = _stream_env_float("AUDIT_STREAM_POLL_SECONDS", 1.0)
+    test_once = str(os.getenv("AUDIT_STREAM_TEST_ONCE", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    tracked_kinds = {"result_upsert", "result_summary"}
+    last_emit_at = time.monotonic()
+    sent_any = False
+    sent_heartbeat = False
+
+    while True:
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(AuditRunEvent)
+                .filter(
+                    AuditRunEvent.project_id == project_id,
+                    AuditRunEvent.audit_version == version,
+                    AuditRunEvent.id > last_id,
+                    AuditRunEvent.event_kind.in_(list(tracked_kinds)),
+                )
+                .order_by(AuditRunEvent.id.asc())
+                .limit(200)
+                .all()
+            )
+        finally:
+            db.close()
+
+        if rows:
+            for row in rows:
+                payload = _serialize_audit_event_row(row).model_dump()
+                event_name = str(row.event_kind or "result_upsert").strip() or "result_upsert"
+                last_id = row.id
+                last_emit_at = time.monotonic()
+                sent_any = True
+                yield _format_sse_event(event=event_name, data=payload, event_id=row.id)
+            if test_once and since_id is not None:
+                break
+            continue
+
+        if time.monotonic() - last_emit_at >= heartbeat_seconds:
+            last_emit_at = time.monotonic()
+            sent_any = True
+            sent_heartbeat = True
+            yield _format_sse_event(
+                event="heartbeat",
+                data={
+                    "id": last_id,
+                    "audit_version": version,
+                    "event_kind": "heartbeat",
+                    "message": "结果流连接正常，系统仍在等待新问题",
+                    "meta": {"stream_kind": "results"},
                 },
                 event_id=last_id if last_id > 0 else None,
             )
@@ -997,6 +945,9 @@ def get_audit_events(
     project_id: str,
     version: Optional[int] = Query(None, description="审核版本号"),
     since_id: Optional[int] = Query(None, description="增量拉取起点事件ID"),
+    event_kinds: Optional[str] = Query(
+        None, description="事件类型过滤，逗号分隔，例如 result_upsert,result_summary"
+    ),
     limit: int = Query(50, ge=1, le=200, description="返回条数上限"),
     db: Session = Depends(get_db),
 ):
@@ -1010,6 +961,10 @@ def get_audit_events(
         AuditRunEvent.project_id == project_id,
         AuditRunEvent.audit_version == version,
     )
+    if event_kinds:
+        kinds = [item.strip() for item in event_kinds.split(",") if item.strip()]
+        if kinds:
+            query = query.filter(AuditRunEvent.event_kind.in_(kinds))
     if since_id is not None:
         query = query.filter(AuditRunEvent.id > since_id)
 
@@ -1037,6 +992,30 @@ def stream_audit_events(
 
     return StreamingResponse(
         _iter_audit_events_stream(project_id, resolved_version, since_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/projects/{project_id}/audit/results/stream")
+def stream_audit_results(
+    project_id: str,
+    version: Optional[int] = Query(None, description="审核版本号"),
+    since_id: Optional[int] = Query(None, description="增量拉取起点事件ID"),
+    db: Session = Depends(get_db),
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    resolved_version = _resolve_audit_event_version(project_id, db, version)
+
+    return StreamingResponse(
+        _iter_audit_results_stream(project_id, resolved_version, since_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1238,7 +1217,7 @@ def start_audit(
 
 @router.post("/projects/{project_id}/audit/stop")
 def stop_audit(project_id: str, db: Session = Depends(get_db)):
-    """中断当前审核任务（协作取消）。"""
+    """强制中断当前审核任务，并清空本次审核的状态、记录和缓存。"""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -1256,14 +1235,52 @@ def stop_audit(project_id: str, db: Session = Depends(get_db)):
         return {"success": True, "message": "当前没有运行中的审核任务"}
 
     from services.audit_runtime.cancel_registry import request_cancel
+    from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+    from services.audit_runtime_service import _clear_running, wait_for_project_stop
+    from services.cache_service import (
+        recalculate_project_status,
+        increment_cache_version,
+    )
 
+    audit_version = running_run.audit_version
     request_cancel(project_id)
     running_run.current_step = "正在中断（用户请求）"
     db.commit()
+
+    runner = ProjectAuditAgentRunner.get_existing(
+        project_id,
+        audit_version=audit_version,
+    )
+    if runner is not None:
+        try:
+            runner.cancel_active_turns()
+        except Exception:
+            pass
+
+    stopped = wait_for_project_stop(project_id, timeout_seconds=20.0)
+    if not stopped:
+        _clear_running(project_id)
+
+    db.expire_all()
+
+    deleted = _delete_audit_version_records(project_id, audit_version, db)
+    cache_files_deleted = _clear_audit_version_cache(project, audit_version, db)
+    report_files_deleted = _clear_audit_version_report_files(project, audit_version)
+    recalculate_project_status(project_id, db)
+    db.commit()
+    increment_cache_version(project_id, db)
+    ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
+
     return {
         "success": True,
-        "message": "已发送中断请求",
-        "audit_version": running_run.audit_version,
+        "message": "当前审核已终止并清理完成" if stopped else "当前审核已强制清理，后台任务会继续收尾",
+        "audit_version": audit_version,
+        "stopped": stopped,
+        "deleted": deleted,
+        "artifacts": {
+            "cache_files": cache_files_deleted,
+            "report_files": report_files_deleted,
+        },
     }
 
 
@@ -1320,6 +1337,81 @@ def _clear_audit_version_cache(project, version: int, db) -> int:
     return deleted_count
 
 
+def _clear_audit_version_report_files(project, version: int) -> int:
+    """删除指定审核版本的报告产物。"""
+    from services.storage_path_service import resolve_project_dir
+
+    reports_dir = resolve_project_dir(project, ensure=False) / "reports"
+    if not reports_dir.exists():
+        return 0
+
+    deleted_count = 0
+    for path in (
+        reports_dir / f"report_v{version}.pdf",
+        reports_dir / f"report_v{version}.xlsx",
+        reports_dir / f"report_v{version}_marked.pdf",
+        reports_dir / f"report_v{version}_anchors.json",
+    ):
+        if not path.exists():
+            continue
+        try:
+            path.unlink()
+            deleted_count += 1
+        except Exception:
+            pass
+
+    annotated_dir = reports_dir / f"annotated_v{version}"
+    if annotated_dir.exists():
+        import shutil
+
+        try:
+            deleted_count += sum(1 for child in annotated_dir.rglob("*") if child.is_file())
+            shutil.rmtree(annotated_dir)
+        except Exception:
+            pass
+
+    return deleted_count
+
+
+def _delete_audit_version_records(
+    project_id: str,
+    version: Optional[int],
+    db: Session,
+) -> Dict[str, int]:
+    version_filters = [AuditResult.project_id == project_id]
+    run_filters = [AuditRun.project_id == project_id]
+    task_filters = [AuditTask.project_id == project_id]
+    event_filters = [AuditRunEvent.project_id == project_id]
+    feedback_filters = [FeedbackSample.project_id == project_id]
+    issue_drawing_filters = [AuditIssueDrawing.project_id == project_id]
+    annotation_filters = [DrawingAnnotation.project_id == project_id]
+    if version is not None:
+        version_filters.append(AuditResult.audit_version == version)
+        run_filters.append(AuditRun.audit_version == version)
+        task_filters.append(AuditTask.audit_version == version)
+        event_filters.append(AuditRunEvent.audit_version == version)
+        feedback_filters.append(FeedbackSample.audit_version == version)
+        issue_drawing_filters.append(AuditIssueDrawing.audit_version == version)
+        annotation_filters.append(DrawingAnnotation.audit_version == version)
+
+    deleted_results = db.query(AuditResult).filter(*version_filters).delete(synchronize_session=False)
+    deleted_runs = db.query(AuditRun).filter(*run_filters).delete(synchronize_session=False)
+    deleted_tasks = db.query(AuditTask).filter(*task_filters).delete(synchronize_session=False)
+    deleted_events = db.query(AuditRunEvent).filter(*event_filters).delete(synchronize_session=False)
+    deleted_feedback_samples = db.query(FeedbackSample).filter(*feedback_filters).delete(synchronize_session=False)
+    deleted_issue_drawings = db.query(AuditIssueDrawing).filter(*issue_drawing_filters).delete(synchronize_session=False)
+    deleted_annotations = db.query(DrawingAnnotation).filter(*annotation_filters).delete(synchronize_session=False)
+    return {
+        "results": deleted_results,
+        "runs": deleted_runs,
+        "tasks": deleted_tasks,
+        "events": deleted_events,
+        "feedback_samples": deleted_feedback_samples,
+        "issue_drawings": deleted_issue_drawings,
+        "annotations": deleted_annotations,
+    }
+
+
 @router.post("/projects/{project_id}/audit/run")
 def run_audit(project_id: str, db: Session = Depends(get_db)):
     """执行审核（三步）/查询当前执行快照（兼容旧前端）"""
@@ -1374,21 +1466,7 @@ def clear_audit_report(project_id: str, db: Session = Depends(get_db)):
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    deleted_results = (
-        db.query(AuditResult)
-        .filter(AuditResult.project_id == project_id)
-        .delete(synchronize_session=False)
-    )
-    deleted_runs = (
-        db.query(AuditRun)
-        .filter(AuditRun.project_id == project_id)
-        .delete(synchronize_session=False)
-    )
-    deleted_tasks = (
-        db.query(AuditTask)
-        .filter(AuditTask.project_id == project_id)
-        .delete(synchronize_session=False)
-    )
+    deleted = _delete_audit_version_records(project_id, None, db)
 
     from services.cache_service import (
         recalculate_project_status,
@@ -1401,11 +1479,7 @@ def clear_audit_report(project_id: str, db: Session = Depends(get_db)):
 
     return {
         "success": True,
-        "deleted": {
-            "results": deleted_results,
-            "runs": deleted_runs,
-            "tasks": deleted_tasks,
-        },
+        "deleted": deleted,
     }
 
 
@@ -1428,32 +1502,9 @@ def delete_audit_version(project_id: str, version: int, db: Session = Depends(ge
     if running:
         raise HTTPException(status_code=409, detail="该审核版本仍在运行，无法删除")
 
-    deleted_results = (
-        db.query(AuditResult)
-        .filter(
-            AuditResult.project_id == project_id,
-            AuditResult.audit_version == version,
-        )
-        .delete(synchronize_session=False)
-    )
-    deleted_runs = (
-        db.query(AuditRun)
-        .filter(
-            AuditRun.project_id == project_id,
-            AuditRun.audit_version == version,
-        )
-        .delete(synchronize_session=False)
-    )
-    deleted_tasks = (
-        db.query(AuditTask)
-        .filter(
-            AuditTask.project_id == project_id,
-            AuditTask.audit_version == version,
-        )
-        .delete(synchronize_session=False)
-    )
+    deleted = _delete_audit_version_records(project_id, version, db)
 
-    if (deleted_results + deleted_runs + deleted_tasks) == 0:
+    if sum(deleted.values()) == 0:
         db.rollback()
         raise HTTPException(status_code=404, detail=f"审核版本 v{version} 不存在")
 
@@ -1490,10 +1541,6 @@ def delete_audit_version(project_id: str, version: int, db: Session = Depends(ge
 
     return {
         "success": True,
-        "deleted": {
-            "results": deleted_results,
-            "runs": deleted_runs,
-            "tasks": deleted_tasks,
-        },
+        "deleted": deleted,
         "latest_remaining_version": latest_remaining_version,
     }

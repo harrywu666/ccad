@@ -171,6 +171,92 @@ def _ensure_runtime_columns():
                 )
             """))
 
+        if "feedback_threads" not in existing_tables:
+            conn.execute(text("""
+                CREATE TABLE feedback_threads (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    audit_result_id TEXT NOT NULL REFERENCES audit_results(id),
+                    result_group_id TEXT,
+                    audit_version INTEGER NOT NULL,
+                    status TEXT DEFAULT 'open',
+                    learning_decision TEXT DEFAULT 'pending',
+                    agent_decision TEXT,
+                    agent_confidence REAL,
+                    opened_by TEXT,
+                    source_agent TEXT,
+                    rule_id TEXT,
+                    issue_type TEXT,
+                    summary TEXT,
+                    resolution_reason TEXT,
+                    escalation_reason TEXT,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    closed_at DATETIME
+                )
+            """))
+        else:
+            ft_rows = conn.execute(text("PRAGMA table_info(feedback_threads)")).fetchall()
+            ft_col_names = {str(row[1]) for row in ft_rows}
+            if "result_group_id" not in ft_col_names:
+                conn.execute(text("ALTER TABLE feedback_threads ADD COLUMN result_group_id TEXT"))
+
+        if "feedback_messages" not in existing_tables:
+            conn.execute(text("""
+                CREATE TABLE feedback_messages (
+                    id TEXT PRIMARY KEY,
+                    thread_id TEXT NOT NULL REFERENCES feedback_threads(id),
+                    role TEXT NOT NULL,
+                    message_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    structured_json TEXT,
+                    created_at DATETIME
+                )
+            """))
+
+        if "feedback_message_attachments" not in existing_tables:
+            conn.execute(text("""
+                CREATE TABLE feedback_message_attachments (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    thread_id TEXT NOT NULL REFERENCES feedback_threads(id),
+                    message_id TEXT NOT NULL REFERENCES feedback_messages(id),
+                    file_name TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    file_size INTEGER NOT NULL DEFAULT 0,
+                    storage_path TEXT NOT NULL,
+                    created_at DATETIME
+                )
+            """))
+
+        if "feedback_learning_records" not in existing_tables:
+            conn.execute(text("""
+                CREATE TABLE feedback_learning_records (
+                    id TEXT PRIMARY KEY,
+                    thread_id TEXT NOT NULL REFERENCES feedback_threads(id),
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    audit_result_id TEXT NOT NULL REFERENCES audit_results(id),
+                    rule_id TEXT,
+                    issue_type TEXT,
+                    decision TEXT DEFAULT 'pending',
+                    reason_code TEXT,
+                    reason_text TEXT,
+                    evidence_score REAL,
+                    similar_case_count INTEGER,
+                    reusability_score REAL,
+                    suggested_intervention_level TEXT,
+                    snapshot_json TEXT,
+                    created_at DATETIME
+                )
+            """))
+        else:
+            fl_rows = conn.execute(text("PRAGMA table_info(feedback_learning_records)")).fetchall()
+            fl_col_names = {str(row[1]) for row in fl_rows}
+            if "rule_id" not in fl_col_names:
+                conn.execute(text("ALTER TABLE feedback_learning_records ADD COLUMN rule_id TEXT"))
+            if "issue_type" not in fl_col_names:
+                conn.execute(text("ALTER TABLE feedback_learning_records ADD COLUMN issue_type TEXT"))
+
         if "audit_issue_drawings" not in existing_tables:
             conn.execute(text("""
                 CREATE TABLE audit_issue_drawings (

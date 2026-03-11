@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AuditProviderSelector, getAuditProviderLabel } from '../ProjectDetail/components/AuditProgressDialog';
+import SettingsFeedbackAgentPrompts from './SettingsFeedbackAgentPrompts';
 
 type EditablePromptStage = AIPromptStage & {
   draftSystemPrompt: string;
@@ -296,7 +297,7 @@ export default function SettingsPrompts() {
         detail: { providerMode: next },
       }));
     }
-    setSaveMessage(`默认审核引擎已改成 ${getAuditProviderLabel(next)}，后面新发起的审核会先选这个。`);
+    setSaveMessage(`默认审核引擎已改成 ${getAuditProviderLabel(next)}，后面新发起的审核都会使用这个。`);
   };
 
   return (
@@ -319,7 +320,7 @@ export default function SettingsPrompts() {
         <CardHeader>
           <CardTitle>默认审核引擎</CardTitle>
           <CardDescription>
-            这里决定新发起审核时默认先选哪条路线。真正启动前，页面里还可以按这一次的需要临时切换。
+            这里决定后面新发起审核用哪条引擎路线，项目页不再单独切换。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -329,6 +330,8 @@ export default function SettingsPrompts() {
           />
         </CardContent>
       </Card>
+
+      <SettingsFeedbackAgentPrompts />
 
       {saveMessage ? (
         <section className="border border-success/30 bg-success/10 px-5 py-4 text-[14px] text-foreground">

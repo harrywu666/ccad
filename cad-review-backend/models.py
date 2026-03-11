@@ -52,6 +52,9 @@ class Project(Base):
     sheet_edges = relationship("SheetEdge", back_populates="project", cascade="all, delete-orphan")
     audit_tasks = relationship("AuditTask", back_populates="project", cascade="all, delete-orphan")
     feedback_samples = relationship("FeedbackSample", back_populates="project", cascade="all, delete-orphan")
+    feedback_threads = relationship("FeedbackThread", back_populates="project", cascade="all, delete-orphan")
+    feedback_message_attachments = relationship("FeedbackMessageAttachment", back_populates="project", cascade="all, delete-orphan")
+    feedback_learning_records = relationship("FeedbackLearningRecord", back_populates="project", cascade="all, delete-orphan")
     layout_registrations = relationship("DrawingLayoutRegistration", back_populates="project", cascade="all, delete-orphan")
 
 
@@ -171,6 +174,8 @@ class AuditResult(Base):
     created_at = Column(DateTime, default=datetime.now)
 
     project = relationship("Project", back_populates="audit_results")
+    feedback_threads = relationship("FeedbackThread", back_populates="audit_result", cascade="all, delete-orphan")
+    feedback_learning_records = relationship("FeedbackLearningRecord", back_populates="audit_result", cascade="all, delete-orphan")
 
 
 class AuditRun(Base):
@@ -374,3 +379,93 @@ class FeedbackSample(Base):
     curated_at = Column(DateTime, nullable=True)
 
     project = relationship("Project", back_populates="feedback_samples")
+
+
+class FeedbackThread(Base):
+    """误报反馈会话表。"""
+    __tablename__ = "feedback_threads"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    audit_result_id = Column(String, ForeignKey("audit_results.id"), nullable=False)
+    result_group_id = Column(String, nullable=True)
+    audit_version = Column(Integer, nullable=False, default=1)
+    status = Column(String, default="open")
+    learning_decision = Column(String, default="pending")
+    agent_decision = Column(String, nullable=True)
+    agent_confidence = Column(Float, nullable=True)
+    opened_by = Column(String, nullable=True)
+    source_agent = Column(String, nullable=True)
+    rule_id = Column(String, nullable=True)
+    issue_type = Column(String, nullable=True)
+    summary = Column(Text, nullable=True)
+    resolution_reason = Column(Text, nullable=True)
+    escalation_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    closed_at = Column(DateTime, nullable=True)
+
+    project = relationship("Project", back_populates="feedback_threads")
+    audit_result = relationship("AuditResult", back_populates="feedback_threads")
+    messages = relationship("FeedbackMessage", back_populates="thread", cascade="all, delete-orphan")
+    learning_records = relationship("FeedbackLearningRecord", back_populates="thread", cascade="all, delete-orphan")
+
+
+class FeedbackMessage(Base):
+    """误报反馈会话消息表。"""
+    __tablename__ = "feedback_messages"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    thread_id = Column(String, ForeignKey("feedback_threads.id"), nullable=False)
+    role = Column(String, nullable=False)
+    message_type = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    structured_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    thread = relationship("FeedbackThread", back_populates="messages")
+    attachments = relationship("FeedbackMessageAttachment", back_populates="message", cascade="all, delete-orphan")
+
+
+class FeedbackMessageAttachment(Base):
+    """误报反馈消息图片附件表。"""
+    __tablename__ = "feedback_message_attachments"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    thread_id = Column(String, ForeignKey("feedback_threads.id"), nullable=False)
+    message_id = Column(String, ForeignKey("feedback_messages.id"), nullable=False)
+    file_name = Column(String, nullable=False)
+    mime_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False, default=0)
+    storage_path = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+    project = relationship("Project", back_populates="feedback_message_attachments")
+    thread = relationship("FeedbackThread")
+    message = relationship("FeedbackMessage", back_populates="attachments")
+
+
+class FeedbackLearningRecord(Base):
+    """误报反馈学习门禁记录表。"""
+    __tablename__ = "feedback_learning_records"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    thread_id = Column(String, ForeignKey("feedback_threads.id"), nullable=False)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    audit_result_id = Column(String, ForeignKey("audit_results.id"), nullable=False)
+    rule_id = Column(String, nullable=True)
+    issue_type = Column(String, nullable=True)
+    decision = Column(String, default="pending")
+    reason_code = Column(String, nullable=True)
+    reason_text = Column(Text, nullable=True)
+    evidence_score = Column(Float, nullable=True)
+    similar_case_count = Column(Integer, nullable=True)
+    reusability_score = Column(Float, nullable=True)
+    suggested_intervention_level = Column(String, nullable=True)
+    snapshot_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    thread = relationship("FeedbackThread", back_populates="learning_records")
+    project = relationship("Project", back_populates="feedback_learning_records")
+    audit_result = relationship("AuditResult", back_populates="feedback_learning_records")

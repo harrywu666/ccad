@@ -117,6 +117,7 @@ def test_feedback_runtime_profile_influences_planning_and_evidence(monkeypatch, 
 
     assert profile["false_positive_rate"] == 0.8
     assert profile["needs_secondary_review"] is True
+    assert profile["experience_hint"]["intervention_level"] == "soft"
     assert dim_task is not None
     assert dim_task.priority == 2
     assert plans[0].pack_type.value == "focus_pack"
@@ -184,5 +185,49 @@ def test_feedback_runtime_profile_changes_worker_policies(monkeypatch, tmp_path)
         feedback_profile=material_profile,
     )
 
+    assert [item["target"] for item in filtered] == ["A4.02"]
+    assert severity == "warning"
+
+
+def test_workers_can_follow_experience_hint_without_legacy_flat_fields(monkeypatch, tmp_path):
+    _database, _models, _feedback_runtime_service, _task_planner, evidence_planner, relationship_discovery, material_audit = _load_modules(monkeypatch, tmp_path)
+
+    hint_profile = {
+        "experience_hint": {
+            "rule_id": "dimension_runtime_hint",
+            "false_positive_rate": 0.78,
+            "confidence_floor": 0.87,
+            "intervention_level": "soft",
+            "reason_template": "该类问题历史误报较多",
+        }
+    }
+
+    plans = evidence_planner.plan_evidence_requests(
+        task_type="dimension",
+        source_sheet_no="A1.01",
+        target_sheet_no="A4.01",
+        feedback_profile=hint_profile,
+    )
+    filtered = relationship_discovery.apply_relationship_runtime_policy(
+        [
+            {"source": "A1.01", "target": "A4.01", "confidence": 0.7},
+            {"source": "A1.01", "target": "A4.02", "confidence": 0.92},
+        ],
+        feedback_profile=hint_profile,
+    )
+    severity = material_audit.resolve_material_issue_severity(
+        "error",
+        feedback_profile={
+            "experience_hint": {
+                "rule_id": "material_runtime_hint",
+                "false_positive_rate": 0.75,
+                "confidence_floor": 0.8,
+                "intervention_level": "soft",
+                "reason_template": "该类材料问题误报偏多",
+            }
+        },
+    )
+
+    assert plans[0].pack_type.value == "focus_pack"
     assert [item["target"] for item in filtered] == ["A4.02"]
     assert severity == "warning"

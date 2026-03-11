@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
+from services.feedback_review_queue_service import start_feedback_review_worker, stop_feedback_review_worker
 
 audit = import_module("routers.audit")
 catalog = import_module("routers.catalog")
@@ -18,6 +19,7 @@ categories = import_module("routers.categories")
 drawings = import_module("routers.drawings")
 dwg = import_module("routers.dwg")
 feedback = import_module("routers.feedback")
+feedback_threads = import_module("routers.feedback_threads")
 projects = import_module("routers.projects")
 report = import_module("routers.report")
 settings = import_module("routers.settings")
@@ -25,6 +27,9 @@ skill_pack = import_module("routers.skill_pack")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+# ezdxf 的 INFO/WARNING 日志量极大（proxy object、invisible entity 等），统一静默到 ERROR
+logging.getLogger("ezdxf").setLevel(logging.ERROR)
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
 def load_local_env():
@@ -53,6 +58,8 @@ async def lifespan(app: FastAPI):
     logger.info("正在初始化数据库...")
     init_db()
     logger.info("数据库初始化完成")
+    start_feedback_review_worker(feedback_threads._process_feedback_thread_review_async)
+    logger.info("误报反馈后台队列已启动")
     
     from database import SessionLocal
     from models import ProjectCategory
@@ -79,6 +86,7 @@ async def lifespan(app: FastAPI):
         db.close()
     
     yield
+    stop_feedback_review_worker()
     logger.info("应用关闭")
 
 
@@ -107,6 +115,7 @@ app.include_router(report.router, prefix="/api", tags=["报告管理"])
 app.include_router(settings.router, prefix="/api", tags=["系统设置"])
 app.include_router(skill_pack.router, prefix="/api", tags=["审查技能包"])
 app.include_router(feedback.router, prefix="/api", tags=["误报样本"])
+app.include_router(feedback_threads.router, prefix="/api", tags=["误报反馈会话"])
 
 
 @app.get("/")

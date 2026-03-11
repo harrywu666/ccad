@@ -3,11 +3,13 @@ import { AlertCircle, CheckCircle2, ChevronDown, Database, Download, Flag, Histo
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import * as api from '@/api';
 import type { AuditFeedbackStatus, AuditIssuePreviewDrawingAsset, AuditResult, AuditStatus, Drawing } from '@/types';
-import type { AuditHistoryItem } from '@/types/api';
+import type { AuditHistoryItem, FeedbackThread, FeedbackThreadMessage } from '@/types/api';
 import type { PreviewDrawing } from '../../hooks/useDrawingPreview';
+import FeedbackThreadDrawer from './FeedbackThreadDrawer';
+import { createFeedbackThreadStreamController } from '../feedbackThreadStream';
+import { getLearningDecisionLabel, getThreadStatusLabel } from './feedbackThreadPresentation';
 import InlineDrawingPreviewPanel from './InlineDrawingPreviewPanel';
 
 interface ProjectStepAuditProps {
@@ -53,139 +55,89 @@ function getLocationDisplay(result: AuditResult) {
   return `${locations.slice(0, 4).join('、')} 等${locations.length}处`;
 }
 
-function FeedbackPopover({
-  result,
-  isIncorrect,
-  isPending,
-  onSubmit,
-  onRevoke,
-}: {
-  result: AuditResult;
-  isIncorrect: boolean;
-  isPending: boolean;
-  onSubmit: (note?: string) => void;
-  onRevoke: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [note, setNote] = useState('');
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+type AuditReportPresentation = {
+  tone: 'success' | 'warning' | 'error';
+  title: string;
+  description: string;
+};
 
-  const handleOpen = (nextOpen: boolean) => {
-    if (isIncorrect) {
-      if (!nextOpen) setOpen(false);
-      return;
-    }
-    setOpen(nextOpen);
-    if (nextOpen) {
-      setNote('');
-      requestAnimationFrame(() => inputRef.current?.focus());
-    }
-  };
+export function isAuditReportRunning(projectStatus: string, auditStatus: AuditStatus | null): boolean {
+  const project = String(projectStatus || '').toLowerCase();
+  const status = String(auditStatus?.status || '').toLowerCase();
+  const runStatus = String(auditStatus?.run_status || '').toLowerCase();
+  return (
+    project === 'auditing'
+    || status === 'auditing'
+    || ['planning', 'running', 'queued', 'pending'].includes(runStatus)
+  );
+}
 
-  const handleSubmit = () => {
-    onSubmit(note.trim() || undefined);
-    setOpen(false);
-    setNote('');
-  };
+export function buildIssuePreviewSignature(result: AuditResult | null): string {
+  if (!result) return '';
+  return JSON.stringify({
+    id: result.id,
+    description: result.description || '',
+    location: result.location || '',
+    finding_status: result.finding_status || '',
+    review_round: result.review_round || 0,
+    confidence: result.confidence || 0,
+    evidence_json: result.evidence_json || '',
+    issue_ids: result.issue_ids || [],
+  });
+}
 
-  if (isIncorrect) {
-    return (
-      <Popover open={open} onOpenChange={handleOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="rounded-none shadow-none bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive"
-            disabled={isPending}
-            aria-label={`撤销误报反馈：${result.sheet_no_a || '未命名图纸'}`}
-            title={result.feedback_note ? `已反馈误报：${result.feedback_note}` : '已反馈误报，点击可撤销'}
-          >
-            <Flag className="w-4 h-4" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent side="right" align="center" className="w-56 p-3 space-y-2">
-          {result.feedback_note ? (
-            <p className="text-xs text-muted-foreground leading-relaxed">{result.feedback_note}</p>
-          ) : (
-            <p className="text-xs text-muted-foreground">已标记为误报</p>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="w-full text-xs"
-            disabled={isPending}
-            onClick={() => {
-              onRevoke();
-              setOpen(false);
-            }}
-          >
-            撤销反馈
-          </Button>
-        </PopoverContent>
-      </Popover>
-    );
+export function resolveAuditReportPresentation(
+  auditStatus: AuditStatus | null,
+  selectedVersionMeta: AuditHistoryItem | null,
+): AuditReportPresentation {
+  const versionStatus = String(selectedVersionMeta?.status || '').trim().toLowerCase();
+  const runStatus = String(auditStatus?.run_status || '').trim().toLowerCase();
+  const status = String(auditStatus?.status || '').trim().toLowerCase();
+  const running = (
+    versionStatus === 'running'
+    || status === 'auditing'
+    || ['planning', 'running', 'queued', 'pending'].includes(runStatus)
+  );
+  const failed = versionStatus === 'failed' || runStatus === 'failed' || status === 'failed';
+
+  if (running) {
+    return {
+      tone: 'warning',
+      title: '审图进行中',
+      description: '审图还在持续处理中，问题会陆续追加到下方列表。你可以先处理已经出现的问题。',
+    };
   }
 
-  return (
-    <Popover open={open} onOpenChange={handleOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="rounded-none shadow-none text-muted-foreground hover:bg-secondary hover:text-foreground"
-          disabled={isPending}
-          aria-label={`提交误报反馈：${result.sheet_no_a || '未命名图纸'}`}
-          title="反馈为误报"
-        >
-          <Flag className="w-4 h-4" />
-        </Button>
-      </PopoverTrigger>
-        <PopoverContent side="right" align="center" className="w-64 p-3 space-y-2">
-        <p className="text-xs font-medium text-foreground">反馈为误报</p>
-        <p className="text-[11px] leading-5 text-muted-foreground">
-          确认后，这条反馈会进入后续审图纠偏样本，帮助系统减少类似误报。
-        </p>
-        <textarea
-          ref={inputRef}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="可选：简述误报原因"
-          rows={2}
-          className="w-full resize-none rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              handleSubmit();
-            }
-          }}
-        />
-        <div className="flex gap-1.5">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="flex-1 text-xs"
-            onClick={() => setOpen(false)}
-          >
-            取消
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            className="flex-1 text-xs"
-            disabled={isPending}
-            onClick={handleSubmit}
-          >
-            确认误报
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
+  if (failed) {
+    return {
+      tone: 'error',
+      title: '审核已中断',
+      description: '这轮审图没有正常跑完，当前展示的是中断前已经写入的问题，不是完整报告。开发层运行细节可以去设置页里的运行总结查看。',
+    };
+  }
+
+  if (auditStatus?.scope_mode === 'partial') {
+    try {
+      const scope = JSON.parse(auditStatus?.scope_summary || '{}');
+      return {
+        tone: 'warning',
+        title: '审核报告就绪（部分覆盖）',
+        description: `已对 ${scope.ready ?? '?'} / ${scope.total ?? '?'} 张就绪图纸完成深度核查，缺项图纸已跳过。左边可以逐条处理问题，右边可以直接看对应图纸。`,
+      };
+    } catch {
+      return {
+        tone: 'warning',
+        title: '审核报告就绪（部分覆盖）',
+        description: '部分图纸因缺项跳过，仅对就绪图纸完成深度核查。左边可以逐条处理问题，右边可以直接看对应图纸。',
+      };
+    }
+  }
+
+  return {
+    tone: 'success',
+    title: '审核报告就绪',
+    description: '全部深度核查完成。左边可以逐条处理问题，右边可以直接看对应图纸。',
+  };
 }
 
 export default function ProjectStepAudit({
@@ -207,7 +159,18 @@ export default function ProjectStepAudit({
   const [actionError, setActionError] = useState('');
   const [selectedPreview, setSelectedPreview] = useState<SelectedPreview | null>(null);
   const [previewView, setPreviewView] = useState<'a' | 'b'>('a');
+  const [feedbackDrawerOpen, setFeedbackDrawerOpen] = useState(false);
+  const [activeFeedbackResultId, setActiveFeedbackResultId] = useState<string | null>(null);
+  const [activeFeedbackThread, setActiveFeedbackThread] = useState<FeedbackThread | null>(null);
+  const [feedbackThreadsByResultId, setFeedbackThreadsByResultId] = useState<Record<string, FeedbackThread>>({});
+  const [feedbackThreadLoading, setFeedbackThreadLoading] = useState(false);
+  const [feedbackThreadSubmitting, setFeedbackThreadSubmitting] = useState(false);
+  const [feedbackThreadError, setFeedbackThreadError] = useState('');
   const previewRequestRef = useRef(0);
+  const selectedIssueSignatureRef = useRef('');
+  const auditResultsRef = useRef(auditResults);
+  const activeFeedbackThreadIdRef = useRef<string | null>(null);
+  const activeFeedbackResultIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!selectedPreview) return;
@@ -221,6 +184,193 @@ export default function ProjectStepAudit({
   useEffect(() => {
     onInlinePreviewChange?.(Boolean(selectedPreview));
   }, [onInlinePreviewChange, selectedPreview]);
+
+  useEffect(() => {
+    auditResultsRef.current = auditResults;
+  }, [auditResults]);
+
+  useEffect(() => {
+    activeFeedbackThreadIdRef.current = activeFeedbackThread?.id || null;
+  }, [activeFeedbackThread]);
+
+  useEffect(() => {
+    activeFeedbackResultIdRef.current = activeFeedbackResultId;
+  }, [activeFeedbackResultId]);
+
+  const refreshFeedbackThreadSummaries = async (currentResults: AuditResult[]) => {
+    if (!projectId || currentResults.length === 0) {
+      setFeedbackThreadsByResultId({});
+      return;
+    }
+
+    const rowIdsByTargetId = new Map<string, string[]>();
+    currentResults.forEach((result) => {
+      const targetId = result.id;
+      const rowIds = rowIdsByTargetId.get(targetId) || [];
+      rowIds.push(result.id);
+      rowIdsByTargetId.set(targetId, rowIds);
+    });
+    const targetIds = Array.from(rowIdsByTargetId.keys());
+    if (targetIds.length === 0) {
+      setFeedbackThreadsByResultId({});
+      return;
+    }
+
+    try {
+      const threads = await api.listFeedbackThreadsByResults(projectId, targetIds, {
+        auditVersion: selectedAuditVersion ?? auditStatus?.audit_version ?? undefined,
+      });
+      const nextMap: Record<string, FeedbackThread> = {};
+      threads.forEach((thread) => {
+        const threadRefId = thread.result_group_id || thread.audit_result_id;
+        const rowIds = rowIdsByTargetId.get(threadRefId) || [];
+        rowIds.forEach((rowId) => {
+          nextMap[rowId] = thread;
+        });
+      });
+      setFeedbackThreadsByResultId(nextMap);
+    } catch (error) {
+      console.error('批量加载误报反馈线程失败', error);
+    }
+  };
+
+  const applyFeedbackThreadUpdate = (
+    thread: FeedbackThread,
+    options?: { fallbackNote?: string | null; sourceResultId?: string | null; updateActiveThread?: boolean; allowActivateDrawerThread?: boolean },
+  ) => {
+    const currentResults = auditResultsRef.current;
+    const matchedRows = currentResults.filter((item) => {
+      if (thread.result_group_id) {
+        return item.id === thread.result_group_id || item.group_id === thread.result_group_id;
+      }
+      return item.id === thread.audit_result_id || (item.issue_ids || []).includes(thread.audit_result_id);
+    });
+    const sourceResultId = options?.sourceResultId || null;
+    const fallbackNote = options?.fallbackNote ?? null;
+    const targetRows = matchedRows.length > 0
+      ? matchedRows
+      : (sourceResultId ? currentResults.filter((item) => item.id === sourceResultId) : []);
+
+    const shouldUpdateActiveThread = options?.updateActiveThread ?? true;
+    const allowActivateDrawerThread = options?.allowActivateDrawerThread ?? false;
+
+    if (targetRows.length === 0) {
+      if (shouldUpdateActiveThread && activeFeedbackThreadIdRef.current === thread.id) {
+        setActiveFeedbackThread(thread);
+      }
+      return;
+    }
+
+    const targetRowIds = new Set(targetRows.map((item) => item.id));
+    setFeedbackThreadsByResultId((current) => {
+      const next = { ...current };
+      targetRows.forEach((item) => {
+        next[item.id] = thread;
+      });
+      return next;
+    });
+
+    if (shouldUpdateActiveThread && activeFeedbackThreadIdRef.current === thread.id) {
+      setActiveFeedbackThread(thread);
+    } else if (!activeFeedbackThreadIdRef.current && allowActivateDrawerThread && activeFeedbackResultIdRef.current && targetRowIds.has(activeFeedbackResultIdRef.current)) {
+      setActiveFeedbackThread(thread);
+    }
+
+    let changed = false;
+    const nextResults = currentResults.map((item) => {
+      if (!targetRowIds.has(item.id)) return item;
+      const nextFeedbackStatus = thread.status === 'resolved_incorrect' ? 'incorrect' : 'none';
+      const nextFeedbackAt = nextFeedbackStatus === 'incorrect' ? (item.feedback_at || new Date().toISOString()) : null;
+      const nextFeedbackNote = nextFeedbackStatus === 'incorrect'
+        ? (fallbackNote || thread.summary || item.feedback_note || null)
+        : null;
+      if (
+        item.feedback_status === nextFeedbackStatus
+        && item.feedback_note === nextFeedbackNote
+        && ((item.feedback_at || null) === (nextFeedbackAt || null) || nextFeedbackStatus !== 'incorrect')
+      ) {
+        return item;
+      }
+      changed = true;
+      return {
+        ...item,
+        feedback_status: nextFeedbackStatus,
+        feedback_at: nextFeedbackAt,
+        feedback_note: nextFeedbackNote,
+      };
+    });
+
+    if (changed) {
+      onAuditResultsChange(nextResults);
+    }
+  };
+
+  const feedbackTargetIdsSignature = useMemo(
+    () => auditResults.map((result) => result.id).join('|'),
+    [auditResults],
+  );
+
+  useEffect(() => {
+    void refreshFeedbackThreadSummaries(auditResults);
+    return () => {
+    };
+  }, [projectId, feedbackTargetIdsSignature, selectedAuditVersion, auditStatus?.audit_version]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    const version = selectedAuditVersion ?? auditStatus?.audit_version ?? null;
+    if (version === null || version === undefined) return;
+
+    const controller = createFeedbackThreadStreamController({
+      projectId,
+      version,
+      onThreadUpsert: (thread) => {
+        applyFeedbackThreadUpdate(thread, {
+          updateActiveThread: false,
+          allowActivateDrawerThread: true,
+        });
+      },
+      onError: (message) => {
+        if (message) {
+          console.error(message);
+        }
+      },
+    });
+    controller.start();
+
+    return () => {
+      controller.stop();
+    };
+  }, [projectId, selectedAuditVersion, auditStatus?.audit_version]);
+
+  useEffect(() => {
+    if (!projectId || !feedbackDrawerOpen || !activeFeedbackThread?.id) return;
+    const version = activeFeedbackThread.audit_version ?? selectedAuditVersion ?? auditStatus?.audit_version ?? null;
+    if (version === null || version === undefined) return;
+
+    const controller = createFeedbackThreadStreamController({
+      projectId,
+      version,
+      threadId: activeFeedbackThread.id,
+      onThreadUpsert: (thread) => {
+        applyFeedbackThreadUpdate(thread, { updateActiveThread: true });
+      },
+      onMessageCreated: (message, meta) => {
+        if (!meta?.threadId) return;
+        appendActiveFeedbackMessage(meta.threadId, message);
+      },
+      onError: (message) => {
+        if (message) {
+          console.error(message);
+        }
+      },
+    });
+    controller.start();
+
+    return () => {
+      controller.stop();
+    };
+  }, [projectId, feedbackDrawerOpen, activeFeedbackThread?.id, activeFeedbackThread?.audit_version, selectedAuditVersion, auditStatus?.audit_version]);
 
   const unresolvedCounts = useMemo(() => ({
     index: auditResults.filter((result) => result.type === 'index' && !result.is_resolved).length,
@@ -238,6 +388,7 @@ export default function ProjectStepAudit({
     ? auditHistory.find((item) => item.version === selectedAuditVersion) || null
     : null;
   const selectedVersionDisplayCount = selectedVersionMeta?.grouped_count ?? selectedVersionMeta?.count ?? totalCount;
+  const reportPresentation = resolveAuditReportPresentation(auditStatus, selectedVersionMeta);
 
   const formatVersionTime = (value?: string | null) => {
     if (!value) return '无时间';
@@ -268,7 +419,10 @@ export default function ProjectStepAudit({
     };
   };
 
-  const openIssueDrawing = async (result: AuditResult) => {
+  const openIssueDrawing = async (
+    result: AuditResult,
+    options?: { preserveView?: boolean },
+  ) => {
     if (!projectId) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
@@ -284,7 +438,9 @@ export default function ProjectStepAudit({
       }
       if (previewRequestRef.current !== requestId) return;
 
-      setPreviewView('a');
+      if (!options?.preserveView) {
+        setPreviewView('a');
+      }
       setSelectedPreview({
         issueId: result.id,
         drawingA: resolvePreviewDrawing(preview.source),
@@ -394,38 +550,161 @@ export default function ProjectStepAudit({
     }
   };
 
+  const syncAuditResultFromFeedbackThread = (
+    resultId: string,
+    thread: FeedbackThread,
+    fallbackNote?: string | null,
+  ) => {
+    applyFeedbackThreadUpdate(thread, { fallbackNote, sourceResultId: resultId });
+  };
+
+  const appendActiveFeedbackMessage = (threadId: string, message: FeedbackThreadMessage) => {
+    setActiveFeedbackThread((current) => {
+      if (!current || current.id !== threadId) return current;
+      if (current.messages.some((item) => item.id === message.id)) {
+        return current;
+      }
+      return {
+        ...current,
+        messages: [...current.messages, message],
+      };
+    });
+  };
+
+  const openFeedbackThread = async (result: AuditResult) => {
+    if (!projectId) return;
+    const targetResultId = result.id;
+    setFeedbackDrawerOpen(true);
+    setActiveFeedbackResultId(result.id);
+    setActiveFeedbackThread(null);
+    setFeedbackThreadLoading(true);
+    setFeedbackThreadError('');
+
+    try {
+      const thread = await api.getFeedbackThreadByResult(projectId, targetResultId, {
+        auditVersion: selectedAuditVersion ?? auditStatus?.audit_version ?? undefined,
+      });
+      setActiveFeedbackThread(thread);
+      syncAuditResultFromFeedbackThread(result.id, thread, result.feedback_note);
+    } catch (error: any) {
+      const status = error?.response?.status;
+      if (status === 404) {
+        setActiveFeedbackThread(null);
+      } else {
+        console.error('加载误报反馈会话失败', error);
+        setFeedbackThreadError('这条反馈会话加载失败了，请稍后再试。');
+      }
+    } finally {
+      setFeedbackThreadLoading(false);
+    }
+  };
+
+  const handleSubmitFeedbackMessage = async (payload: { content: string; images: File[] }) => {
+    if (!projectId || !activeFeedbackResultId) return;
+    const activeResult = auditResults.find((item) => item.id === activeFeedbackResultId);
+    if (!activeResult) return;
+
+    setFeedbackThreadSubmitting(true);
+    setFeedbackThreadError('');
+
+    try {
+      let thread: FeedbackThread;
+      const targetResultId = activeResult.id;
+      if (activeFeedbackThread) {
+        thread = await api.appendFeedbackThreadMessage(projectId, activeFeedbackThread.id, payload);
+      } else {
+        thread = await api.createFeedbackThread(projectId, targetResultId, { message: payload.content, images: payload.images }, {
+          auditVersion: selectedAuditVersion ?? auditStatus?.audit_version ?? undefined,
+        });
+      }
+      setActiveFeedbackThread(thread);
+      syncAuditResultFromFeedbackThread(activeResult.id, thread, payload.content);
+    } catch (error: any) {
+      console.error('提交误报反馈消息失败', error);
+      if (error?.response?.data?.detail) {
+        setFeedbackThreadError(String(error.response.data.detail));
+      } else {
+        setFeedbackThreadError('这条消息没有发成功，请稍后再试。');
+      }
+    } finally {
+      setFeedbackThreadSubmitting(false);
+    }
+  };
+
+  const handleRevokeFeedbackFromDrawer = async () => {
+    if (!activeFeedbackResultId) return;
+    const activeResult = auditResults.find((item) => item.id === activeFeedbackResultId);
+    if (!activeResult) return;
+
+    setFeedbackThreadSubmitting(true);
+    setFeedbackThreadError('');
+    try {
+      await handleToggleFeedback(activeResult, 'none');
+      setActiveFeedbackThread((current) => current ? {
+        ...current,
+        status: 'open',
+        learning_decision: current.learning_decision === 'accepted_for_learning' ? 'pending' : current.learning_decision,
+      } : current);
+      setFeedbackThreadsByResultId((current) => {
+        const next = { ...current };
+        if (next[activeResult.id]) {
+          next[activeResult.id] = {
+            ...next[activeResult.id],
+            status: 'open',
+            learning_decision: next[activeResult.id].learning_decision === 'accepted_for_learning'
+              ? 'pending'
+              : next[activeResult.id].learning_decision,
+          };
+        }
+        return next;
+      });
+    } catch {
+      setFeedbackThreadError('撤销误报失败，请稍后再试。');
+    } finally {
+      setFeedbackThreadSubmitting(false);
+    }
+  };
+
   const selectedIssue = selectedPreview
     ? auditResults.find((item) => item.id === selectedPreview.issueId) || null
     : null;
+  const activeFeedbackResult = activeFeedbackResultId
+    ? auditResults.find((item) => item.id === activeFeedbackResultId) || null
+    : null;
+  const reportRunning = isAuditReportRunning(projectStatus, auditStatus);
+  const selectedIssueSignature = buildIssuePreviewSignature(selectedIssue);
 
-  if (projectStatus === 'auditing') {
-    return null;
-  }
+  useEffect(() => {
+    if (!selectedPreview || !selectedIssue || !projectId) {
+      selectedIssueSignatureRef.current = '';
+      return;
+    }
+
+    const previousSignature = selectedIssueSignatureRef.current;
+    selectedIssueSignatureRef.current = selectedIssueSignature;
+    if (!previousSignature || previousSignature === selectedIssueSignature) {
+      return;
+    }
+    void openIssueDrawing(selectedIssue, { preserveView: true });
+  }, [projectId, selectedPreview, selectedIssue, selectedIssueSignature]);
 
   return (
-    <div className="w-full space-y-8 animate-in fade-in duration-500">
+    <div className="w-full space-y-8">
       <div className="space-y-6">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-[24px] font-semibold flex items-center gap-2">
-              {auditStatus?.scope_mode === 'partial' ? (
+              {reportPresentation.tone === 'error' ? (
+                <AlertCircle className="h-6 w-6 text-destructive" />
+              ) : reportPresentation.tone === 'warning' ? (
                 <AlertCircle className="h-6 w-6 text-warning" />
               ) : (
                 <CheckCircle2 className="h-6 w-6 text-success" />
               )}
-              {auditStatus?.scope_mode === 'partial' ? '审核报告就绪（部分覆盖）' : '审核报告就绪'}
+              {reportPresentation.title}
             </h2>
             <p className="text-[14px] text-muted-foreground mt-1 text-balance">
-              {auditStatus?.scope_mode === 'partial'
-                ? (() => {
-                    try {
-                      const scope = JSON.parse(auditStatus?.scope_summary || '{}');
-                      return `已对 ${scope.ready ?? '?'} / ${scope.total ?? '?'} 张就绪图纸完成深度核查，缺项图纸已跳过。左边可以逐条处理问题，右边可以直接看对应图纸。`;
-                    } catch {
-                      return '部分图纸因缺项跳过，仅对就绪图纸完成深度核查。左边可以逐条处理问题，右边可以直接看对应图纸。';
-                    }
-                  })()
-                : '全部深度核查完成。左边可以逐条处理问题，右边可以直接看对应图纸。'}
+              {reportPresentation.description}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -562,14 +841,14 @@ export default function ProjectStepAudit({
                     <th className="w-[70px] pl-0 pr-2 py-3 text-center text-[12px] font-semibold text-foreground">问题类型</th>
                     <th className="w-[112px] px-2 py-3 text-left text-[12px] font-semibold text-foreground">关联图纸</th>
                     <th className="px-3 py-3 text-left text-[12px] font-semibold text-foreground">问题说明</th>
-                    <th className="w-[72px] px-2 py-3 text-center text-[12px] font-semibold text-foreground whitespace-nowrap">误报</th>
+                    <th className="w-[132px] px-2 py-3 text-center text-[12px] font-semibold text-foreground whitespace-nowrap">误报</th>
                   </tr>
                 </thead>
                 <tbody>
                   {auditResults.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="px-4 py-12 text-center text-[14px] text-muted-foreground">
-                        当前这一轮还没有发现问题。
+                        {reportRunning ? '审图正在进行，问题将陆续出现。' : '当前这一轮还没有发现问题。'}
                       </td>
                     </tr>
                   ) : auditResults.map((result) => {
@@ -577,6 +856,11 @@ export default function ProjectStepAudit({
                     const isPending = Boolean(pendingIds[result.id]);
                     const isActive = selectedPreview?.issueId === result.id;
                     const isIncorrectFeedback = result.feedback_status === 'incorrect';
+                    const feedbackThread = feedbackThreadsByResultId[result.id];
+                    const compactThreadStatus = feedbackThread ? getThreadStatusLabel(feedbackThread.status) : null;
+                    const compactLearningStatus = feedbackThread && feedbackThread.learning_decision !== 'pending'
+                      ? getLearningDecisionLabel(feedbackThread.learning_decision)
+                      : null;
 
                     return (
                       <tr
@@ -647,13 +931,36 @@ export default function ProjectStepAudit({
                           </div>
                         </td>
                         <td className="px-2 py-4 text-center" onClick={(event) => event.stopPropagation()}>
-                          <FeedbackPopover
-                            result={result}
-                            isIncorrect={isIncorrectFeedback}
-                            isPending={isPending}
-                            onSubmit={(note) => void handleToggleFeedback(result, 'incorrect', note)}
-                            onRevoke={() => void handleToggleFeedback(result, 'none')}
-                          />
+                          <div className="flex flex-col items-center gap-1.5">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className={`rounded-none shadow-none ${
+                                isIncorrectFeedback
+                                  ? 'bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive'
+                                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                              }`}
+                              disabled={isPending}
+                              aria-label={`${isIncorrectFeedback ? '查看误报反馈' : '提交误报反馈'}：${result.sheet_no_a || '未命名图纸'}`}
+                              title={isIncorrectFeedback ? '查看误报反馈会话' : '反馈为误报'}
+                              onClick={() => { void openFeedbackThread(result); }}
+                            >
+                              <Flag className="w-4 h-4" />
+                            </Button>
+                            {compactThreadStatus ? (
+                              <div className="max-w-[112px] space-y-0.5 text-center leading-4">
+                                <div className="text-[10px] font-medium text-foreground">{compactThreadStatus}</div>
+                                {compactLearningStatus ? (
+                                  <div className="text-[10px] text-muted-foreground">{compactLearningStatus}</div>
+                                ) : null}
+                              </div>
+                            ) : isIncorrectFeedback ? (
+                              <div className="max-w-[112px] text-[10px] text-muted-foreground leading-4">
+                                已标记误报
+                              </div>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -683,6 +990,23 @@ export default function ProjectStepAudit({
           ) : null}
         </div>
       </div>
+      <FeedbackThreadDrawer
+        open={feedbackDrawerOpen}
+        onOpenChange={(open) => {
+          setFeedbackDrawerOpen(open);
+          if (!open) {
+            setFeedbackThreadError('');
+            setFeedbackThreadLoading(false);
+          }
+        }}
+        result={activeFeedbackResult}
+        thread={activeFeedbackThread}
+        loading={feedbackThreadLoading}
+        submitting={feedbackThreadSubmitting}
+        error={feedbackThreadError}
+        onSubmitMessage={handleSubmitFeedbackMessage}
+        onRevokeIncorrect={handleRevokeFeedbackFromDrawer}
+      />
     </div>
   );
 }
