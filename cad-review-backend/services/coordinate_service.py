@@ -32,6 +32,10 @@ def cad_to_global_pct(cad_x: float, cad_y: float, model_range: Dict[str, List[fl
     return pct_x, pct_y
 
 
+def _layout_point_to_pct(layout_x: float, layout_y: float, range_obj: Dict[str, List[float]]) -> Tuple[float, float]:
+    return cad_to_global_pct(layout_x, layout_y, range_obj)
+
+
 def _bbox_to_highlight_region(
     bbox: Dict[str, List[float]],
     range_obj: Dict[str, List[float]],
@@ -220,6 +224,13 @@ def _count_in_range(points: List[Tuple[float, float]], range_obj: Dict[str, List
     return in_count
 
 
+def _point_in_range(point: Tuple[float, float], range_obj: Dict[str, List[float]], padding: float = 0.0) -> bool:
+    x_min, y_min = range_obj["min"]
+    x_max, y_max = range_obj["max"]
+    x, y = point
+    return (x_min - padding) <= x <= (x_max + padding) and (y_min - padding) <= y <= (y_max + padding)
+
+
 def _resolve_mapping_range(layout_json: Dict) -> Optional[Dict[str, List[float]]]:
     """
     选择用于坐标映射的范围：
@@ -245,6 +256,10 @@ def _resolve_mapping_range(layout_json: Dict) -> Optional[Dict[str, List[float]]
 
 
 def _resolve_layout_space_range(layout_json: Dict) -> Optional[Dict[str, List[float]]]:
+    fragment_range = _normalize_range(layout_json.get("fragment_bbox"))
+    if fragment_range is not None:
+        return fragment_range
+
     explicit_range = _normalize_range(layout_json.get("layout_page_range"))
     if explicit_range is None:
         explicit_range = _normalize_range(layout_json.get("paper_range"))
@@ -319,6 +334,71 @@ def _enrich_point_item(item: Dict, pos_key: str, range_obj: Dict[str, List[float
     return item
 
 
+def _project_model_point_to_layout(
+    point: Tuple[float, float],
+    viewports: List[Dict],
+) -> Optional[Tuple[float, float]]:
+    best_projection: Optional[Tuple[float, float]] = None
+    best_area: Optional[float] = None
+
+    for viewport in viewports or []:
+        model_range = _normalize_range(viewport.get("model_range"))
+        position = viewport.get("position")
+        width = viewport.get("width")
+        height = viewport.get("height")
+        if model_range is None or not isinstance(position, (list, tuple)) or len(position) < 2:
+            continue
+        try:
+            cx = float(position[0])
+            cy = float(position[1])
+            vw = float(width)
+            vh = float(height)
+        except (TypeError, ValueError):
+            continue
+        if vw <= 0.0 or vh <= 0.0:
+            continue
+        if not _point_in_range(point, model_range, padding=1.0):
+            continue
+
+        pct_x, pct_y = cad_to_global_pct(point[0], point[1], model_range)
+        left = cx - vw / 2.0
+        top = cy + vh / 2.0
+        layout_x = left + (pct_x / 100.0) * vw
+        layout_y = top - (pct_y / 100.0) * vh
+        area = vw * vh
+        if best_area is None or area < best_area:
+            best_projection = (layout_x, layout_y)
+            best_area = area
+
+    return best_projection
+
+
+def _project_model_bbox_to_layout(
+    bbox: Dict[str, List[float]],
+    viewports: List[Dict],
+) -> Optional[Dict[str, List[float]]]:
+    mn = bbox.get("min")
+    mx = bbox.get("max")
+    if not isinstance(mn, (list, tuple)) or not isinstance(mx, (list, tuple)) or len(mn) < 2 or len(mx) < 2:
+        return None
+    try:
+        corners = [
+            (float(mn[0]), float(mn[1])),
+            (float(mx[0]), float(mx[1])),
+        ]
+    except (TypeError, ValueError):
+        return None
+
+    projected = [_project_model_point_to_layout(point, viewports) for point in corners]
+    if not all(projected):
+        return None
+    xs = [point[0] for point in projected if point]
+    ys = [point[1] for point in projected if point]
+    if len(xs) < 2 or len(ys) < 2:
+        return None
+    return {"min": [min(xs), min(ys)], "max": [max(xs), max(ys)]}
+
+
 def enrich_json_with_coordinates(layout_json: Dict) -> Dict:
     """
     为 dimensions/indexes/materials 增强坐标信息：
@@ -328,28 +408,59 @@ def enrich_json_with_coordinates(layout_json: Dict) -> Dict:
     """
     default_range = _resolve_mapping_range(layout_json)
     layout_space_range = _resolve_layout_space_range(layout_json)
+    viewports = layout_json.get("viewports", []) or []
     if not isinstance(default_range, dict) and not isinstance(layout_space_range, dict):
         return layout_json
 
-    def pick_range(item: Dict) -> Optional[Dict[str, List[float]]]:
-        if str(item.get("source") or "").strip() == "layout_space" and isinstance(layout_space_range, dict):
-            return layout_space_range
-        return default_range if isinstance(default_range, dict) else layout_space_range
+    def enrich_item(item: Dict, pos_key: str) -> Dict:
+        copied = dict(item)
+        source = str(copied.get("source") or "").strip()
+        if source == "layout_space" and isinstance(layout_space_range, dict):
+            return _enrich_point_item(copied, pos_key, layout_space_range)
+
+        if source == "model_space" and isinstance(layout_space_range, dict):
+            pos = copied.get(pos_key)
+            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+                try:
+                    model_point = (float(pos[0]), float(pos[1]))
+                except (TypeError, ValueError):
+                    model_point = None
+                if model_point is not None:
+                    projected = _project_model_point_to_layout(model_point, viewports)
+                    if projected is not None:
+                        pct_x, pct_y = _layout_point_to_pct(projected[0], projected[1], layout_space_range)
+                        copied["global_pct"] = {"x": pct_x, "y": pct_y}
+                        copied["grid"] = global_pct_to_grid(pct_x, pct_y)
+                        copied["in_quadrants"] = global_pct_to_quadrants(pct_x, pct_y)
+                        symbol_bbox = copied.get("symbol_bbox")
+                        if isinstance(symbol_bbox, dict):
+                            projected_bbox = _project_model_bbox_to_layout(symbol_bbox, viewports)
+                            if projected_bbox is not None:
+                                highlight_region = _bbox_to_highlight_region(projected_bbox, layout_space_range)
+                                if highlight_region is not None:
+                                    copied["highlight_region"] = highlight_region
+                        return copied
+
+        chosen_range = default_range if isinstance(default_range, dict) else layout_space_range
+        if isinstance(chosen_range, dict):
+            return _enrich_point_item(copied, pos_key, chosen_range)
+        return copied
 
     enriched = dict(layout_json)
     enriched["dimensions"] = [
-        _enrich_point_item(dict(item), "text_position", chosen_range)
-        if isinstance((chosen_range := pick_range(dict(item))), dict) else dict(item)
+        enrich_item(item, "text_position")
         for item in layout_json.get("dimensions", [])
     ]
     enriched["indexes"] = [
-        _enrich_point_item(dict(item), "position", chosen_range)
-        if isinstance((chosen_range := pick_range(dict(item))), dict) else dict(item)
+        enrich_item(item, "position")
         for item in layout_json.get("indexes", [])
     ]
     enriched["materials"] = [
-        _enrich_point_item(dict(item), "position", chosen_range)
-        if isinstance((chosen_range := pick_range(dict(item))), dict) else dict(item)
+        enrich_item(item, "position")
         for item in layout_json.get("materials", [])
+    ]
+    enriched["material_table"] = [
+        enrich_item(item, "position")
+        for item in layout_json.get("material_table", [])
     ]
     return enriched

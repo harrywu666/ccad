@@ -19,6 +19,7 @@ def compact_dimensions(dims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             {
                 "id": item.get("id"),
                 "value": item.get("value"),
+                "actual_value": item.get("actual_value"),
                 "display_text": item.get("display_text"),
                 "layer": item.get("layer"),
                 "global_pct": {"x": gp.get("x"), "y": gp.get("y")} if gp else None,

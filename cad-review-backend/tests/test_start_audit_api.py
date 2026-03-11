@@ -63,7 +63,11 @@ def _patch_runtime(monkeypatch) -> None:
     monkeypatch.setattr(runtime, "_set_running", lambda project_id: True)
     monkeypatch.setattr(runtime, "_clear_running", lambda project_id: None)
     monkeypatch.setattr(runtime, "get_next_audit_version", lambda project_id, db: 1)
-    monkeypatch.setattr(runtime, "start_audit_async", lambda project_id, audit_version, allow_incomplete=False: None)
+    monkeypatch.setattr(
+        runtime,
+        "start_audit_async",
+        lambda project_id, audit_version, allow_incomplete=False, provider_mode=None, **kwargs: None,
+    )
 
 
 def test_start_audit_rejects_incomplete_three_line_match_by_default(monkeypatch, tmp_path):

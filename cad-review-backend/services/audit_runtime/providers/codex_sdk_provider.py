@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 
 from services.audit_runtime.codex_bridge_client import CodexBridgeClient
+from services.audit_runtime.cancel_registry import AuditCancellationRequested
 from services.audit_runtime.runner_observer_prompt import (
     build_runner_observer_system_prompt,
     build_runner_observer_user_prompt,
@@ -56,17 +58,37 @@ class CodexSdkProvider(BaseRunnerProvider):
     ) -> RunnerTurnResult:
         if should_cancel and should_cancel():
             await self.cancel(subsession)
-            raise RuntimeError("用户手动中断审核")
+            raise AuditCancellationRequested("用户手动中断审核")
 
         thread_id = _thread_map(subsession).get(subsession.session_key)
         op = "resume_turn" if thread_id else "start_turn"
-        bridge_result = await self.bridge_client.stream_turn(
+        bridge_task = asyncio.create_task(self.bridge_client.stream_turn(
             op=op,
             subsession_key=subsession.session_key,
             thread_id=thread_id,
             input_text=self._build_prompt(request),
             on_event=on_event,
-        )
+        ))
+
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    {bridge_task},
+                    timeout=0.2,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if done:
+                    bridge_result = bridge_task.result()
+                    break
+
+                if should_cancel and should_cancel():
+                    await self.cancel(subsession)
+                    bridge_task.cancel()
+                    await asyncio.gather(bridge_task, return_exceptions=True)
+                    raise AuditCancellationRequested("用户手动中断审核")
+        finally:
+            if not bridge_task.done():
+                bridge_task.cancel()
 
         if bridge_result.thread_id:
             _thread_map(subsession)[subsession.session_key] = bridge_result.thread_id

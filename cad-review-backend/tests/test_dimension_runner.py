@@ -29,7 +29,7 @@ def _load_module(monkeypatch):
     return importlib.import_module("services.audit.dimension_audit")
 
 
-def test_dimension_agent_uses_runner_and_needs_review_on_bad_json(monkeypatch, tmp_path):
+def test_dimension_agent_uses_runner_and_returns_empty_on_deferred_result(monkeypatch, tmp_path):
     dimension_audit = _load_module(monkeypatch)
     runner_called = {"value": False}
 
@@ -48,7 +48,7 @@ def test_dimension_agent_uses_runner_and_needs_review_on_bad_json(monkeypatch, t
             return dimension_audit.RunnerTurnResult(
                 provider_name="api",
                 output=None,
-                status="needs_review",
+                status="deferred",
                 raw_output="broken-json",
                 repair_attempts=1,
             )

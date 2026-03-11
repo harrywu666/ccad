@@ -10,7 +10,10 @@ import ast
 import base64
 import logging
 import asyncio
-from typing import Any, Dict, List, Union
+import inspect
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
+
+from services.audit_runtime.cancel_registry import AuditCancellationRequested
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,17 @@ def _env_float(name: str, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return value if value > 0 else default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
 
 
 def _http_timeout_config():
@@ -115,6 +129,160 @@ def _official_temperature(requested: float) -> float:
     return 1.0
 
 
+def _retryable_status(status_code: int) -> bool:
+    return status_code in {429, 500, 502, 503, 504}
+
+
+def _retry_sleep_seconds(attempt: int, response: Any = None) -> float:
+    retry_after = None
+    if response is not None:
+        headers = getattr(response, "headers", None)
+        if headers:
+            retry_after = headers.get("Retry-After")
+    if retry_after:
+        try:
+            seconds = float(str(retry_after).strip())
+            if seconds > 0:
+                return seconds
+        except (TypeError, ValueError):
+            pass
+
+    base = _env_float("KIMI_RETRY_BASE_SECONDS", 2.0)
+    cap = _env_float("KIMI_RETRY_MAX_SECONDS", 20.0)
+    return min(cap, base * max(1, attempt))
+
+
+def _build_kimi_request(
+    system_prompt: str,
+    user_prompt: str,
+    images: Optional[List[bytes]],
+    temperature: float,
+    max_tokens: int,
+    *,
+    stream: bool = False,
+) -> tuple[str, dict[str, Any], str]:
+    provider = _provider()
+    if provider == "official":
+        content: List[dict[str, Any]] = []
+        for img in (images or []):
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": _base64_data_url(img),
+                },
+            })
+        content.append({"type": "text", "text": user_prompt})
+        payload: dict[str, Any] = {
+            "model": os.getenv("KIMI_OFFICIAL_MODEL", KIMI_OFFICIAL_MODEL),
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content},
+            ],
+            "temperature": _official_temperature(temperature),
+            "max_tokens": max_tokens,
+        }
+        if stream:
+            payload["stream"] = True
+        endpoint = f"{os.getenv('KIMI_OFFICIAL_API_BASE', KIMI_OFFICIAL_API_BASE).rstrip('/')}/chat/completions"
+        return provider, payload, endpoint
+
+    content = []
+    for img in (images or []):
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": _mime(img),
+                "data": base64.b64encode(img).decode(),
+            },
+        })
+    content.append({"type": "text", "text": user_prompt})
+    payload = {
+        "model": os.getenv("KIMI_CODE_MODEL", KIMI_CODE_MODEL),
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": content}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if stream:
+        payload["stream"] = True
+    endpoint = f"{os.getenv('KIMI_CODE_API_BASE', KIMI_CODE_API_BASE).rstrip('/')}/messages"
+    return provider, payload, endpoint
+
+
+def _extract_response_text(provider: str, data: dict[str, Any]) -> str:
+    if provider == "official":
+        return data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+    return "".join(
+        b.get("text", "")
+        for b in data.get("content", [])
+        if b.get("type") == "text"
+    )
+
+
+def _extract_stream_delta(provider: str, payload: dict[str, Any]) -> str:
+    if provider == "official":
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return ""
+        delta = choices[0].get("delta")
+        if not isinstance(delta, dict):
+            return ""
+        content = delta.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    parts.append(str(item.get("text") or ""))
+            return "".join(parts)
+        return ""
+    content = payload.get("delta") or payload.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            str(block.get("text") or "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return ""
+
+
+async def _emit_delta(
+    on_delta: Optional[Callable[[str], Optional[Awaitable[None]]]],
+    chunk: str,
+) -> None:
+    if not on_delta or not chunk:
+        return
+    result = on_delta(chunk)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _emit_retry(
+    on_retry: Optional[Callable[[Dict[str, Any]], Optional[Awaitable[None]]]],
+    payload: Dict[str, Any],
+) -> None:
+    if not on_retry:
+        return
+    result = on_retry(payload)
+    if inspect.isawaitable(result):
+        await result
+
+
+def _stream_idle_timeout_seconds() -> float:
+    return _env_float("KIMI_STREAM_IDLE_TIMEOUT_SECONDS", 30.0)
+
+
+def _raise_if_stream_cancelled(
+    should_cancel: Optional[Callable[[], bool]],
+) -> None:
+    if should_cancel and should_cancel():
+        raise AuditCancellationRequested("用户手动中断审核")
+
+
 def _parse_json(text: str) -> Union[dict, list]:
     """健壮的 JSON 提取：直接解析 → 剥离代码块 → 暴力搜索"""
     t = text.strip()
@@ -182,75 +350,219 @@ async def call_kimi(
         解析后的 JSON 对象或列表
     """
     import httpx
+    max_retries = _env_int("KIMI_MAX_RETRIES", 3)
+
+    provider, payload, endpoint = _build_kimi_request(
+        system_prompt,
+        user_prompt,
+        images,
+        temperature,
+        max_tokens,
+    )
     
-    provider = _provider()
-    if provider == "official":
-        content = []
-        for img in (images or []):
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": _base64_data_url(img),
-                },
-            })
-        content.append({"type": "text", "text": user_prompt})
-        payload = {
-            "model": os.getenv("KIMI_OFFICIAL_MODEL", KIMI_OFFICIAL_MODEL),
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": content},
-            ],
-            "temperature": _official_temperature(temperature),
-            "max_tokens": max_tokens,
-        }
-        endpoint = f"{os.getenv('KIMI_OFFICIAL_API_BASE', KIMI_OFFICIAL_API_BASE).rstrip('/')}/chat/completions"
-    else:
-        content = []
-        for img in (images or []):
-            content.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": _mime(img),
-                    "data": base64.b64encode(img).decode(),
-                },
-            })
-        content.append({"type": "text", "text": user_prompt})
-        payload = {
-            "model": os.getenv("KIMI_CODE_MODEL", KIMI_CODE_MODEL),
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": content}],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        endpoint = f"{os.getenv('KIMI_CODE_API_BASE', KIMI_CODE_API_BASE).rstrip('/')}/messages"
-    
-    try:
-        async with httpx.AsyncClient(timeout=_http_timeout_config(), trust_env=False) as client:
-            resp = await client.post(
-                endpoint,
-                headers=_headers(),
-                json=payload,
+    async with httpx.AsyncClient(timeout=_http_timeout_config(), trust_env=False) as client:
+        for attempt in range(max_retries + 1):
+            try:
+                resp = await client.post(
+                    endpoint,
+                    headers=_headers(),
+                    json=payload,
+                )
+            except httpx.TimeoutException as exc:
+                if attempt >= max_retries:
+                    raise RuntimeError(f"Kimi API 超时: {exc}") from exc
+                delay = _retry_sleep_seconds(attempt + 1)
+                logger.warning(
+                    "Kimi 请求超时，第 %d 次重试前等待 %.1f 秒",
+                    attempt + 1,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            except httpx.HTTPError as exc:
+                if attempt >= max_retries:
+                    raise RuntimeError(f"Kimi API 网络错误: {exc}") from exc
+                delay = _retry_sleep_seconds(attempt + 1)
+                logger.warning(
+                    "Kimi 网络异常，第 %d 次重试前等待 %.1f 秒",
+                    attempt + 1,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+
+            if resp.status_code == 200:
+                break
+
+            if not _retryable_status(resp.status_code) or attempt >= max_retries:
+                raise RuntimeError(f"Kimi API 失败 ({resp.status_code}): {resp.text[:300]}")
+
+            delay = _retry_sleep_seconds(attempt + 1, resp)
+            logger.warning(
+                "Kimi 服务暂时繁忙（%s），第 %d 次重试前等待 %.1f 秒",
+                resp.status_code,
+                attempt + 1,
+                delay,
             )
-    except httpx.TimeoutException as exc:
-        raise RuntimeError(f"Kimi API 超时: {exc}") from exc
-    except httpx.HTTPError as exc:
-        raise RuntimeError(f"Kimi API 网络错误: {exc}") from exc
-    
-    if resp.status_code != 200:
-        raise RuntimeError(f"Kimi API 失败 ({resp.status_code}): {resp.text[:300]}")
-    
+            await asyncio.sleep(delay)
+
     data = resp.json()
-    if provider == "official":
-        raw = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
-    else:
-        raw = "".join(
-            b.get("text", "")
-            for b in data.get("content", [])
-            if b.get("type") == "text"
-        )
+    raw = _extract_response_text(provider, data)
     logger.info("Kimi 响应长度: %d 字符", len(raw))
     return _parse_json(raw)
+
+
+async def call_kimi_stream(
+    system_prompt: str,
+    user_prompt: str,
+    images: List[bytes] = None,
+    temperature: float = 0.1,
+    max_tokens: int = 65536,
+    on_delta: Optional[Callable[[str], Optional[Awaitable[None]]]] = None,
+    on_retry: Optional[Callable[[Dict[str, Any]], Optional[Awaitable[None]]]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+) -> Union[dict, list]:
+    import httpx
+
+    max_retries = _env_int("KIMI_MAX_RETRIES", 3)
+    idle_timeout = _stream_idle_timeout_seconds()
+    provider, payload, endpoint = _build_kimi_request(
+        system_prompt,
+        user_prompt,
+        images,
+        temperature,
+        max_tokens,
+        stream=True,
+    )
+
+    async with httpx.AsyncClient(timeout=_http_timeout_config(), trust_env=False) as client:
+        for attempt in range(max_retries + 1):
+            chunks: List[str] = []
+            try:
+                _raise_if_stream_cancelled(should_cancel)
+                async with client.stream(
+                    "POST",
+                    endpoint,
+                    headers=_headers(),
+                    json=payload,
+                ) as resp:
+                    if resp.status_code != 200:
+                        if not _retryable_status(resp.status_code) or attempt >= max_retries:
+                            text = getattr(resp, "text", "") or ""
+                            raise RuntimeError(f"Kimi API 失败 ({resp.status_code}): {text[:300]}")
+                        delay = _retry_sleep_seconds(attempt + 1, resp)
+                        logger.warning(
+                            "Kimi 流式服务暂时繁忙（%s），第 %d 次重试前等待 %.1f 秒",
+                            resp.status_code,
+                            attempt + 1,
+                            delay,
+                        )
+                        await _emit_retry(
+                            on_retry,
+                            {
+                                "attempt": attempt + 1,
+                                "status_code": resp.status_code,
+                                "delay_seconds": delay,
+                                "reason": "retryable_status",
+                            },
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
+                    iterator = resp.aiter_lines().__aiter__()
+                    while True:
+                        _raise_if_stream_cancelled(should_cancel)
+                        try:
+                            line = await asyncio.wait_for(iterator.__anext__(), timeout=idle_timeout)
+                        except StopAsyncIteration:
+                            break
+                        except asyncio.TimeoutError as exc:
+                            if attempt >= max_retries:
+                                raise RuntimeError(
+                                    f"Kimi 流式长时间没有新内容（>{idle_timeout:.1f} 秒）"
+                                ) from exc
+                            delay = _retry_sleep_seconds(attempt + 1)
+                            logger.warning(
+                                "Kimi 流式长时间没有新内容，第 %d 次重试前等待 %.1f 秒",
+                                attempt + 1,
+                                delay,
+                            )
+                            await _emit_retry(
+                                on_retry,
+                                {
+                                    "attempt": attempt + 1,
+                                    "status_code": None,
+                                    "delay_seconds": delay,
+                                    "reason": "idle_timeout",
+                                },
+                            )
+                            await asyncio.sleep(delay)
+                            break
+
+                        text = (line or "").strip()
+                        if not text or not text.startswith("data:"):
+                            continue
+                        body = text[5:].strip()
+                        if not body or body == "[DONE]":
+                            continue
+                        payload_json = json.loads(body)
+                        delta = _extract_stream_delta(provider, payload_json)
+                        if not delta:
+                            continue
+                        chunks.append(delta)
+                        await _emit_delta(on_delta, delta)
+
+                    else:
+                        pass
+
+                    if attempt < max_retries and not chunks:
+                        continue
+
+                raw = "".join(chunks)
+                logger.info("Kimi 流式响应长度: %d 字符", len(raw))
+                return _parse_json(raw)
+            except AuditCancellationRequested:
+                raise
+            except httpx.TimeoutException as exc:
+                if attempt >= max_retries:
+                    raise RuntimeError(f"Kimi API 超时: {exc}") from exc
+                delay = _retry_sleep_seconds(attempt + 1)
+                logger.warning(
+                    "Kimi 流式请求超时，第 %d 次重试前等待 %.1f 秒",
+                    attempt + 1,
+                    delay,
+                )
+                await _emit_retry(
+                    on_retry,
+                    {
+                        "attempt": attempt + 1,
+                        "status_code": None,
+                        "delay_seconds": delay,
+                        "reason": "timeout",
+                    },
+                )
+                await asyncio.sleep(delay)
+            except httpx.HTTPError as exc:
+                if attempt >= max_retries:
+                    raise RuntimeError(f"Kimi API 网络错误: {exc}") from exc
+                delay = _retry_sleep_seconds(attempt + 1)
+                logger.warning(
+                    "Kimi 流式网络异常，第 %d 次重试前等待 %.1f 秒",
+                    attempt + 1,
+                    delay,
+                )
+                await _emit_retry(
+                    on_retry,
+                    {
+                        "attempt": attempt + 1,
+                        "status_code": None,
+                        "delay_seconds": delay,
+                        "reason": "network_error",
+                    },
+                )
+                await asyncio.sleep(delay)
+
+    raise RuntimeError("Kimi 流式调用失败：超过最大重试次数")
 
 
 async def async_recognize_catalog(image_path: str) -> list:

@@ -193,7 +193,8 @@ def test_issue_preview_returns_source_drawing_anchor_when_target_drawing_missing
     assert payload["source"]["sheet_no"] == "A6.00"
     assert payload["source"]["anchor"]["global_pct"] == {"x": 46.2, "y": 58.4}
     assert payload["source"]["pdf_anchor"]["global_pct"] == {"x": 46.2, "y": 58.4}
-    assert payload["source"]["highlight_region"] is None
+    assert payload["source"]["highlight_region"]["shape"] == "cloud_rect"
+    assert payload["source"]["highlight_region"]["bbox_pct"]["width"] > 0
     assert payload["source"]["anchor_status"] == "layout_fallback"
     assert payload["target"] is None
     assert payload["missing_reason"] == "missing_target_drawing"
@@ -1156,3 +1157,86 @@ def test_issue_preview_does_not_backfill_layout_page_range_implicitly(monkeypatc
 
     refreshed_json = json.loads(source_json.read_text(encoding="utf-8"))
     assert "layout_page_range" not in refreshed_json
+
+
+def test_batch_issue_preview_keeps_multiple_cloud_regions(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    _seed_project(session_local, models)
+    png_path = _create_dummy_png(tmp_path, "source-a600-v1.png")
+    _seed_source_drawing(
+        session_local,
+        models,
+        drawing_id="drawing-a600-v1",
+        data_version=1,
+        png_path=png_path,
+    )
+
+    db = session_local()
+    try:
+        db.add_all(
+            [
+                models.AuditResult(
+                    id="issue-preview-group-1",
+                    project_id="proj-preview",
+                    audit_version=3,
+                    type="index",
+                    severity="error",
+                    sheet_no_a="A6.00",
+                    location="索引3",
+                    description="索引3断链",
+                    evidence_json=json.dumps(
+                        {
+                            "anchors": [
+                                {
+                                    "role": "source",
+                                    "sheet_no": "A6.00",
+                                    "global_pct": {"x": 26.2, "y": 38.4},
+                                    "origin": "index",
+                                    "confidence": 1.0,
+                                }
+                            ]
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+                models.AuditResult(
+                    id="issue-preview-group-2",
+                    project_id="proj-preview",
+                    audit_version=3,
+                    type="index",
+                    severity="error",
+                    sheet_no_a="A6.00",
+                    location="索引4",
+                    description="索引4断链",
+                    evidence_json=json.dumps(
+                        {
+                            "anchors": [
+                                {
+                                    "role": "source",
+                                    "sheet_no": "A6.00",
+                                    "global_pct": {"x": 46.2, "y": 58.4},
+                                    "origin": "index",
+                                    "confidence": 1.0,
+                                }
+                            ]
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/projects/proj-preview/audit/results/batch-preview",
+            json={"result_ids": ["issue-preview-group-1", "issue-preview-group-2"]},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"]["highlight_region"]["shape"] == "cloud_rect"
+    assert len(payload["extra_source_anchors"]) == 1
+    assert payload["extra_source_anchors"][0]["highlight_region"]["shape"] == "cloud_rect"

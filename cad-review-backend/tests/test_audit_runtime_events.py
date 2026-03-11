@@ -68,7 +68,11 @@ def test_execute_pipeline_records_plain_language_events(monkeypatch, tmp_path):
     monkeypatch.setattr(orchestrator, "match_three_lines", lambda project_id, db: {
         "summary": {"total": 2, "ready": 2, "missing_png": 0, "missing_json": 0, "missing_all": 0}
     })
-    monkeypatch.setattr(orchestrator, "build_sheet_contexts", lambda project_id, db: {"ready": 2, "pending": 0})
+    monkeypatch.setattr(
+        orchestrator,
+        "build_sheet_contexts",
+        lambda project_id, db: {"ready_contexts": 2, "contexts_total": 2, "edges_total": 1},
+    )
     monkeypatch.setattr(orchestrator, "discover_relationships", lambda project_id, db: [])
     monkeypatch.setattr(orchestrator, "save_ai_edges", lambda project_id, relationships, db: 0)
     monkeypatch.setattr(orchestrator, "build_audit_tasks", lambda project_id, audit_version, db: {
@@ -98,7 +102,15 @@ def test_execute_pipeline_records_plain_language_events(monkeypatch, tmp_path):
         db.close()
 
     messages = [event.message for event in events]
-    assert "开始准备审图数据" in messages
-    assert "图纸信息整理完成，共 2 张图纸可进入审图" in messages
-    assert "开始分析跨图关系" in messages
-    assert any("未规划出可执行的审核任务" in message for message in messages)
+    assert "总控规划Agent 正在整理这次审图需要的基础数据" in messages
+    assert "总控规划Agent 已整理好基础数据，共 2 张图纸可进入审图" in messages
+    assert "总控规划Agent 已整理好图纸上下文，当前有 2 张图纸可继续分析" in messages
+    assert "关系审查Agent 开始分析跨图关系，正在找出值得继续核对的图纸关联" in messages
+    assert any("总控规划Agent 暂时没有规划出可执行任务" in message for message in messages)
+    assert all(event.agent_key for event in events)
+    assert all(event.agent_name for event in events)
+    assert all(event.event_kind for event in events)
+    assert all(event.progress_hint is not None for event in events)
+    assert events[0].agent_key == "master_planner_agent"
+    assert events[0].agent_name == "总控规划Agent"
+    assert events[0].event_kind == "phase_started"

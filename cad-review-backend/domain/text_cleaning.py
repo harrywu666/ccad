@@ -11,9 +11,9 @@ import re
 
 _MTEXT_BRACE_PATTERN = re.compile(r"\{\\[a-zA-Z][^{}]*;([^{}]*)\}")
 _MTEXT_STACKING = re.compile(r"\{\\S([^;{}]*);([^{}]*)\}")
-_MTEXT_BARE_COMMANDS = re.compile(r"\\[LlOoKkNn~]")
+_MTEXT_BARE_COMMANDS = re.compile(r"\\[LlOoKkNnAaCcQqWw~]")
 _PARAGRAPH_BREAK = re.compile(r"\\[Pp]")
-_TRAILING_SEMICOLONS = re.compile(r";\s*\}")
+_BACKSLASH_COMMANDS_WITH_VALUE = re.compile(r"\\[HhTtCcQqWw]\d*\.?\d*;?")
 
 
 def strip_mtext_formatting(text: str) -> str:
@@ -45,6 +45,7 @@ def strip_mtext_formatting(text: str) -> str:
         s = _MTEXT_STACKING.sub(r"\1\2", s)
         s = _MTEXT_BRACE_PATTERN.sub(r"\1", s)
 
+    s = _BACKSLASH_COMMANDS_WITH_VALUE.sub("", s)
     s = _MTEXT_BARE_COMMANDS.sub("", s)
     s = s.replace("{}", "")
     s = re.sub(r"\s+", " ", s).strip()

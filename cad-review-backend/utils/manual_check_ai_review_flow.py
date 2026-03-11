@@ -165,6 +165,11 @@ def summarize_runner_metrics(
     codex_resume_count = 0
     codex_cancel_count = 0
     codex_stream_event_count = 0
+    sdk_session_reuse_count = 0
+    sdk_repair_attempts = 0
+    sdk_repair_successes = 0
+    sdk_stream_event_count = 0
+    sdk_needs_review_count = 0
     stalled_turn_retries = 0
     invalid_input_skipped = 0
     runner_broadcast_count = 0
@@ -188,14 +193,25 @@ def summarize_runner_metrics(
             invalid_input_skipped += 1
         elif event_kind == "runner_broadcast":
             runner_broadcast_count += 1
-        elif event_kind == "runner_turn_needs_review":
+        elif event_kind in {"runner_turn_deferred", "runner_turn_needs_review"}:
             needs_review_count += 1
+            if effective_provider == "sdk":
+                sdk_needs_review_count += 1
         elif event_kind == "runner_observer_decision":
             observer_decision_count += 1
             if meta.get("should_intervene") is True:
                 observer_intervention_suggested_count += 1
             if str(meta.get("suggested_action") or "").strip() in {"observe_only", "broadcast_update"}:
                 observer_auto_action_count += 1
+        if effective_provider == "sdk":
+            if event_kind == "runner_session_reused":
+                sdk_session_reuse_count += 1
+            elif event_kind == "output_repair_started":
+                sdk_repair_attempts += 1
+            elif event_kind == "output_repair_succeeded":
+                sdk_repair_successes += 1
+            elif event_kind == "provider_stream_delta":
+                sdk_stream_event_count += 1
         if effective_provider != "codex_sdk":
             continue
         thread_id = str(meta.get("thread_id") or "").strip()
@@ -240,6 +256,11 @@ def summarize_runner_metrics(
         "codex_resume_count": codex_resume_count,
         "codex_cancel_count": codex_cancel_count,
         "codex_stream_event_count": codex_stream_event_count,
+        "sdk_session_reuse_count": sdk_session_reuse_count,
+        "sdk_repair_attempts": sdk_repair_attempts,
+        "sdk_repair_successes": sdk_repair_successes,
+        "sdk_stream_event_count": sdk_stream_event_count,
+        "sdk_needs_review_count": sdk_needs_review_count,
         "stalled_turn_retries": stalled_turn_retries,
         "invalid_input_skipped": invalid_input_skipped,
         "runner_broadcast_count": runner_broadcast_count,

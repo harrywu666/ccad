@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import threading
 
+
+class AuditCancellationRequested(RuntimeError):
+    """审核在运行中被用户请求中断。"""
+
+
 _cancel_lock = threading.Lock()
 _cancel_requested_projects: set[str] = set()
 

@@ -29,7 +29,7 @@ describe('AuditEventList', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'model' }));
+    fireEvent.click(screen.getByRole('button', { name: '开发者模式' }));
 
     expect(screen.getByText('先整理目录，再检查跨图关系。')).toBeInTheDocument();
   });
@@ -44,6 +44,8 @@ describe('AuditEventList', () => {
       />,
     );
 
+    expect(screen.getByText('关键进展')).toBeInTheDocument();
+    expect(screen.queryByText('terminal://audit-stream')).not.toBeInTheDocument();
     expect(screen.queryByText('这是原始模型片段')).not.toBeInTheDocument();
     expect(screen.getByText('开始规划')).toBeInTheDocument();
   });
@@ -70,6 +72,110 @@ describe('AuditEventList', () => {
 
     expect(screen.getByText(/正在复核第 15 组候选关系/)).toBeInTheDocument();
     expect(screen.queryByText('{"raw":"provider fragment"}')).not.toBeInTheDocument();
+  });
+
+  it('summarizes parallel relationship work into one user-facing card', () => {
+    render(
+      <AuditEventList
+        events={[
+          buildEvent({
+            id: 1,
+            step_key: 'relationship_discovery',
+            agent_key: 'relationship_review_agent',
+            agent_name: '关系审查Agent',
+            event_kind: 'phase_progress',
+            progress_hint: 14,
+            message: '关系审查Agent 正在处理第 1 组图纸，共 4 组',
+            meta: { group_index: 1, group_count: 4 },
+          }),
+          buildEvent({
+            id: 2,
+            step_key: 'relationship_discovery',
+            agent_key: 'relationship_review_agent',
+            agent_name: '关系审查Agent',
+            event_kind: 'phase_progress',
+            progress_hint: 14,
+            message: '关系审查Agent 正在处理第 2 组图纸，共 4 组',
+            meta: { group_index: 2, group_count: 4 },
+          }),
+          buildEvent({
+            id: 3,
+            step_key: 'relationship_discovery',
+            agent_key: 'relationship_review_agent',
+            agent_name: '关系审查Agent',
+            event_kind: 'phase_progress',
+            progress_hint: 14,
+            message: '关系审查Agent 正在处理第 3 组图纸，共 4 组',
+            meta: { group_index: 3, group_count: 4 },
+          }),
+          buildEvent({
+            id: 4,
+            step_key: 'relationship_discovery',
+            agent_key: 'relationship_review_agent',
+            agent_name: '关系审查Agent',
+            event_kind: 'runner_broadcast',
+            progress_hint: 15,
+            message: '关系审查Agent 正在整理值得继续复核的候选关系',
+            meta: { stream_layer: 'user_facing', mode: 'legacy_group' },
+          }),
+          buildEvent({
+            id: 5,
+            step_key: 'relationship_discovery',
+            agent_key: 'relationship_review_agent',
+            agent_name: '关系审查Agent',
+            event_kind: 'phase_progress',
+            progress_hint: 14,
+            message: '关系审查Agent 正在处理第 4 组图纸，共 4 组',
+            meta: { group_index: 4, group_count: 4 },
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('关系审查中，当前并行 4 组')).toBeInTheDocument();
+    expect(screen.getByText('关系审查Agent 正在处理第 4 组图纸，共 4 组')).toBeInTheDocument();
+    expect(screen.queryAllByText(/关系审查Agent 正在处理第 [123] 组图纸/)).toHaveLength(0);
+  });
+
+  it('summarizes parallel material work for other agents too', () => {
+    render(
+      <AuditEventList
+        events={[
+          buildEvent({
+            id: 1,
+            step_key: 'material',
+            agent_key: 'material_review_agent',
+            agent_name: '材料审查Agent',
+            event_kind: 'runner_broadcast',
+            progress_hint: 36,
+            message: '材料审查Agent 正在继续推进当前审图步骤',
+            meta: { sheet_no: 'M-01' },
+          }),
+          buildEvent({
+            id: 2,
+            step_key: 'material',
+            agent_key: 'material_review_agent',
+            agent_name: '材料审查Agent',
+            event_kind: 'runner_broadcast',
+            progress_hint: 36,
+            message: '材料审查Agent 正在继续推进当前审图步骤',
+            meta: { sheet_no: 'M-02' },
+          }),
+          buildEvent({
+            id: 3,
+            step_key: 'material',
+            agent_key: 'material_review_agent',
+            agent_name: '材料审查Agent',
+            event_kind: 'runner_broadcast',
+            progress_hint: 36,
+            message: '材料审查Agent 正在继续推进当前审图步骤',
+            meta: { sheet_no: 'M-03' },
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('材料审查中，当前并行 3 张图纸')).toBeInTheDocument();
   });
 
   it('pauses auto-scroll when user scrolls up', () => {

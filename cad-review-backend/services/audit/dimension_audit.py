@@ -28,7 +28,7 @@ from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
 from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidenceRequest
 from services.audit_runtime.evidence_planner import plan_evidence_requests
 from services.audit_runtime.evidence_service import get_evidence_service
-from services.audit_runtime.finding_schema import Finding, apply_finding_to_audit_result
+from services.audit_runtime.finding_schema import Finding, GroundingRequiredError, apply_finding_to_audit_result
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider
 from services.audit_runtime.runner_types import (
@@ -37,7 +37,11 @@ from services.audit_runtime.runner_types import (
     RunnerTurnResult,
 )
 from services.audit_runtime.cancel_registry import is_cancel_requested
-from services.audit_runtime.state_transitions import append_agent_status_report, append_run_event
+from services.audit_runtime.state_transitions import (
+    append_agent_status_report,
+    append_result_upsert_events,
+    append_run_event,
+)
 from services.coordinate_service import cad_to_global_pct, enrich_json_with_coordinates
 from services.feedback_runtime_service import load_feedback_runtime_profile
 from services.kimi_service import call_kimi_stream
@@ -95,6 +99,35 @@ def _build_dimension_agent_report(
         runner_help_request=help_request,
         agent_confidence=confidence,
         next_recommended_action=next_action,
+    )
+
+
+def _build_dimension_job_failure_report(
+    job: Dict[str, Any],
+    *,
+    stage: str,
+    exc: Exception,
+) -> DimensionAgentReport:
+    sheet_no = str(job.get("sheet_no") or job.get("a_sheet_no") or job.get("sheet_key") or "UNKNOWN").strip() or "UNKNOWN"
+    target_sheet_no = str(job.get("b_sheet_no") or "").strip()
+    label = f"{sheet_no} -> {target_sheet_no}" if target_sheet_no else sheet_no
+    reason = str(exc).strip() or exc.__class__.__name__
+    return DimensionAgentReport(
+        batch_summary=f"尺寸审查Agent 在 {stage} 批次遇到异常（{label}）",
+        confirmed_findings=[],
+        suspected_findings=[],
+        blocking_issues=[
+            {
+                "kind": "job_failed",
+                "stage": stage,
+                "sheet_no": sheet_no,
+                "target_sheet_no": target_sheet_no or None,
+                "reason": reason,
+            }
+        ],
+        runner_help_request="restart_subsession",
+        agent_confidence=0.2,
+        next_recommended_action="rerun_current_batch",
     )
 
 
@@ -170,7 +203,7 @@ def _apply_dimension_finding(
         triggered_by=triggered_by,
         description=str(issue.description or "").strip(),
     )
-    return apply_finding_to_audit_result(issue, finding)
+    return apply_finding_to_audit_result(issue, finding, require_grounding=True)
 
 
 def _dimension_v2_enabled() -> bool:
@@ -743,9 +776,30 @@ async def _execute_sheet_jobs(
         *[_worker(job) for job in sheet_jobs], return_exceptions=True
     )
     final_results: List[Tuple[str, List[Dict[str, Any]], str]] = []
-    for result in results:
+    for job, result in zip(sheet_jobs, results):
         if isinstance(result, Exception):
-            raise result
+            logger.warning(
+                "dimension sheet job failed project=%s version=%s sheet=%s error=%r",
+                project_id,
+                audit_version,
+                job.get("sheet_no"),
+                result,
+            )
+            if project_id is not None and audit_version is not None:
+                append_agent_status_report(
+                    project_id,
+                    audit_version,
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    progress_hint=29,
+                    report=_build_dimension_job_failure_report(
+                        job,
+                        stage="sheet_semantic",
+                        exc=result,
+                    ),
+                )
+            continue
         final_results.append(result)
     return final_results
 
@@ -975,9 +1029,31 @@ async def _execute_pair_jobs(
         *[_worker(job) for job in pair_jobs], return_exceptions=True
     )
     pair_compare_results: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
-    for result in results:
+    for job, result in zip(pair_jobs, results):
         if isinstance(result, Exception):
-            raise result
+            logger.warning(
+                "dimension pair job failed project=%s version=%s source=%s target=%s error=%r",
+                project_id,
+                audit_version,
+                job.get("a_sheet_no"),
+                job.get("b_sheet_no"),
+                result,
+            )
+            if project_id is not None and audit_version is not None:
+                append_agent_status_report(
+                    project_id,
+                    audit_version,
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    progress_hint=31,
+                    report=_build_dimension_job_failure_report(
+                        job,
+                        stage="pair_compare",
+                        exc=result,
+                    ),
+                )
+            continue
         pair_key, payload = result
         pair_compare_results[pair_key] = payload
     return pair_compare_results
@@ -1096,6 +1172,10 @@ def _build_dimension_issues(
                 global_pct=resolved_source_pct,
                 confidence=confidence,
                 origin="dimension",
+                highlight_region=(source_dim or {}).get("highlight_region")
+                if isinstance((source_dim or {}).get("highlight_region"), dict)
+                else None,
+                meta={"dimension_id": source_dim_id or None},
             )
             if source_anchor:
                 anchors.append(source_anchor)
@@ -1107,6 +1187,10 @@ def _build_dimension_issues(
                 global_pct=resolved_target_pct,
                 confidence=confidence,
                 origin="dimension",
+                highlight_region=(target_dim or {}).get("highlight_region")
+                if isinstance((target_dim or {}).get("highlight_region"), dict)
+                else None,
+                meta={"dimension_id": target_dim_id or None},
             )
             if target_anchor:
                 anchors.append(target_anchor)
@@ -1116,11 +1200,36 @@ def _build_dimension_issues(
                 pair_id=f"{pair['a']}::{pair['b']}",
                 unlocated_reason=None if anchors else "dimension_pair_unlocated",
             )
-            _apply_dimension_finding(
-                issue,
-                confidence=confidence,
-                review_round=1,
-            )
+            try:
+                _apply_dimension_finding(
+                    issue,
+                    confidence=confidence,
+                    review_round=1,
+                )
+            except GroundingRequiredError:
+                append_agent_status_report(
+                    project_id,
+                    audit_version,
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    progress_hint=43,
+                    report=DimensionAgentReport(
+                        batch_summary="尺寸问题已经识别出来，但这次没把图上的精确位置框稳，Runner 正在帮它重启后重试。",
+                        blocking_issues=[
+                            {
+                                "issue_type": "grounding_missing",
+                                "sheet_no": issue.sheet_no_a or issue.sheet_no_b,
+                                "location": issue.location,
+                                "reason": "missing_highlight_region",
+                            }
+                        ],
+                        runner_help_request="restart_subsession",
+                        agent_confidence=0.0,
+                        next_recommended_action="restart_subsession",
+                    ),
+                )
+                continue
             issues.append(issue)
 
     return issues
@@ -1295,6 +1404,11 @@ def audit_dimensions(
                 source_agent="dimension_review_agent",
             )
     add_and_commit(db, issues)
+    append_result_upsert_events(
+        project_id,
+        audit_version,
+        issue_ids=[issue.id for issue in issues],
+    )
     logger.info(
         "dimension_audit done project=%s version=%s issues=%s",
         project_id,

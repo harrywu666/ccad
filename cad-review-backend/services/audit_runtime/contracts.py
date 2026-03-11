@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any, Dict, Optional
 
+from services.audit_runtime.finding_schema import Finding
+
 
 class EvidencePackType(StrEnum):
     OVERVIEW_PACK = "overview_pack"
@@ -60,3 +62,12 @@ class EvidencePlanItem:
         payload = asdict(self)
         payload["pack_type"] = self.pack_type.value
         return payload
+
+
+__all__ = [
+    "EvidencePackType",
+    "EvidenceRequest",
+    "EvidencePack",
+    "EvidencePlanItem",
+    "Finding",
+]

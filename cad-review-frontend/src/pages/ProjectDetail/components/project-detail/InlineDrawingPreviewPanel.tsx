@@ -14,6 +14,8 @@ interface InlineDrawingPreviewPanelProps {
   missingReason?: string | null;
   drawingA: PreviewDrawing | null;
   drawingB?: PreviewDrawing | null;
+  extraSourceAnchors?: any[];
+  extraTargetAnchors?: any[];
   activeView: 'a' | 'b';
   onViewChange: (view: 'a' | 'b') => void;
   onClose: () => void;
@@ -29,6 +31,8 @@ export default function InlineDrawingPreviewPanel({
   missingReason = null,
   drawingA,
   drawingB = null,
+  extraSourceAnchors,
+  extraTargetAnchors,
   activeView,
   onViewChange,
   onClose,
@@ -111,6 +115,7 @@ export default function InlineDrawingPreviewPanel({
             availableVersions={availableVersions}
             overlayVersions={overlayVersions}
             onToggleOverlayVersion={toggleOverlayVersion}
+            extraAnchors={activeView === 'b' ? extraTargetAnchors : extraSourceAnchors}
           />
         ) : (
           <div className="h-full bg-secondary/20 p-6 flex items-center justify-center">

@@ -18,16 +18,21 @@ from services.ai_prompt_service import (
 )
 from services.audit.common import build_anchor, to_evidence_json
 from services.audit.issue_preview import ensure_issue_drawing_matches
+from services.audit_runtime.agent_reports import IndexAgentReport
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
 from services.audit_runtime.contracts import EvidenceRequest
 from services.audit_runtime.evidence_planner import plan_evidence_requests
 from services.audit_runtime.evidence_service import get_evidence_service
-from services.audit_runtime.finding_schema import Finding, apply_finding_to_audit_result
+from services.audit_runtime.finding_schema import Finding, GroundingRequiredError, apply_finding_to_audit_result
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
-from services.audit_runtime.state_transitions import append_run_event
+from services.audit_runtime.state_transitions import (
+    append_agent_status_report,
+    append_result_upsert_events,
+    append_run_event,
+)
 from services.feedback_runtime_service import load_feedback_runtime_profile
 from services.kimi_service import call_kimi, call_kimi_stream
 from services.layout_json_service import load_enriched_layout_json
@@ -123,6 +128,63 @@ def _run_async(coro):  # noqa: ANN001
             loop.close()
 
 
+def _build_index_agent_report(
+    turn_result: RunnerTurnResult,
+    *,
+    source_sheet_no: str,
+    target_sheet_no: str,
+    index_no: str,
+) -> IndexAgentReport:
+    event_kinds = {
+        str(item.event_kind or "").strip()
+        for item in (turn_result.events or [])
+        if str(item.event_kind or "").strip()
+    }
+    blocking_issues: List[Dict[str, Any]] = []
+    unstable = (
+        turn_result.status != "ok"
+        or turn_result.repair_attempts > 0
+        or "output_validation_failed" in event_kinds
+    )
+    if unstable:
+        blocking_issues.append(
+            {
+                "kind": "unstable_output",
+                "stage": "index_visual_review",
+                "source_sheet_no": str(source_sheet_no or "").strip(),
+                "target_sheet_no": str(target_sheet_no or "").strip(),
+                "index_no": str(index_no or "").strip(),
+                "reason": turn_result.error or "runner_output_unstable",
+            }
+        )
+
+    if blocking_issues:
+        help_request = "restart_subsession"
+        next_action = "rerun_current_batch"
+        confidence = 0.35
+    else:
+        help_request = ""
+        next_action = "continue"
+        confidence = 0.82 if isinstance(turn_result.output, dict) and turn_result.output else 0.6
+
+    pair_label = " -> ".join(
+        item for item in [str(source_sheet_no or "").strip(), str(target_sheet_no or "").strip()] if item
+    )
+    summary = f"索引审查Agent 已完成一批索引复核"
+    if pair_label:
+        summary = f"{summary}（{pair_label} / {index_no or '?'}）"
+
+    return IndexAgentReport(
+        batch_summary=summary,
+        confirmed_findings=[],
+        suspected_findings=[],
+        blocking_issues=blocking_issues,
+        runner_help_request=help_request,
+        agent_confidence=confidence,
+        next_recommended_action=next_action,
+    )
+
+
 def _reviewable_index_issue(kind: str) -> bool:
     return kind in {
         "missing_target_index_no",
@@ -201,7 +263,7 @@ def _apply_index_finding(issue: AuditResult, candidate: Dict[str, Any]) -> Audit
         triggered_by=candidate.get("triggered_by"),
         description=str(issue.description or "").strip(),
     )
-    return apply_finding_to_audit_result(issue, finding)
+    return apply_finding_to_audit_result(issue, finding, require_grounding=True)
 
 
 def _merge_index_ai_review(issue: AuditResult, result: Dict[str, Any]) -> None:
@@ -292,7 +354,7 @@ async def _run_index_ai_review(
             ),
             should_cancel=lambda: is_cancel_requested(project_id),
         )
-        result = turn_result.output if turn_result.status != "needs_review" else None
+        result = turn_result.output if turn_result.status == "ok" else None
     else:
         runner = _get_index_runner(project_id or "__adhoc_index__", audit_version or 0)
         turn_result = await runner.run_once(
@@ -314,7 +376,23 @@ async def _run_index_ai_review(
                 },
             )
         )
-        result = turn_result.output if turn_result.status != "needs_review" else None
+        result = turn_result.output if turn_result.status == "ok" else None
+    report = _build_index_agent_report(
+        turn_result,
+        source_sheet_no=candidate["source_sheet_no"],
+        target_sheet_no=str(candidate.get("target_sheet_no") or "").strip(),
+        index_no=str(candidate["index_no"] or "").strip(),
+    )
+    if report.blocking_issues and project_id is not None and audit_version is not None:
+        append_agent_status_report(
+            project_id,
+            audit_version,
+            step_key="index",
+            agent_key="index_review_agent",
+            agent_name="索引审查Agent",
+            progress_hint=24,
+            report=report,
+        )
     return result if isinstance(result, dict) else None
 
 
@@ -645,6 +723,11 @@ def audit_indexes(
                 global_pct=idx.get("global_pct") if isinstance(idx.get("global_pct"), dict) else None,
                 confidence=1.0,
                 origin="index",
+                highlight_region=idx.get("highlight_region") if isinstance(idx.get("highlight_region"), dict) else None,
+                meta={
+                    "index_no": raw_index_no or None,
+                    "target_sheet": raw_target_sheet or None,
+                },
             )
 
             if idx_key:
@@ -876,7 +959,32 @@ def audit_indexes(
 
     issues: List[AuditResult] = []
     for candidate in final_candidates:
-        issue = _apply_index_finding(candidate["issue"], candidate)
+        try:
+            issue = _apply_index_finding(candidate["issue"], candidate)
+        except GroundingRequiredError:
+            append_agent_status_report(
+                project_id,
+                audit_version,
+                step_key="index",
+                agent_key="index_review_agent",
+                agent_name="索引审查Agent",
+                progress_hint=24,
+                report=IndexAgentReport(
+                    batch_summary="索引问题已经识别出来，但这次没把图上的精确位置框稳，Runner 正在帮它重启后重试。",
+                    blocking_issues=[
+                        {
+                            "issue_type": "grounding_missing",
+                            "sheet_no": candidate["issue"].sheet_no_a or candidate["issue"].sheet_no_b,
+                            "location": candidate["issue"].location,
+                            "reason": "missing_highlight_region",
+                        }
+                    ],
+                    runner_help_request="restart_subsession",
+                    agent_confidence=0.0,
+                    next_recommended_action="restart_subsession",
+                ),
+            )
+            continue
         db.add(issue)
         db.flush()
         ensure_issue_drawing_matches(issue, db)
@@ -897,4 +1005,9 @@ def audit_indexes(
             )
 
     db.commit()
+    append_result_upsert_events(
+        project_id,
+        audit_version,
+        issue_ids=[issue.id for issue in issues],
+    )
     return issues

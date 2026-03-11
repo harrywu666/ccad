@@ -20,6 +20,8 @@ export interface Project {
   created_at: string;
   status: string;
   updated_at: string;
+  current_step?: string | null;
+  progress?: number | null;
 }
 
 export interface ProjectCreate {

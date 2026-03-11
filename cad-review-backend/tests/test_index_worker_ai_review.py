@@ -225,3 +225,42 @@ def test_index_audit_emits_stream_events_for_ai_review(monkeypatch, tmp_path):
         )
     finally:
         db.close()
+
+
+def test_index_audit_reports_grounding_failure_to_runner(monkeypatch, tmp_path):
+    database, models, index_audit = _load_modules(monkeypatch, tmp_path)
+
+    source_json = tmp_path / "source-grounding.json"
+    source_json.write_text(
+        '{"indexes":[{"index_no":"D1","target_sheet":"A9.99"}],"title_blocks":[]}',
+        encoding="utf-8",
+    )
+
+    captured_reports: list[object] = []
+    monkeypatch.setattr(
+        index_audit,
+        "append_agent_status_report",
+        lambda *args, **kwargs: captured_reports.append(kwargs["report"]),
+    )
+
+    db = database.SessionLocal()
+    try:
+        db.add(models.Project(id="proj-index-grounding", name="Index Grounding"))
+        db.add(
+            models.JsonData(
+                id="json-source-grounding",
+                project_id="proj-index-grounding",
+                sheet_no="A1.01",
+                json_path=str(source_json),
+                is_latest=1,
+            )
+        )
+        db.commit()
+
+        issues = index_audit.audit_indexes("proj-index-grounding", 1, db)
+    finally:
+        db.close()
+
+    assert issues == []
+    assert len(captured_reports) == 1
+    assert captured_reports[0].runner_help_request == "restart_subsession"

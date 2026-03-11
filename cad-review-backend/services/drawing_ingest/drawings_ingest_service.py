@@ -7,10 +7,10 @@ import logging
 import os
 import time
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 from domain.match_scoring import pick_catalog_candidate
 from models import Catalog, Drawing
@@ -18,6 +18,13 @@ from services.cache_service import increment_cache_version, recalculate_project_
 from services.storage_path_service import resolve_project_dir
 
 logger = logging.getLogger(__name__)
+
+MAX_PDF_SIZE_BYTES = 500 * 1024 * 1024
+
+
+def _safe_filename(raw: str) -> str:
+    """提取纯文件名，防止路径穿越攻击。"""
+    return PurePosixPath(raw).name or "upload"
 
 
 def _render_pdf_page(pdf_path: str, page_index: int, dpi: int = 300) -> bytes:
@@ -54,9 +61,11 @@ async def ingest_drawings_upload(project_id: str, project, file: UploadFile, db,
     pdf_dir = project_dir / "pngs" / f"v{current_version}"
     pdf_dir.mkdir(parents=True, exist_ok=True)
 
-    pdf_path = pdf_dir / (file.filename or "drawings.pdf")
+    pdf_path = pdf_dir / _safe_filename(file.filename or "upload.pdf")
+    content = await file.read()
+    if len(content) > MAX_PDF_SIZE_BYTES:
+        raise HTTPException(status_code=413, detail="PDF 文件不能超过 500MB")
     with open(pdf_path, "wb") as stream:
-        content = await file.read()
         stream.write(content)
     set_progress(project_id, "processing", 10, "文件上传完成，读取页数中")
 

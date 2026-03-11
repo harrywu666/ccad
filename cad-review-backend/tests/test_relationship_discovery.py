@@ -140,6 +140,42 @@ def test_discover_group_uses_configured_stage_user_prompt(monkeypatch, tmp_path)
     }
 
 
+def test_build_discovery_prompt_enforces_json_only_contract(monkeypatch, tmp_path):
+    _, _, relationship_discovery = _load_modules(monkeypatch, tmp_path)
+
+    prompt = relationship_discovery._build_discovery_prompt(
+        [
+            {
+                "sheet_no": "A1.01",
+                "sheet_name": "平面布置图",
+                "indexes_json": [],
+            }
+        ],
+        [{"图号": "A1.01", "图名": "平面布置图"}],
+    )
+
+    assert "不要输出分析过程" in prompt
+    assert "不要输出 ```json" in prompt
+    assert "没有关系就只返回[]" in prompt
+    assert '"source":"图号"' in prompt
+    assert '"target":"目标图号"' in prompt
+
+
+def test_build_relationship_task_prompt_enforces_json_only_contract(monkeypatch, tmp_path):
+    _, _, relationship_discovery = _load_modules(monkeypatch, tmp_path)
+
+    prompt = relationship_discovery._build_relationship_task_prompt(
+        {"sheet_no": "A1.01", "sheet_name": "平面图"},
+        {"sheet_no": "A4.01", "sheet_name": "节点详图"},
+    )
+
+    assert "不要输出分析过程" in prompt
+    assert "不要输出 markdown" in prompt
+    assert "没有跨图引用关系就只返回[]" in prompt
+    assert '"relation":"index_ref|detail_ref|section_ref|elevation_ref|callout_ref"' in prompt
+    assert '"index_label":"索引编号或标记文字"' in prompt
+
+
 def test_group_sheets_honors_configured_group_size(monkeypatch, tmp_path):
     _, _, relationship_discovery = _load_modules(monkeypatch, tmp_path)
     monkeypatch.setenv("AUDIT_RELATIONSHIP_DISCOVERY_GROUP_SIZE", "2")

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import * as api from '@/api';
 import type { Category, Project } from '@/types';
+import type { AuditStatus } from '@/types';
 import AppLayout from '@/components/layout/AppLayout';
 import ProjectTable from './ProjectList/components/ProjectTable';
 import CreateProjectDialog from './ProjectList/components/CreateProjectDialog';
@@ -38,6 +39,16 @@ export default function ProjectList() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const prefix = 'ccad.auditProgress.uiState.';
+    Object.keys(window.sessionStorage).forEach((key) => {
+      if (key.startsWith(prefix)) {
+        window.sessionStorage.removeItem(key);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       void loadData();
     }, 6000);
@@ -62,12 +73,44 @@ export default function ProjectList() {
         api.getCategories(),
         api.getProjects(),
       ]);
-      setCategories(cats);
-      setProjects(projs);
 
-      const counts: Record<string, number> = { all: projs.length };
+      const auditingProjectIds = projs
+        .filter((project) => project.status === 'auditing')
+        .map((project) => project.id);
+
+      let progressMap = new Map<string, AuditStatus>();
+      if (auditingProjectIds.length) {
+        const auditStatuses = await Promise.all(
+          auditingProjectIds.map(async (projectId) => {
+            try {
+              const status = await api.getAuditStatus(projectId);
+              return [projectId, status] as const;
+            } catch {
+              return null;
+            }
+          }),
+        );
+        progressMap = new Map(
+          auditStatuses.filter((item): item is readonly [string, AuditStatus] => Boolean(item)),
+        );
+      }
+
+      const enrichedProjects = projs.map((project) => {
+        const auditStatus = progressMap.get(project.id);
+        if (!auditStatus) return project;
+        return {
+          ...project,
+          current_step: auditStatus.current_step,
+          progress: auditStatus.progress,
+        };
+      });
+
+      setCategories(cats);
+      setProjects(enrichedProjects);
+
+      const counts: Record<string, number> = { all: enrichedProjects.length };
       cats.forEach(c => {
-        counts[c.id] = projs.filter(p => p.category === c.id).length;
+        counts[c.id] = enrichedProjects.filter(p => p.category === c.id).length;
       });
       setCategoryCount(counts);
     } catch (error) {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import sys
 import uuid
 from pathlib import Path
@@ -90,5 +91,8 @@ def test_ingest_dwg_upload_initial_version_creates_json_without_history(monkeypa
         assert row.json_path
         assert Path(row.json_path).exists()
         assert "分图:frag-1" in (row.summary or "")
+        payload = json.loads(Path(row.json_path).read_text(encoding="utf-8"))
+        assert payload["sheet_no"] == "PL-01"
+        assert payload["sheet_name"] == "平面布置图"
     finally:
         db.close()

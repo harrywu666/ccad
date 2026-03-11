@@ -10,7 +10,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from domain.sheet_normalization import normalize_sheet_no
 from database import SessionLocal
-from models import AuditRun, AuditRunEvent, AuditTask, Project
+from models import AuditResult, AuditRun, AuditRunEvent, AuditTask, Project
+from services.audit_runtime.result_view import (
+    group_results_for_view,
+    serialize_audit_result,
+    summarize_grouped_counts,
+)
 
 
 _STEP_AGENT_DEFAULTS: Dict[str, Dict[str, object]] = {
@@ -71,6 +76,8 @@ _OBSERVER_TRIGGER_EVENT_KINDS = {
     "runner_turn_retrying",
     "runner_turn_deferred",
     "runner_turn_needs_review",
+    "master_replan_requested",
+    "master_recovery_exhausted",
 }
 
 
@@ -189,6 +196,100 @@ def append_run_event(
             audit_version,
             event_kind=(event_kind or str(_resolve_event_defaults(step_key)["event_kind"])).strip() or None,
         )
+
+
+def _build_grouped_result_snapshot(
+    db, project_id: str, audit_version: int  # noqa: ANN001
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    rows = (
+        db.query(AuditResult)
+        .filter(
+            AuditResult.project_id == project_id,
+            AuditResult.audit_version == audit_version,
+        )
+        .order_by(AuditResult.created_at.asc())
+        .all()
+    )
+    raw_items = [serialize_audit_result(item) for item in rows]
+    grouped_items = group_results_for_view(raw_items)
+    counts = summarize_grouped_counts(grouped_items)
+    issue_to_row: Dict[str, Dict[str, Any]] = {}
+    for row in grouped_items:
+        for issue_id in row.get("issue_ids") or []:
+            issue_to_row[str(issue_id)] = row
+    return grouped_items, counts, issue_to_row
+
+
+def append_result_upsert_events(
+    project_id: str,
+    audit_version: int,
+    *,
+    issue_ids: List[str],
+) -> None:
+    normalized_issue_ids = [str(item).strip() for item in issue_ids if str(item).strip()]
+    if not normalized_issue_ids:
+        return
+
+    db = SessionLocal()
+    try:
+        _, counts, issue_to_row = _build_grouped_result_snapshot(db, project_id, audit_version)
+    finally:
+        db.close()
+
+    emitted_row_ids: set[str] = set()
+    for issue_id in normalized_issue_ids:
+        row = issue_to_row.get(issue_id)
+        if not row:
+            continue
+        row_id = str(row.get("id") or "").strip()
+        if not row_id or row_id in emitted_row_ids:
+            continue
+        emitted_row_ids.add(row_id)
+        append_run_event(
+            project_id,
+            audit_version,
+            level="info",
+            step_key="result_stream",
+            agent_key="runner_agent",
+            agent_name="Runner Agent",
+            event_kind="result_upsert",
+            progress_hint=None,
+            message="Runner Agent 已向报告追加一条问题",
+            meta={
+                "delta_kind": "upsert",
+                "view": "grouped",
+                "row": row,
+                "counts": counts,
+                "source_issue_ids": row.get("issue_ids") or [issue_id],
+            },
+            dispatch_observer=False,
+        )
+
+
+def append_result_summary_event(project_id: str, audit_version: int) -> None:
+    db = SessionLocal()
+    try:
+        _, counts, _ = _build_grouped_result_snapshot(db, project_id, audit_version)
+    finally:
+        db.close()
+
+    append_run_event(
+        project_id,
+        audit_version,
+        level="info",
+        step_key="result_stream",
+        agent_key="runner_agent",
+        agent_name="Runner Agent",
+        event_kind="result_summary",
+        progress_hint=None,
+        message=f"Runner Agent 已同步报告汇总：当前共 {counts['total']} 条问题",
+        meta={
+            "delta_kind": "summary",
+            "view": "grouped",
+            "counts": counts,
+        },
+        dispatch_observer=False,
+    )
 
 
 def append_agent_status_report(
@@ -504,6 +605,61 @@ def _restart_runner_subsession(
     return restarted
 
 
+def _restart_master_agent(
+    project_id: str,
+    audit_version: int,
+    *,
+    runtime_status: Dict[str, Any],
+    recent_events: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    from dataclasses import asdict
+
+    from services.audit_runtime.project_recovery_memory import load_project_recovery_memory
+    from services.audit_runtime_service import restart_master_agent_async
+
+    memory = load_project_recovery_memory(project_id, audit_version=audit_version)
+    restart_result = restart_master_agent_async(project_id, audit_version)
+    append_run_event(
+        project_id,
+        audit_version,
+        step_key=runtime_status.get("current_step") or None,
+        agent_key="runner_observer_agent",
+        agent_name="Runner观察Agent",
+        event_kind="runner_master_recovery_requested",
+        progress_hint=runtime_status.get("progress") or 0,
+        message="Runner 正在带着项目级记忆重启总控Agent",
+        meta={
+            "stream_layer": "internal_master_recovery",
+            "memory": asdict(memory),
+            "recent_events_seen": len(recent_events),
+            "restart_result": restart_result,
+        },
+        dispatch_observer=False,
+    )
+    append_run_event(
+        project_id,
+        audit_version,
+        step_key=runtime_status.get("current_step") or None,
+        agent_key="runner_observer_agent",
+        agent_name="Runner观察Agent",
+        event_kind="runner_master_recovery_succeeded",
+        progress_hint=runtime_status.get("progress") or 0,
+        message="Runner 已把项目级记忆交回总控Agent，后续会继续盯它是否恢复推进",
+        meta={
+            "stream_layer": "internal_master_recovery",
+            "memory": asdict(memory),
+            "recent_events_seen": len(recent_events),
+            "restart_result": restart_result,
+        },
+        dispatch_observer=False,
+    )
+    return {
+        "restarted": bool(restart_result.get("restarted")),
+        "memory": asdict(memory),
+        "restart_result": restart_result,
+    }
+
+
 def _rewrite_observer_action(
     requested_action: str,
     *,
@@ -546,7 +702,20 @@ def _execute_observer_action(
                 audit_version,
                 agent_key=_find_target_agent_key(recent_events),
             ),
+            "restart_master_agent": lambda: _restart_master_agent(
+                project_id,
+                audit_version,
+                runtime_status=runtime_status,
+                recent_events=recent_events,
+            ),
         },
+    )
+    action_label = result.get("action_name") or action_name or "observe_only"
+    executed = bool(result.get("executed"))
+    action_message = (
+        f"Runner 已执行观察动作：{action_label}"
+        if executed
+        else f"Runner 暂未执行观察动作：{action_label}"
     )
     append_run_event(
         project_id,
@@ -556,7 +725,7 @@ def _execute_observer_action(
         agent_name="Runner观察Agent",
         event_kind="runner_observer_action",
         progress_hint=runtime_status.get("progress") or 0,
-        message=f"Runner 已执行观察动作：{result.get('action_name') or action_name or 'observe_only'}",
+        message=action_message,
         meta={
             "stream_layer": "observer_action",
             "action_name": result.get("action_name"),

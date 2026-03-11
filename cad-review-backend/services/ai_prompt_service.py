@@ -162,6 +162,38 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         ),
         placeholders=("payload_json",),
     ),
+    PromptStageDefinition(
+        stage_key="index_visual_review",
+        title="索引视觉复核",
+        description="对规则引擎判定为高歧义的索引问题做一次视觉复核，减少误报。",
+        call_site="索引核对阶段，仅在规则结果存在歧义时触发。",
+        default_system_prompt=(
+            "你是室内施工图索引复核专家。"
+            "你的任务不是重新全面审图，而是只针对给定的索引疑点做确认。"
+            "只返回 JSON，不要解释。"
+        ),
+        default_user_prompt=(
+            "请复核这条索引疑点是否应当保留为审图问题。\n"
+            "来源图：{{source_sheet_no}}\n"
+            "目标图：{{target_sheet_no}}\n"
+            "索引编号：{{index_no}}\n"
+            "疑点类型：{{issue_kind}}\n"
+            "规则判断：{{issue_description}}\n\n"
+            "判断原则：\n"
+            "- confirm：从图面看，这条问题大概率成立，应保留\n"
+            "- reject：从图面看，这条更像正常表达或规则误判，应去掉\n"
+            "- uncertain：图面证据不足，保持原规则结果\n\n"
+            "只返回 JSON 对象：\n"
+            '{"decision":"confirm|reject|uncertain","confidence":0.0,"reason":"","severity_override":""}'
+        ),
+        placeholders=(
+            "source_sheet_no",
+            "target_sheet_no",
+            "index_no",
+            "issue_kind",
+            "issue_description",
+        ),
+    ),
     # ── 尺寸单图语义分析 ──────────────────────────────────────
     PromptStageDefinition(
         stage_key="dimension_single_sheet",
@@ -192,10 +224,11 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
             "相邻象限有20%重叠，确保边界处标注不被截断。\n\n"
             "**坐标读取方法：** 看象限图白色边距上的刻度数字，即可得到该位置的全图百分比坐标。\n"
             "刻度坐标与 JSON 数据中的 global_pct 是完全一致的坐标系，可直接对应。\n\n"
-            "以下是DWG提取的精确尺寸数据（数值100%准确，无需重新OCR）。\n"
+            "以下是DWG提取的尺寸数据（优先保留图上显示的数字，无需重新OCR）。\n"
             "每条数据字段说明：\n"
             "- id：标注唯一ID\n"
-            "- value：精确数值（mm）\n"
+            "- value：审核使用的数值（优先取图上显示数字；没手动改字时回退到真实测量值，单位 mm）\n"
+            "- actual_value：按几何算出来的真实长度（仅作参考，单位 mm）\n"
             "- display_text：标注显示文字\n"
             "- global_pct：在全图中的百分比位置（x=0最左, x=100最右, y=0最上, y=100最下）\n"
             "- in_quadrants：该标注在哪些象限图（图2-5）中可见\n\n"
@@ -349,10 +382,17 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
             "- 象限图外围有白色边距，边距上标有百分比刻度尺，这是坐标参考工具\n"
             "- 图纸内容只在白色边距以内，刻度尺不是图纸的一部分\n"
             "- 你输出的 global_pct 必须是全图百分比坐标，与 JSON 数据中的坐标是同一坐标系\n\n"
-            "只返回JSON数组，不要解释。"
+            "输出纪律（必须严格遵守）：\n"
+            "1. 只返回 JSON 数组，不要输出任何解释、思考过程、结论性段落或额外文字\n"
+            "2. 不要输出 markdown，不要输出 ```json 代码块，不要加前后缀\n"
+            "3. 没有发现跨图引用关系时，只返回 []\n"
+            "4. 只有证据明确时才输出；不要猜，不要为了凑结果而输出可疑关系\n"
+            "5. source 和 target 必须是图号字符串，target 必须来自项目目录\n"
         ),
         default_user_prompt=(
-            "请分析以下图纸，找出所有跨图引用关系。\n\n"
+            "请分析以下图纸，找出所有跨图引用关系。\n"
+            "你必须直接交标准 JSON 结果，不要写分析过程。\n"
+            "如果没有关系，就只返回 []。\n\n"
             "{{discovery_prompt}}"
         ),
         placeholders=("discovery_prompt",),

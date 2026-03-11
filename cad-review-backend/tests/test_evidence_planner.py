@@ -44,6 +44,18 @@ def test_material_task_avoids_deep_pack_by_default():
     assert plans[0].pack_type.value == "focus_pack"
 
 
+def test_index_task_uses_paired_overview_when_target_exists():
+    plans = plan_evidence_requests(
+        task_type="index",
+        source_sheet_no="A1.01",
+        target_sheet_no="A4.01",
+    )
+
+    assert len(plans) == 1
+    assert plans[0].pack_type.value == "paired_overview_pack"
+    assert plans[0].task_type == "index"
+
+
 def test_evidence_plan_item_is_serializable():
     plan = plan_evidence_requests(
         task_type="relationship",

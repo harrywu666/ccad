@@ -19,10 +19,8 @@ class RunnerActionGate:
     _ALLOWED_ACTIONS = {
         "observe_only",
         "broadcast_update",
-        "cancel_turn",
         "restart_subsession",
-        "rerun_current_step",
-        "mark_needs_review",
+        "restart_master_agent",
     }
 
     def __init__(self, *, project_root: str) -> None:

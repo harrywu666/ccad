@@ -200,3 +200,77 @@ def test_expand_layout_json_units_collapses_directory_like_text_only_layout():
 
     assert len(units) == 1
     assert units[0]["json_path"] == "/tmp/layout.json"
+
+
+def test_expand_layout_json_units_keeps_clustered_text_only_fragments_without_viewports():
+    json_info = {
+        "layout_name": "布局1",
+        "sheet_no": "",
+        "sheet_name": "",
+        "data": {
+            "layout_name": "布局1",
+            "sheet_no": "",
+            "sheet_name": "",
+            "layout_frames": [{"frame_id": "f1"}, {"frame_id": "f2"}, {"frame_id": "f3"}, {"frame_id": "f4"}],
+            "layout_fragments": [
+                {
+                    "fragment_id": "frag-1",
+                    "frame_id": "f1",
+                    "sheet_no": "IN-01",
+                    "sheet_name": "目录",
+                    "title_blocks": [],
+                    "detail_titles": [],
+                    "viewports": [],
+                    "dimensions": [],
+                    "indexes": [],
+                    "materials": [],
+                    "text_count": 120,
+                },
+                {
+                    "fragment_id": "frag-2",
+                    "frame_id": "f2",
+                    "sheet_no": "IN-02",
+                    "sheet_name": "设计说明",
+                    "title_blocks": [],
+                    "detail_titles": [],
+                    "viewports": [],
+                    "dimensions": [],
+                    "indexes": [],
+                    "materials": [],
+                    "text_count": 140,
+                },
+                {
+                    "fragment_id": "frag-3",
+                    "frame_id": "f3",
+                    "sheet_no": "PL-01",
+                    "sheet_name": "平面布置图",
+                    "title_blocks": [],
+                    "detail_titles": [],
+                    "viewports": [{"id": "vp1"}],
+                    "dimensions": [],
+                    "indexes": [],
+                    "materials": [],
+                    "text_count": 8,
+                },
+                {
+                    "fragment_id": "frag-4",
+                    "frame_id": "f4",
+                    "sheet_no": "EL-12",
+                    "sheet_name": "会议室一立面图",
+                    "title_blocks": [],
+                    "detail_titles": [],
+                    "viewports": [],
+                    "dimensions": [],
+                    "indexes": [],
+                    "materials": [],
+                    "text_count": 130,
+                },
+            ],
+            "is_multi_sheet_layout": True,
+        },
+    }
+
+    units = expand_layout_json_units(json_info)
+
+    assert len(units) == 3
+    assert {unit["sheet_no"] for unit in units} == {"IN-01", "IN-02", "PL-01"}

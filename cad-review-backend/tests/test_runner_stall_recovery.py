@@ -4,6 +4,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -11,6 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+from services.audit_runtime.cancel_registry import AuditCancellationRequested
 from services.audit_runtime.providers.kimi_sdk_provider import SdkStreamIdleTimeoutError
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.visual_budget import (
@@ -45,6 +48,16 @@ class _TimeoutProvider:
             output={"ok": True, "attempt": self.calls},
             subsession_key=subsession.session_key,
         )
+
+
+class _CancelledProvider:
+    provider_name = "sdk"
+
+    async def run_once(self, request, subsession):  # noqa: ANN001
+        raise AuditCancellationRequested("用户手动中断审核")
+
+    async def run_stream(self, request, subsession, *, on_event=None, should_cancel=None):  # noqa: ANN001
+        raise AuditCancellationRequested("用户手动中断审核")
 
 
 def _build_request() -> RunnerTurnRequest:
@@ -87,7 +100,7 @@ def test_runner_retries_stalled_turn_before_retry_budget_is_exhausted(monkeypatc
     assert any(event["event_kind"] == "runner_turn_retrying" for event in captured)
 
 
-def test_runner_retries_stalled_turn_and_marks_needs_review_after_limit(monkeypatch):
+def test_runner_retries_stalled_turn_and_marks_deferred_after_limit(monkeypatch):
     provider = _TimeoutProvider(fail_times=2)
     runner = ProjectAuditAgentRunner(
         project_id="proj-runner-stall-needs-review",
@@ -107,8 +120,26 @@ def test_runner_retries_stalled_turn_and_marks_needs_review_after_limit(monkeypa
     finally:
         set_active_visual_budget(None)
 
-    assert result.status == "needs_review"
+    assert result.status == "deferred"
     assert result.repair_attempts == 0
     assert provider.calls == 2
     assert budget.retry_budget == 0
-    assert any(event["event_kind"] == "runner_turn_needs_review" for event in captured)
+    assert any(event["event_kind"] == "runner_turn_deferred" for event in captured)
+
+
+def test_runner_prioritizes_cancellation_over_failure_handling(monkeypatch):
+    runner = ProjectAuditAgentRunner(
+        project_id="proj-runner-cancel",
+        audit_version=3,
+        provider=_CancelledProvider(),
+    )
+    captured: list[dict] = []
+    monkeypatch.setattr(
+        "services.audit_runtime.state_transitions.append_run_event",
+        lambda project_id, audit_version, **kwargs: captured.append(kwargs),
+    )
+
+    with pytest.raises(AuditCancellationRequested, match="用户手动中断审核"):
+        asyncio.run(runner.run_stream(_build_request()))
+
+    assert not any(event["event_kind"] == "runner_session_failed" for event in captured)

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,21 +36,11 @@ import MatchTable from './ProjectDetail/components/MatchTable';
 import ProjectStepAudit from './ProjectDetail/components/project-detail/ProjectStepAudit';
 import AuditProgressDialog, {
   AuditProgressPill,
-  AuditProviderSelector,
   getAuditProviderLabel,
 } from './ProjectDetail/components/AuditProgressDialog';
 import { createAuditEventStreamController } from './ProjectDetail/components/auditEventStream';
-
-const STAGE_FLOW = [
-  { match: ['校验三线匹配'], title: '准备检查' },
-  { match: ['构建图纸上下文'], title: '提取图纸信息' },
-  { match: ['AI 分析图纸关系'], title: '分析跨图关系' },
-  { match: ['规划审核任务图'], title: '预规划审核任务' },
-  { match: ['索引核对'], title: '索引断链核对' },
-  { match: ['尺寸核对'], title: '尺寸比对核查' },
-  { match: ['材料核对'], title: '材料表验证' },
-  { match: ['审核完成'], title: '生成报告' },
-];
+import { createAuditResultStreamController } from './ProjectDetail/components/auditResultStream';
+import { useAuditProgressViewModel } from './ProjectDetail/components/useAuditProgressViewModel';
 
 function readDefaultAuditProviderMode(): AuditProviderMode {
   if (typeof window === 'undefined') return DEFAULT_AUDIT_PROVIDER_MODE;
@@ -57,9 +48,91 @@ function readDefaultAuditProviderMode(): AuditProviderMode {
   return raw === 'codex_sdk' ? 'codex_sdk' : DEFAULT_AUDIT_PROVIDER_MODE;
 }
 
+type AuditProgressUiState = 'minimized' | 'dismissed';
+
+function getAuditProgressUiStateStorageKey(projectId?: string) {
+  return projectId ? `ccad.auditProgress.uiState.${projectId}` : '';
+}
+
+function readAuditProgressUiState(projectId?: string): AuditProgressUiState | null {
+  if (!projectId || typeof window === 'undefined') return null;
+  const raw = window.sessionStorage.getItem(getAuditProgressUiStateStorageKey(projectId));
+  return raw === 'minimized' || raw === 'dismissed' ? raw : null;
+}
+
+function persistAuditProgressUiState(projectId: string | undefined, nextState: AuditProgressUiState | null) {
+  if (!projectId || typeof window === 'undefined') return;
+  const key = getAuditProgressUiStateStorageKey(projectId);
+  if (!nextState) {
+    window.sessionStorage.removeItem(key);
+    return;
+  }
+  window.sessionStorage.setItem(key, nextState);
+}
+
+export function isAuditRunActiveStatus(runStatus?: string | null): boolean {
+  const normalized = (runStatus || '').toLowerCase();
+  return ['planning', 'running', 'queued', 'pending'].includes(normalized);
+}
+
+export function hasAuditReachedTerminalState(
+  runStatus?: string | null,
+  status?: string | null,
+): boolean {
+  const normalizedRunStatus = (runStatus || '').toLowerCase();
+  const normalizedStatus = (status || '').toLowerCase();
+  return ['done', 'failed'].includes(normalizedRunStatus) || ['done', 'failed'].includes(normalizedStatus);
+}
+
+export function resolveProjectDetailStep(
+  projectStatus?: string | null,
+  currentAuditStatus?: AuditStatus | null,
+): number {
+  const normalizedProjectStatus = (projectStatus || '').toLowerCase();
+  const normalizedAuditStatus = (currentAuditStatus?.status || '').toLowerCase();
+
+  if (normalizedProjectStatus === 'new') return 0;
+
+  if (
+    normalizedProjectStatus === 'auditing'
+    || normalizedProjectStatus === 'done'
+    || normalizedAuditStatus === 'auditing'
+    || isAuditRunActiveStatus(currentAuditStatus?.run_status)
+  ) {
+    return 2;
+  }
+
+  if (
+    normalizedProjectStatus === 'catalog_locked'
+    || normalizedProjectStatus === 'matching'
+    || normalizedProjectStatus === 'ready'
+  ) {
+    return 1;
+  }
+
+  return 0;
+}
+
+export function upsertAuditResultRow(
+  current: AuditResult[],
+  incoming: AuditResult,
+): AuditResult[] {
+  let matched = false;
+  const next = current.map((item) => {
+    if (item.id !== incoming.id) return item;
+    matched = true;
+    return {
+      ...item,
+      ...incoming,
+    };
+  });
+  return matched ? next : [...current, incoming];
+}
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const initialAuditProgressUiState = readAuditProgressUiState(id);
 
   // Data States
   const [project, setProject] = useState<Project | null>(null);
@@ -94,11 +167,10 @@ export default function ProjectDetail() {
   const [isIncompleteAuditConfirmOpen, setIsIncompleteAuditConfirmOpen] = useState(false);
   const [isAuditInlinePreviewOpen, setIsAuditInlinePreviewOpen] = useState(false);
   const [isAuditProgressDialogOpen, setIsAuditProgressDialogOpen] = useState(false);
-  const [isAuditProgressMinimized, setIsAuditProgressMinimized] = useState(false);
-  const [isAuditProgressDismissed, setIsAuditProgressDismissed] = useState(false);
+  const [isAuditProgressMinimized, setIsAuditProgressMinimized] = useState(initialAuditProgressUiState === 'minimized');
+  const [isAuditProgressDismissed, setIsAuditProgressDismissed] = useState(initialAuditProgressUiState === 'dismissed');
   const [awaitingAuditStatusSync, setAwaitingAuditStatusSync] = useState(false);
   const [defaultAuditProviderMode, setDefaultAuditProviderMode] = useState<AuditProviderMode>(readDefaultAuditProviderMode);
-  const [auditProviderMode, setAuditProviderMode] = useState<AuditProviderMode>(readDefaultAuditProviderMode);
   const [previewDrawing, setPreviewDrawing] = useState<{
     sheetNo: string;
     sheetName: string;
@@ -127,10 +199,19 @@ export default function ProjectDetail() {
   const loadSeqRef = useRef(0);
   const auditEventsSinceIdRef = useRef<number | null>(null);
   const auditEventsVersionRef = useRef<number | null>(null);
+  const auditCompletionRefreshNeededRef = useRef(false);
 
   useEffect(() => {
     if (id) loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    const persistedState = readAuditProgressUiState(id);
+    setIsAuditProgressDialogOpen(false);
+    setIsAuditProgressMinimized(persistedState === 'minimized');
+    setIsAuditProgressDismissed(persistedState === 'dismissed');
   }, [id]);
 
   useEffect(() => {
@@ -153,14 +234,20 @@ export default function ProjectDetail() {
       try {
         const latest = await api.getAuditStatus(id);
         setAuditStatus(latest);
-        if (latest.run_status === 'done' || latest.status === 'done') {
+        const reachedTerminalState = hasAuditReachedTerminalState(latest.run_status, latest.status);
+        if (reachedTerminalState) {
           stopped = true;
-          setSelectedAuditVersion(null);
-          await loadData();
-        } else if (latest.run_status === 'failed') {
-          stopped = true;
-          setError(`审核失败: ${latest.error}`);
-          await loadData();
+          const shouldRefreshCompletedAudit = auditCompletionRefreshNeededRef.current;
+          auditCompletionRefreshNeededRef.current = false;
+
+          if (latest.run_status === 'failed' || latest.status === 'failed') {
+            setError(`审核失败: ${latest.error}`);
+          }
+
+          if (shouldRefreshCompletedAudit) {
+            setSelectedAuditVersion(null);
+            await loadData();
+          }
         }
       } catch (error) {
         console.error('获取审核状态失败', error);
@@ -186,14 +273,24 @@ export default function ProjectDetail() {
   const isAuditRunning = startingAudit
     || project?.status === 'auditing'
     || auditStatusValue === 'auditing'
-    || ['running', 'queued', 'pending'].includes(auditRunStatus);
+    || isAuditRunActiveStatus(auditRunStatus);
   const shouldShowAuditProgress = isAuditRunning || awaitingAuditStatusSync;
+  const currentAuditProviderLabel = getAuditProviderLabel(auditStatus?.provider_mode || defaultAuditProviderMode);
+  const auditProgressViewModel = useAuditProgressViewModel({
+    auditStatus,
+    events: auditEvents,
+    providerLabel: currentAuditProviderLabel,
+  });
+
+  useEffect(() => {
+    if (isAuditRunning) {
+      auditCompletionRefreshNeededRef.current = true;
+    }
+  }, [isAuditRunning]);
 
   useEffect(() => {
     if (!shouldShowAuditProgress) {
       setIsAuditProgressDialogOpen(false);
-      setIsAuditProgressMinimized(false);
-      setIsAuditProgressDismissed(false);
       setAuditEvents([]);
       setAuditEventsError('');
       setAuditEventsLoading(false);
@@ -210,6 +307,13 @@ export default function ProjectDetail() {
       setAwaitingAuditStatusSync(false);
     }
   }, [isAuditRunning, auditRunStatus]);
+
+  useEffect(() => {
+    if (loading || !project) return;
+    if (shouldShowAuditProgress) return;
+    // 当前没有运行中的审核时，清掉记忆，保证下一次新启动审核会自动弹窗。
+    persistAuditProgressUiState(id, null);
+  }, [id, loading, project, shouldShowAuditProgress]);
 
   useEffect(() => {
     if (!id || !shouldShowAuditProgress) return;
@@ -248,6 +352,42 @@ export default function ProjectDetail() {
   }, [id, shouldShowAuditProgress, auditStatus?.audit_version, selectedAuditVersion]);
 
   useEffect(() => {
+    if (!id || currentStep !== 2 || !shouldShowAuditProgress) return;
+    const liveVersion = auditStatus?.audit_version ?? null;
+    if (liveVersion === null || liveVersion === undefined) return;
+    if (selectedAuditVersion !== null && selectedAuditVersion !== liveVersion) return;
+
+    let stopped = false;
+    const bootstrap = async () => {
+      try {
+        const latest = await api.getAuditResults(id, { version: liveVersion, view: 'grouped' });
+        if (stopped) return;
+        setAuditResults(latest);
+      } catch (error) {
+        console.error('初始化增量结果失败', error);
+      }
+    };
+    void bootstrap();
+
+    const controller = createAuditResultStreamController({
+      projectId: id,
+      version: liveVersion,
+      onUpsert: ({ row }) => {
+        setAuditResults((current) => upsertAuditResultRow(current, row));
+      },
+      onSummary: () => {
+        // 汇总事件用于统计对账，当前页面以列表实时计算为准。
+      },
+    });
+    controller.start();
+
+    return () => {
+      stopped = true;
+      controller.stop();
+    };
+  }, [id, currentStep, shouldShowAuditProgress, auditStatus?.audit_version, selectedAuditVersion]);
+
+  useEffect(() => {
     if (!previewDrawing) return;
     const handleEscClose = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -258,7 +398,7 @@ export default function ProjectDetail() {
     return () => window.removeEventListener('keydown', handleEscClose);
   }, [previewDrawing]);
 
-  const loadData = async () => {
+  const loadData = async (preferredAuditVersion?: number | null) => {
     if (!id) return;
     const seq = ++loadSeqRef.current;
     try {
@@ -292,6 +432,9 @@ export default function ProjectDetail() {
       const historyList = (Array.isArray(history) ? history : []) as AuditHistoryItem[];
       setAuditHistory(historyList);
       const effectiveVersion = (() => {
+        if (preferredAuditVersion !== null && preferredAuditVersion !== undefined) {
+          return preferredAuditVersion;
+        }
         if (selectedAuditVersion !== null && historyList.some((item) => item.version === selectedAuditVersion)) {
           return selectedAuditVersion;
         }
@@ -307,10 +450,7 @@ export default function ProjectDetail() {
       setAuditResults(results);
       setThreeLineMatch(threeLine);
 
-      // Restore Steps
-      if (proj.status === 'new') setCurrentStep(0);
-      else if (proj.status === 'catalog_locked' || proj.status === 'matching' || proj.status === 'ready') setCurrentStep(1);
-      else if (proj.status === 'auditing' || proj.status === 'done') setCurrentStep(2);
+      setCurrentStep(resolveProjectDetailStep(proj.status, status));
     } catch (err: any) {
       if (seq !== loadSeqRef.current) return;
       setError(err?.response?.data?.detail || err.message || '加载失败');
@@ -482,11 +622,29 @@ export default function ProjectDetail() {
       setIsAuditProgressDismissed(false);
       setIsAuditProgressMinimized(false);
       setIsAuditProgressDialogOpen(true);
-      await api.startAudit(id, {
-        provider_mode: auditProviderMode,
+      persistAuditProgressUiState(id, null);
+      const started = await api.startAudit(id, {
+        provider_mode: defaultAuditProviderMode,
         ...(allowIncomplete ? { allow_incomplete: true } : {}),
       });
-      await loadData();
+      setSelectedAuditVersion(started.audit_version ?? null);
+      setAuditResults([]);
+      setAuditStatus((previous) => ({
+        project_id: previous?.project_id || id,
+        status: 'auditing',
+        audit_version: started.audit_version ?? previous?.audit_version ?? null,
+        current_step: '准备审图任务',
+        progress: 0,
+        total_issues: 0,
+        run_status: 'planning',
+        provider_mode: defaultAuditProviderMode,
+        error: null,
+        started_at: previous?.started_at ?? null,
+        finished_at: null,
+        scope_mode: null,
+        scope_summary: null,
+      }));
+      await loadData(started.audit_version ?? null);
       setCurrentStep(2);
     } catch (err: any) {
       setAwaitingAuditStatusSync(false);
@@ -703,61 +861,6 @@ export default function ProjectDetail() {
     return item.status === filterDesc;
   }
 
-  const getStageTitle = (status: AuditStatus | null) => {
-    if (!status?.current_step) return '正在审核中';
-    const activeStage = STAGE_FLOW.find(s => s.match.some(m => status.current_step.includes(m)));
-    return activeStage ? activeStage.title : status.current_step;
-  };
-
-  const getDialogPhases = (status: AuditStatus | null) => {
-    const step = status?.current_step || '';
-    const normalizedProgress = Math.max(0, Math.min(100, status?.progress || 0));
-
-    const planningDone =
-      normalizedProgress >= 18 ||
-      step.includes('构建图纸上下文') ||
-      step.includes('AI 分析图纸关系') ||
-      step.includes('规划审核任务图') ||
-      step.includes('索引核对') ||
-      step.includes('尺寸核对') ||
-      step.includes('材料核对') ||
-      step.includes('审核完成');
-    const checkingDone = normalizedProgress >= 85 || step.includes('审核完成');
-    const inChecking =
-      !checkingDone &&
-      (normalizedProgress >= 18 ||
-        step.includes('索引核对') ||
-        step.includes('尺寸核对') ||
-        step.includes('材料核对'));
-
-    return [
-      {
-        title: '准备数据',
-        description: '核对三线关系，分析跨图引用，并预规划审核任务',
-        state: planningDone ? 'complete' : 'current',
-      },
-      {
-        title: '深度审核',
-        description: '执行索引、尺寸、材料等规则检查',
-        state: checkingDone ? 'complete' : (inChecking ? 'current' : 'pending'),
-      },
-      {
-        title: '生成报告',
-        description: '汇总问题并输出审核报告',
-        state: checkingDone ? 'current' : 'pending',
-      },
-    ] as const;
-  };
-
-  const getDialogEtaText = (status: AuditStatus | null) => {
-    const progress = Math.max(0, Math.min(100, status?.progress || 0));
-    if (progress >= 98) return '预计几十秒内完成';
-    if (progress >= 85) return '预计 1 分钟内完成';
-    if (progress >= 60) return '预计 1-2 分钟';
-    if (progress >= 30) return '预计 2-4 分钟';
-    return '预计 3-6 分钟';
-  };
-
   const handleDeleteAuditVersion = async (version: number) => {
     if (!id) return;
     if (!window.confirm(`确认删除审核版本 v${version}？该操作不可恢复。`)) return;
@@ -785,11 +888,12 @@ export default function ProjectDetail() {
         isAuditing={project.status === 'auditing'}
         auditPill={shouldShowAuditProgress && isAuditProgressMinimized ? (
           <AuditProgressPill
-            progress={Math.max(3, Math.min(99, auditStatus?.progress || 0))}
+            progress={Math.max(3, Math.min(99, auditProgressViewModel.pill.progress))}
             onClick={() => {
               setIsAuditProgressMinimized(false);
               setIsAuditProgressDialogOpen(true);
               setIsAuditProgressDismissed(false);
+              persistAuditProgressUiState(id, null);
             }}
           />
         ) : undefined}
@@ -914,22 +1018,17 @@ export default function ProjectDetail() {
                     <h3 className="text-[13px] font-sans font-semibold mb-2 text-foreground">
                       确认无误后，启动审核
                     </h3>
-                    <div className="mb-4 text-left">
-                      <AuditProviderSelector
-                        value={auditProviderMode}
-                        onChange={setAuditProviderMode}
-                        defaultLabel={getAuditProviderLabel(defaultAuditProviderMode)}
-                      />
-                    </div>
-                    <Button
-                      onClick={handleStartAudit}
-                      disabled={startingAudit || matchItems.length === 0}
-                      className="rounded-none shadow-none bg-primary hover:bg-primary/90 text-[14px] h-10 px-4 w-full text-white"
-                    >
-                      {startingAudit ? (
-                        <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> 处理中...</>
-                      ) : '启动审核'}
-                    </Button>
+                    <Label className="block">
+                      <Button
+                        onClick={handleStartAudit}
+                        disabled={startingAudit || matchItems.length === 0}
+                        className="rounded-none shadow-none bg-primary hover:bg-primary/90 text-[14px] h-10 px-4 w-full text-white"
+                      >
+                        {startingAudit ? (
+                          <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> 处理中...</>
+                        ) : '启动审核'}
+                      </Button>
+                    </Label>
                   </div>
                 </div>
               </div>
@@ -967,7 +1066,7 @@ export default function ProjectDetail() {
               selectedAuditVersion={selectedAuditVersion}
               auditResults={auditResults}
               drawings={drawings}
-              stageTitle={getStageTitle(auditStatus)}
+              stageTitle={auditProgressViewModel.headline}
               onSelectAuditVersion={(version) => { void handleSelectAuditVersion(version); }}
               onRequestDeleteVersion={(version) => { void handleDeleteAuditVersion(version); }}
               onAuditResultsChange={setAuditResults}
@@ -1045,65 +1144,34 @@ export default function ProjectDetail() {
       {shouldShowAuditProgress && isAuditProgressDialogOpen ? (
         <AuditProgressDialog
           open
-          progress={Math.max(3, Math.min(99, auditStatus?.progress || 0))}
-          headline={getStageTitle(auditStatus)}
-          supportingText={
-            auditStatus?.current_step
-              ? `当前阶段：${auditStatus.current_step}`
-              : '系统正在后台持续扫描和核对图纸数据。'
-          }
-          etaText={getDialogEtaText(auditStatus)}
-          phases={[...getDialogPhases(auditStatus)]}
+          progress={Math.max(3, Math.min(99, auditProgressViewModel.progress))}
+          headline={auditProgressViewModel.headline}
+          supportingText={auditProgressViewModel.supportingText}
+          startedAt={auditProgressViewModel.startedAt}
+          phases={[...auditProgressViewModel.phases]}
+          pipeline={auditProgressViewModel.pipeline}
+          activeAgentName={auditProgressViewModel.activeAgentName}
+          activeAgentMessage={auditProgressViewModel.activeAgentMessage}
+          totalIssues={auditProgressViewModel.totalIssues}
           events={auditEvents}
           eventError={auditEventsError}
           eventLoading={auditEventsLoading}
-          providerLabel={getAuditProviderLabel(auditStatus?.provider_mode || auditProviderMode)}
+          providerLabel={currentAuditProviderLabel}
           onMinimize={() => {
             setIsAuditProgressDialogOpen(false);
             setIsAuditProgressMinimized(true);
+            persistAuditProgressUiState(id, 'minimized');
           }}
           onRequestClose={async (onStep) => {
             const pid = id || '';
-            let abortedVersion: number | null = null;
-
-            onStep('正在发送终止信号...');
-            try {
-              const res = await api.stopAudit(pid);
-              abortedVersion = res.audit_version ?? null;
-            } catch {
-              // 任务可能已结束
-            }
-
-            onStep('等待后台任务结束...');
-            for (let i = 0; i < 60; i++) {
-              await new Promise((r) => setTimeout(r, 1500));
-              try {
-                const s = await api.getAuditStatus(pid);
-                const runSt = (s.run_status || '').toLowerCase();
-                if (!['running', 'queued', 'pending'].includes(runSt)) {
-                  if (!abortedVersion && s.audit_version) {
-                    abortedVersion = s.audit_version;
-                  }
-                  break;
-                }
-              } catch {
-                break;
-              }
-            }
-
-            if (abortedVersion) {
-              onStep('清除本次审图数据...');
-              try {
-                await api.deleteAuditVersion(pid, abortedVersion);
-              } catch {
-                // 忽略清除失败
-              }
-            }
+            onStep('正在强制关闭并清理本次审图...');
+            await api.stopAudit(pid);
 
             onStep('刷新页面数据...');
             setIsAuditProgressDialogOpen(false);
             setIsAuditProgressMinimized(false);
             setIsAuditProgressDismissed(true);
+            persistAuditProgressUiState(id, 'dismissed');
             setAuditStatus(null);
             setAuditResults([]);
             setAuditHistory([]);

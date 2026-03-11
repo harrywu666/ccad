@@ -34,6 +34,18 @@ export default function ProjectTable({ projects, categories, loadError, statusMa
         return { label: status.label, statusColor, statusBg };
     };
 
+    const getAuditProgress = (project: Project) => {
+        const rawProgress = typeof project.progress === 'number' ? project.progress : null;
+        if (project.status !== 'auditing' || rawProgress === null) return null;
+        return Math.max(0, Math.min(100, Math.round(rawProgress)));
+    };
+
+    const getStepLabel = (project: Project) => {
+        const raw = String(project.current_step || '').trim();
+        if (!raw) return '';
+        return raw.replace(/\s*[\(（][^\)）]*[\)）]\s*$/, '');
+    };
+
     const formatDate = (dateStr: string) => {
         const date = new Date(dateStr);
         return date.toLocaleDateString('zh-CN', {
@@ -73,14 +85,21 @@ export default function ProjectTable({ projects, categories, loadError, statusMa
                     </div>
                 </td>
                 <td className="px-2 py-5 text-center whitespace-nowrap">
-                    <div
-                        className="inline-flex min-w-[56px] items-center justify-center whitespace-nowrap px-2 py-1 border border-border/50"
-                        style={{ backgroundColor: status.statusBg }}
-                    >
-                        <span className="text-[12px] leading-none font-semibold whitespace-nowrap" style={{ color: status.statusColor }}>
-                            {status.label}
-                        </span>
-                    </div>
+                    {(() => {
+                        const auditProgress = getAuditProgress(project);
+                        return (
+                            <div className="flex justify-center">
+                                <div
+                                    className="inline-flex items-center justify-center whitespace-nowrap px-2 py-1 border border-border/50"
+                                    style={{ backgroundColor: status.statusBg }}
+                                >
+                                    <span className="text-[12px] leading-none font-semibold whitespace-nowrap" style={{ color: status.statusColor }}>
+                                        {auditProgress === null ? status.label : `${status.label} ${auditProgress}%`}
+                                    </span>
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </td>
                 <td className="px-2 py-5 text-[14px] text-foreground text-center whitespace-nowrap">
                     {getCategoryName(project)}

@@ -22,6 +22,8 @@ def test_runner_observer_prompt_includes_agent_and_soul_sections():
 
     assert "项目级 Runner Observer Agent" in prompt
     assert "你是整轮审图的 AI 值班长" in prompt
+    assert "人工待确认" not in prompt
+    assert "人工接管" not in prompt
 
 
 def test_runner_observer_user_prompt_includes_escalation_hint_and_recent_decisions():
@@ -47,6 +49,9 @@ def test_runner_observer_user_prompt_includes_escalation_hint_and_recent_decisio
 
     assert "不要连续多次只给 observe_only" in prompt
     assert "recent_decisions" in prompt
+    assert "restart_subsession" in prompt
+    assert "cancel_turn" not in prompt
+    assert "rerun_current_step" not in prompt
 
 
 def test_runner_observer_user_prompt_includes_decision_pressure_summary():

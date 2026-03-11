@@ -10,6 +10,15 @@ export type ToolMode = 'pan' | 'draw' | 'text';
 export type SaveState = 'loading' | 'idle' | 'saving' | 'saved' | 'error';
 export type ViewMode = 'default' | 'contain';
 
+export interface ExtraAnchor {
+  global_pct?: { x: number; y: number } | null;
+  highlight_region?: { bbox_pct?: { x: number; y: number; width: number; height: number } | null } | null;
+  confidence?: number | null;
+  issue_id?: string;
+  location?: string | null;
+  [key: string]: unknown;
+}
+
 export interface AnnotatedDrawingPreviewCanvasProps {
   projectId: string;
   previewDrawing: PreviewDrawing;
@@ -17,6 +26,7 @@ export interface AnnotatedDrawingPreviewCanvasProps {
   availableVersions: number[];
   overlayVersions: number[];
   onToggleOverlayVersion: (version: number) => void;
+  extraAnchors?: ExtraAnchor[];
 }
 
 export interface StageView {

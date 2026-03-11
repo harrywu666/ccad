@@ -342,7 +342,12 @@ def build_audit_tasks(project_id: str, audit_version: int, db) -> Dict[str, Any]
     planner_reason = "rule_based"
     planner_warnings: List[str] = []
 
-    llm_plan = plan_with_master_llm(project_id, contexts, edges)
+    llm_plan = plan_with_master_llm(
+        project_id,
+        contexts,
+        edges,
+        audit_version=audit_version,
+    )
     if llm_plan.get("ok"):
         planner_name = str(llm_plan.get("planner") or "master_llm_v1")
         tasks, summary = _build_tasks_from_master_plan(

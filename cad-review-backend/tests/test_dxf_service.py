@@ -16,6 +16,8 @@ from services.dxf_service import (
     _estimate_insert_visual_anchor,
     _estimate_insert_visual_bbox,
     _extract_insert_info,
+    _extract_sheet_no_from_text,
+    _is_standalone_sheet_no_text,
     extract_layout,
 )
 from services.dxf_service import _extract_layout_page_range
@@ -113,6 +115,7 @@ def test_extract_insert_info_collects_modelspace_detail_titles_visible_in_viewpo
     doc = ezdxf.new("R2018")
     model = doc.modelspace()
     layout = doc.layouts.get("Layout1")
+    doc.layers.add("G-ANNO-TITL")
 
     block = doc.blocks.new(name="DET_TITLE")
     block.add_attdef("DN", insert=(0.0, 0.0))
@@ -154,6 +157,7 @@ def _add_rect(layout, x0: float, y0: float, x1: float, y1: float) -> None:
 def test_extract_layout_detects_single_frame_and_fragment():
     doc = ezdxf.new("R2018")
     layout = doc.layouts.get("Layout1")
+    doc.layers.add("G-ANNO-TITL")
     layout.dxf.paper_width = 841.0
     layout.dxf.paper_height = 594.0
     _add_rect(layout, 10.0, 10.0, 810.0, 560.0)
@@ -176,6 +180,7 @@ def test_extract_layout_detects_single_frame_and_fragment():
 def test_extract_layout_detects_multiple_frames_as_multi_sheet_layout():
     doc = ezdxf.new("R2018")
     layout = doc.layouts.get("Layout1")
+    doc.layers.add("G-ANNO-TITL")
     layout.dxf.paper_width = 841.0
     layout.dxf.paper_height = 594.0
 
@@ -201,6 +206,7 @@ def test_extract_layout_detects_multiple_frames_as_multi_sheet_layout():
 def test_extract_layout_prefers_outer_frame_over_inner_geometry():
     doc = ezdxf.new("R2018")
     layout = doc.layouts.get("Layout1")
+    doc.layers.add("G-ANNO-TITL")
     layout.dxf.paper_width = 841.0
     layout.dxf.paper_height = 594.0
 
@@ -265,3 +271,269 @@ def test_extract_layout_fragment_infers_identity_from_bottom_center_texts():
     fragment = payload["layout_fragments"][0]
     assert fragment["sheet_no"] == "DT-08"
     assert fragment["sheet_name"] == "节点详图"
+
+
+def test_extract_layout_fragment_ignores_body_sentence_outside_bottom_title_zones():
+    doc = ezdxf.new("R2018")
+    layout = doc.layouts.get("Layout1")
+    layout.dxf.paper_width = 841.0
+    layout.dxf.paper_height = 594.0
+
+    _add_rect(layout, 120.0, 120.0, 720.0, 500.0)
+
+    layout.add_text("IN-04", dxfattribs={"insert": (520.0, 92.0)})
+    layout.add_text("设计说明（二）", dxfattribs={"insert": (520.0, 72.0)})
+    layout.add_text(
+        "32：原土建管井检修防火门不做改动或取消，仅在外面做装饰暗门",
+        dxfattribs={"insert": (360.0, 260.0)},
+    )
+
+    payload = extract_layout(doc, "Layout1", "ignore-body-text.dwg")
+
+    assert payload is not None
+    assert len(payload["layout_fragments"]) == 1
+    fragment = payload["layout_fragments"][0]
+    assert fragment["sheet_no"] == "IN-04"
+    assert fragment["sheet_name"] == "设计说明（二）"
+
+
+def test_extract_layout_fragments_do_not_leak_neighbor_frame_texts():
+    doc = ezdxf.new("R2018")
+    layout = doc.layouts.get("Layout1")
+    layout.dxf.paper_width = 841.0
+    layout.dxf.paper_height = 594.0
+
+    _add_rect(layout, 40.0, 120.0, 400.0, 500.0)
+    _add_rect(layout, 420.0, 120.0, 780.0, 500.0)
+
+    layout.add_text("PL-01", dxfattribs={"insert": (730.0, 92.0)})
+    layout.add_text("平面布置图", dxfattribs={"insert": (700.0, 72.0)})
+
+    payload = extract_layout(doc, "Layout1", "neighbor-frame-title-leak.dwg")
+
+    assert payload is not None
+    assert len(payload["layout_fragments"]) == 2
+    fragment_map = {item["sheet_no"]: item for item in payload["layout_fragments"] if item["sheet_no"]}
+    assert "PL-01" in fragment_map
+
+    unresolved = [item for item in payload["layout_fragments"] if not item["sheet_no"]]
+    assert len(unresolved) == 1
+    assert unresolved[0]["sheet_name"] == ""
+
+
+def test_extract_layout_fragments_assign_model_space_dimensions_to_viewport_fragment():
+    doc = ezdxf.new("R2018")
+    model = doc.modelspace()
+    layout = doc.layouts.get("Layout1")
+    layout.dxf.paper_width = 841.0
+    layout.dxf.paper_height = 594.0
+
+    _add_rect(layout, 120.0, 120.0, 720.0, 500.0)
+    vp = layout.add_viewport(
+        center=(420.0, 310.0),
+        size=(420.0, 260.0),
+        view_center_point=(1000.0, 1000.0),
+        view_height=1000.0,
+    )
+    vp.dxf.id = 2
+
+    dim = model.add_linear_dim(base=(1000.0, 900.0), p1=(800.0, 800.0), p2=(1200.0, 800.0), angle=0)
+    dim.render()
+
+    layout.add_text("PL-01", dxfattribs={"insert": (620.0, 92.0)})
+    layout.add_text("平面布置图", dxfattribs={"insert": (560.0, 72.0)})
+
+    payload = extract_layout(doc, "Layout1", "model-space-dims.dwg")
+
+    assert payload is not None
+    fragment = payload["layout_fragments"][0]
+    assert fragment["sheet_no"] == "PL-01"
+    assert len(fragment["viewports"]) == 1
+    assert len(fragment["dimensions"]) >= 1
+
+
+def test_extract_layout_fragments_prefer_dimension_display_override_value():
+    doc = ezdxf.new("R2018")
+    model = doc.modelspace()
+    layout = doc.layouts.get("Layout1")
+    layout.dxf.paper_width = 841.0
+    layout.dxf.paper_height = 594.0
+
+    _add_rect(layout, 120.0, 120.0, 720.0, 500.0)
+    vp = layout.add_viewport(
+        center=(420.0, 310.0),
+        size=(420.0, 260.0),
+        view_center_point=(1300.0, 1000.0),
+        view_height=1000.0,
+    )
+    vp.dxf.id = 2
+
+    dim = model.add_linear_dim(base=(1300.0, 900.0), p1=(800.0, 800.0), p2=(1800.0, 800.0), angle=0)
+    dim.dimension.dxf.text = "800"
+    dim.render()
+
+    layout.add_text("PL-01", dxfattribs={"insert": (620.0, 92.0)})
+    layout.add_text("平面布置图", dxfattribs={"insert": (560.0, 72.0)})
+
+    payload = extract_layout(doc, "Layout1", "model-space-dim-override.dwg")
+
+    assert payload is not None
+    fragment = payload["layout_fragments"][0]
+    assert fragment["sheet_no"] == "PL-01"
+    assert len(fragment["dimensions"]) >= 1
+
+    extracted_dim = fragment["dimensions"][0]
+    assert extracted_dim["value"] == 800.0
+    assert extracted_dim["actual_value"] == 1000.0
+    assert extracted_dim["display_text"] == "800"
+
+
+def test_extract_layout_fragments_assign_layout_pseudo_texts_to_fragment():
+    doc = ezdxf.new("R2018")
+    layout = doc.layouts.get("Layout1")
+    layout.dxf.paper_width = 841.0
+    layout.dxf.paper_height = 594.0
+
+    _add_rect(layout, 120.0, 120.0, 720.0, 500.0)
+    layout.add_text("PL-01", dxfattribs={"insert": (620.0, 92.0)})
+    layout.add_text("平面布置图", dxfattribs={"insert": (560.0, 72.0)})
+    layout.add_text("150", dxfattribs={"insert": (280.0, 240.0)})
+
+    payload = extract_layout(doc, "Layout1", "layout-space-pseudo-text.dwg")
+
+    assert payload is not None
+    fragment = payload["layout_fragments"][0]
+    assert fragment["sheet_no"] == "PL-01"
+    assert len(fragment["pseudo_texts"]) == 1
+
+
+def test_extract_layout_fragments_assign_model_space_indexes_to_viewport_fragment():
+    doc = ezdxf.new("R2018")
+    model = doc.modelspace()
+    layout = doc.layouts.get("Layout1")
+    doc.layers.add("A-ANNO-MATL")
+    layout.dxf.paper_width = 841.0
+    layout.dxf.paper_height = 594.0
+
+    _add_rect(layout, 120.0, 120.0, 720.0, 500.0)
+    vp = layout.add_viewport(
+        center=(420.0, 310.0),
+        size=(420.0, 260.0),
+        view_center_point=(1000.0, 1000.0),
+        view_height=1000.0,
+    )
+    vp.dxf.id = 2
+
+    block_name = _build_index_block(doc)
+    insert = model.add_blockref(block_name, (1000.0, 1000.0))
+    insert.add_attrib("_ACM-SECTIONLABEL", "3", insert=(1000.0, 1010.0))
+    insert.add_attrib("_ACM-SHEETNUMBER", "PL-02", insert=(1000.0, 990.0))
+
+    layout.add_text("PL-01", dxfattribs={"insert": (620.0, 92.0)})
+    layout.add_text("平面布置图", dxfattribs={"insert": (560.0, 72.0)})
+
+    payload = extract_layout(doc, "Layout1", "model-space-indexes.dwg")
+
+    assert payload is not None
+    fragment = payload["layout_fragments"][0]
+    assert fragment["sheet_no"] == "PL-01"
+    assert len(fragment["indexes"]) == 1
+
+
+def test_extract_layout_fragments_assign_layout_space_indexes_to_fragment():
+    doc = ezdxf.new("R2018")
+    layout = doc.layouts.get("Layout1")
+    layout.dxf.paper_width = 841.0
+    layout.dxf.paper_height = 594.0
+
+    _add_rect(layout, 120.0, 120.0, 720.0, 500.0)
+
+    block_name = _build_index_block(doc)
+    insert = layout.add_blockref(block_name, (420.0, 280.0))
+    insert.add_attrib("_ACM-SECTIONLABEL", "3", insert=(420.0, 290.0))
+    insert.add_attrib("_ACM-SHEETNUMBER", "PL-02", insert=(420.0, 270.0))
+
+    layout.add_text("PL-01", dxfattribs={"insert": (620.0, 92.0)})
+    layout.add_text("平面布置图", dxfattribs={"insert": (560.0, 72.0)})
+
+    payload = extract_layout(doc, "Layout1", "layout-space-indexes.dwg")
+
+    assert payload is not None
+    fragment = payload["layout_fragments"][0]
+    assert fragment["sheet_no"] == "PL-01"
+    assert len(fragment["indexes"]) == 1
+
+
+def test_extract_layout_fragments_assign_generic_attr_indexes_to_fragment():
+    doc = ezdxf.new("R2018")
+    layout = doc.layouts.get("Layout1")
+    doc.layers.add("SH-符号")
+    layout.dxf.paper_width = 841.0
+    layout.dxf.paper_height = 594.0
+
+    _add_rect(layout, 120.0, 120.0, 720.0, 500.0)
+
+    block = doc.blocks.new(name="GENERIC_INDEX")
+    block.add_attdef("01", insert=(0.0, 0.0))
+    block.add_attdef("DT-1-01", insert=(10.0, 0.0))
+
+    insert = layout.add_blockref(block.name, (420.0, 280.0), dxfattribs={"layer": "SH-符号"})
+    insert.add_auto_attribs({"01": "07", "DT-1-01": "EL-06"})
+
+    layout.add_text("PL-09", dxfattribs={"insert": (620.0, 92.0)})
+    layout.add_text("立面索引图", dxfattribs={"insert": (540.0, 72.0)})
+
+    payload = extract_layout(doc, "Layout1", "layout-space-generic-indexes.dwg")
+
+    assert payload is not None
+    fragment = payload["layout_fragments"][0]
+    assert fragment["sheet_no"] == "PL-09"
+    assert len(fragment["indexes"]) == 1
+    assert fragment["indexes"][0]["index_no"] == "07"
+    assert fragment["indexes"][0]["target_sheet"] == "EL-06"
+
+
+def test_extract_layout_fragments_assign_model_space_materials_to_viewport_fragment():
+    doc = ezdxf.new("R2018")
+    model = doc.modelspace()
+    layout = doc.layouts.get("Layout1")
+    doc.layers.add("A-ANNO-MATL")
+    layout.dxf.paper_width = 841.0
+    layout.dxf.paper_height = 594.0
+
+    _add_rect(layout, 120.0, 120.0, 720.0, 500.0)
+    vp = layout.add_viewport(
+        center=(420.0, 310.0),
+        size=(420.0, 260.0),
+        view_center_point=(1000.0, 1000.0),
+        view_height=1000.0,
+    )
+    vp.dxf.id = 2
+
+    model.add_text("MT-01 白色免漆板", dxfattribs={"insert": (1030.0, 1000.0), "layer": "A-ANNO-MATL"})
+    model.add_leader([(1000.0, 1000.0), (1030.0, 1000.0)], dxfattribs={"layer": "A-ANNO-MATL"})
+
+    layout.add_text("PL-01", dxfattribs={"insert": (620.0, 92.0)})
+    layout.add_text("平面布置图", dxfattribs={"insert": (560.0, 72.0)})
+
+    payload = extract_layout(doc, "Layout1", "model-space-materials.dwg")
+
+    assert payload is not None
+    fragment = payload["layout_fragments"][0]
+    assert fragment["sheet_no"] == "PL-01"
+    assert len(fragment["materials"]) >= 1
+
+
+def test_extract_sheet_no_from_text_ignores_lowercase_body_tokens():
+    assert _extract_sheet_no_from_text("x30x 五.其它") == ""
+    assert _extract_sheet_no_from_text("IN-04") == "IN-04"
+
+
+def test_is_standalone_sheet_no_text_rejects_body_sentence_matches():
+    assert _is_standalone_sheet_no_text("IN-04", "IN-04") is True
+    assert _is_standalone_sheet_no_text("图号 IN-04", "IN-04") is True
+    assert _is_standalone_sheet_no_text("B1级的装修材料。", "B1") is False
+    assert _is_standalone_sheet_no_text(
+        "24.本次工程使用的所有块毯、木饰面板均应选用燃烧性能不低于B1级的材料;",
+        "B1",
+    ) is False

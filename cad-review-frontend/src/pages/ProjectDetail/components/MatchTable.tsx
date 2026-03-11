@@ -5,7 +5,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useEffect, useMemo, useState } from 'react';
-import type { ThreeLineItem, MatchFilter, Drawing } from '@/types';
+import type { ThreeLineItem, MatchFilter, Drawing, UnmatchedJson } from '@/types';
+import * as api from '@/api';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -24,11 +25,15 @@ interface MatchTableProps {
     onPreviewDrawing: (item: ThreeLineItem) => void;
     hasUploadedDrawings: boolean;
     unmatchedDrawings: Drawing[];
+    unmatchedJsons: UnmatchedJson[];
     onManualCatalogMatch: (payload: { catalogId: string; drawingId: string; sheetNo?: string | null; sheetName?: string | null }) => Promise<void>;
+    onManualJsonCatalogBind: (payload: { jsonId: string; catalogId: string }) => Promise<void>;
     onDeleteDrawing: (drawingId: string) => Promise<void>;
     onDeleteJson: (jsonId: string) => Promise<void>;
     onBatchDeleteDrawings: (drawingIds: string[]) => Promise<void>;
     onBatchDeleteJson: (jsonIds: string[]) => Promise<void>;
+    projectId?: string;
+    cacheVersion?: number;
     stats: {
         total: number;
         ready: number;
@@ -56,6 +61,12 @@ type DisplayRow =
         key: string;
         order: number;
         drawing: Drawing;
+    }
+    | {
+        rowType: 'json';
+        key: string;
+        order: number;
+        json: UnmatchedJson;
     };
 
 export default function MatchTable({
@@ -65,11 +76,15 @@ export default function MatchTable({
     onPreviewDrawing,
     hasUploadedDrawings,
     unmatchedDrawings,
+    unmatchedJsons,
     onManualCatalogMatch,
+    onManualJsonCatalogBind,
     onDeleteDrawing,
     onDeleteJson,
     onBatchDeleteDrawings,
     onBatchDeleteJson,
+    projectId,
+    cacheVersion,
     stats
 }: MatchTableProps) {
     const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
@@ -80,10 +95,25 @@ export default function MatchTable({
     const [deletingKey, setDeletingKey] = useState<string | null>(null);
     const [batchDeletingType, setBatchDeletingType] = useState<'pdf' | 'dwg' | null>(null);
     const [deleteConfirmAction, setDeleteConfirmAction] = useState<DeleteConfirmAction | null>(null);
+    const [editingJsonRowKey, setEditingJsonRowKey] = useState<string | null>(null);
+    const [selectedJsonCatalogId, setSelectedJsonCatalogId] = useState<string>('');
+    const [savingJsonRowKey, setSavingJsonRowKey] = useState<string | null>(null);
 
     const unmatchedCatalogOptions = useMemo(
         () => items
             .filter(item => !item.drawing?.id)
+            .map((item, idx) => ({
+                value: item.catalog_id,
+                sheetNo: item.sheet_no,
+                sheetName: item.sheet_name,
+                label: `${idx + 1}. ${item.sheet_no || '未识别图号'} - ${item.sheet_name || '未识别图名'}`,
+            })),
+        [items]
+    );
+
+    const unmatchedCatalogOptionsForJson = useMemo(
+        () => items
+            .filter(item => !item.json?.id || item.json?.is_placeholder)
             .map((item, idx) => ({
                 value: item.catalog_id,
                 sheetNo: item.sheet_no,
@@ -112,8 +142,19 @@ export default function MatchTable({
             );
         }
 
+        if (filter === 'all' || filter === 'missing') {
+            rows.push(
+                ...unmatchedJsons.map((json, index) => ({
+                    rowType: 'json' as const,
+                    key: `__unmatched_json__:${json.id}`,
+                    order: items.length + unmatchedDrawings.length + index + 1,
+                    json,
+                }))
+            );
+        }
+
         return rows;
-    }, [filter, items, unmatchedDrawings]);
+    }, [filter, items, unmatchedDrawings, unmatchedJsons]);
 
     useEffect(() => {
         setSelectedCatalogIds(prev => {
@@ -175,6 +216,23 @@ export default function MatchTable({
             cancelEditCatalogMatch();
         } catch {
             setSavingRowKey(null);
+        }
+    };
+
+    const saveJsonCatalogBind = async (json: UnmatchedJson) => {
+        if (!selectedJsonCatalogId) return;
+        try {
+            setSavingJsonRowKey(`__unmatched_json__:${json.id}`);
+            await onManualJsonCatalogBind({
+                jsonId: json.id,
+                catalogId: selectedJsonCatalogId,
+            });
+            setEditingJsonRowKey(null);
+            setSelectedJsonCatalogId('');
+        } catch {
+            // keep editing
+        } finally {
+            setSavingJsonRowKey(null);
         }
     };
 
@@ -357,7 +415,7 @@ export default function MatchTable({
             <div className="flex items-center justify-between gap-4">
                 <div>
                     <h2 className="text-[18px] font-semibold font-sans text-foreground mb-1">
-                        匹配明细 (目录 {stats.total} 条{unmatchedDrawings.length ? ` / 未匹配PDF ${unmatchedDrawings.length} 条` : ''})
+                        匹配明细 (目录 {stats.total} 条{unmatchedDrawings.length ? ` / 未匹配PDF ${unmatchedDrawings.length} 条` : ''}{unmatchedJsons.length ? ` / 未匹配DWG ${unmatchedJsons.length} 条` : ''})
                     </h2>
                     <p className="text-[13px] text-muted-foreground font-sans flex gap-4">
                         <span><span className="text-success font-medium">齐备:</span> {stats.ready}</span>
@@ -463,9 +521,11 @@ export default function MatchTable({
                                                 handleRowClick(event, row.item);
                                                 return;
                                             }
-                                            handleRowClick(event, buildPreviewItemForDrawing(row.drawing, row.order));
+                                            if (row.rowType === 'drawing') {
+                                                handleRowClick(event, buildPreviewItemForDrawing(row.drawing, row.order));
+                                            }
                                         }}
-                                        className={`transition-[background-color,box-shadow] duration-200 hover:bg-secondary/50 hover:shadow-[inset_3px_0_0_0_hsl(var(--primary))] ${row.rowType === 'catalog' ? (row.item.drawing?.png_path ? 'cursor-pointer' : 'cursor-default') : (row.drawing.png_path ? 'cursor-pointer' : 'cursor-default')}`}
+                                        className={`transition-[background-color,box-shadow] duration-200 hover:bg-secondary/50 hover:shadow-[inset_3px_0_0_0_hsl(var(--primary))] ${row.rowType === 'catalog' ? (row.item.drawing?.png_path ? 'cursor-pointer' : 'cursor-default') : row.rowType === 'drawing' ? (row.drawing.png_path ? 'cursor-pointer' : 'cursor-default') : 'cursor-default'}`}
                                     >
                                         {(() => {
                                             if (row.rowType === 'drawing') {
@@ -584,6 +644,143 @@ export default function MatchTable({
                                                                         >
                                                                             <Trash2 className="w-4 h-4" />
                                                                             {deletingKey === `pdf-${row.drawing.id}` ? '删除中...' : '删除PDF'}
+                                                                        </DropdownMenuItem>
+                                                                    </DropdownMenuContent>
+                                                                </DropdownMenu>
+                                                            </div>
+                                                        </td>
+                                                    </>
+                                                );
+                                            }
+
+                                            if (row.rowType === 'json') {
+                                                const json = row.json;
+                                                const isEditing = editingJsonRowKey === row.key;
+                                                const thumbUrl = json.id && projectId ? api.getJsonThumbnailUrl(projectId, json.id, cacheVersion) : null;
+                                                return (
+                                                    <>
+                                                        {isBatchMode && (
+                                                            <td className="px-4 py-3 align-middle text-center">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="h-4 w-4 align-middle accent-primary"
+                                                                    checked={selectedCatalogIds.has(row.key)}
+                                                                    onChange={(e) => toggleSelectRow(row.key, e.target.checked)}
+                                                                />
+                                                            </td>
+                                                        )}
+                                                        <td className="px-6 py-0 font-mono text-muted-foreground align-middle text-center">
+                                                            <div className="h-full min-h-[56px] flex items-center justify-center">
+                                                                {row.order}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-3 font-medium text-foreground align-middle">
+                                                            <div className="flex items-center gap-3">
+                                                                {thumbUrl && (
+                                                                    <img
+                                                                        src={thumbUrl}
+                                                                        alt="布局预览"
+                                                                        className="w-16 h-12 object-contain border border-border bg-white flex-shrink-0"
+                                                                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                                                    />
+                                                                )}
+                                                                <div>
+                                                                    <div>{json.sheet_no || '未识别图号'}</div>
+                                                                    {json.layout_name && (
+                                                                        <div className="text-[11px] text-muted-foreground truncate max-w-[160px]" title={json.layout_name}>
+                                                                            {json.layout_name}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-3 text-foreground align-middle">
+                                                            {json.source_dwg || '未知DWG'}
+                                                        </td>
+                                                        <td className="px-6 py-3 align-middle text-center">
+                                                            <div className="flex items-center justify-center min-h-8 gap-2">
+                                                                {isEditing ? (
+                                                                    <div className="flex items-center gap-2">
+                                                                        <Select value={selectedJsonCatalogId} onValueChange={setSelectedJsonCatalogId}>
+                                                                            <SelectTrigger className="w-[260px] h-8 rounded-none bg-white border-border shadow-none text-[12px]">
+                                                                                <SelectValue placeholder={unmatchedCatalogOptionsForJson.length ? '选择目录项' : '暂无可匹配目录'} />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent className="rounded-none border-border shadow-md">
+                                                                                {unmatchedCatalogOptionsForJson.map(opt => (
+                                                                                    <SelectItem key={opt.value} value={opt.value} className="text-[12px] rounded-none">
+                                                                                        {opt.label}
+                                                                                    </SelectItem>
+                                                                                ))}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                        <Button
+                                                                            size="sm"
+                                                                            className="h-8 rounded-none text-[12px] px-3"
+                                                                            disabled={!selectedJsonCatalogId || savingJsonRowKey === row.key}
+                                                                            onClick={() => saveJsonCatalogBind(json)}
+                                                                        >
+                                                                            {savingJsonRowKey === row.key ? '保存中...' : '保存'}
+                                                                        </Button>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            className="h-8 rounded-none text-[12px] px-2"
+                                                                            onClick={() => { setEditingJsonRowKey(null); setSelectedJsonCatalogId(''); }}
+                                                                        >
+                                                                            取消
+                                                                        </Button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="h-8 w-8 rounded-none"
+                                                                            onClick={() => { setEditingJsonRowKey(row.key); setSelectedJsonCatalogId(''); }}
+                                                                            title="手动指定目录"
+                                                                        >
+                                                                            <Pencil className="w-3.5 h-3.5" />
+                                                                        </Button>
+                                                                        <span className="inline-flex items-center px-2 py-0.5 border border-amber-300 bg-amber-50 text-amber-700 text-[12px] font-medium font-sans">
+                                                                            未匹配DWG
+                                                                        </span>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-3 align-middle text-center">
+                                                            <span className="inline-flex items-center px-2 py-0.5 border border-muted/30 bg-secondary text-muted-foreground text-[12px] font-sans">
+                                                                —
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-3 align-middle text-center">
+                                                            <span className="inline-flex items-center px-2 py-0.5 border border-success/30 bg-success/10 text-success text-[12px] font-sans">
+                                                                已提取
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-3 align-middle text-center">
+                                                            <div className="flex items-center justify-center min-h-8 gap-2">
+                                                                <DropdownMenu>
+                                                                    <DropdownMenuTrigger asChild>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="h-10 w-10 rounded-lg border-0 bg-transparent p-0 shadow-none hover:bg-secondary data-[state=open]:bg-secondary focus-visible:ring-0"
+                                                                        >
+                                                                            <MoreVertical className="w-4 h-4" />
+                                                                        </Button>
+                                                                    </DropdownMenuTrigger>
+                                                                    <DropdownMenuContent align="end" className="w-44 rounded-none">
+                                                                        <DropdownMenuItem
+                                                                            variant="destructive"
+                                                                            disabled={deletingKey !== null}
+                                                                            onClick={() => handleDeleteJson(
+                                                                                json.id,
+                                                                                `${json.sheet_no || '未识别图号'} - ${json.layout_name || '未识别布局'}`
+                                                                            )}
+                                                                        >
+                                                                            <Trash2 className="w-4 h-4" />
+                                                                            {deletingKey === `dwg-${json.id}` ? '删除中...' : '删除DWG'}
                                                                         </DropdownMenuItem>
                                                                     </DropdownMenuContent>
                                                                 </DropdownMenu>

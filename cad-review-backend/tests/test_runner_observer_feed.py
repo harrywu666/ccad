@@ -34,6 +34,8 @@ def test_observer_snapshot_summarizes_project_state_and_recent_events():
     assert snapshot.current_step == "尺寸复核"
     assert snapshot.recent_events[0]["event_kind"] == "runner_broadcast"
     assert "observe_only" in snapshot.available_actions
+    assert "cancel_turn" not in snapshot.available_actions
+    assert "rerun_current_step" not in snapshot.available_actions
 
 
 def test_observer_snapshot_exposes_repeated_risk_summary_and_intervention_hint():
@@ -52,6 +54,7 @@ def test_observer_snapshot_exposes_repeated_risk_summary_and_intervention_hint()
     assert snapshot.risk_summary["output_validation_failed_count"] == 3
     assert snapshot.risk_summary["output_unstable_streak"] == 2
     assert "不要继续只做 observe_only" in snapshot.intervention_hint
+    assert "rerun_current_step" not in snapshot.intervention_hint
 
 
 def test_observer_snapshot_includes_active_agent_help_reports():

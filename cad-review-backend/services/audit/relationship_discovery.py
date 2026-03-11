@@ -22,6 +22,7 @@ from services.ai_prompt_service import (
 from services.audit.image_pipeline import pdf_page_to_5images
 from services.coordinate_service import enrich_json_with_coordinates
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+from services.audit_runtime.agent_reports import RelationshipAgentReport
 from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidencePlanItem, EvidenceRequest
 from services.audit_runtime.evidence_planner import plan_deep, plan_evidence_requests, plan_lite
 from services.audit_runtime.evidence_service import EvidenceService
@@ -30,7 +31,7 @@ from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
-from services.audit_runtime.state_transitions import append_run_event
+from services.audit_runtime.state_transitions import append_agent_status_report, append_run_event
 from services.feedback_runtime_service import load_feedback_runtime_profile
 from services.kimi_service import call_kimi_stream
 from services.skill_pack_service import load_runtime_skill_profile
@@ -38,6 +39,64 @@ from services.skill_pack_service import load_runtime_skill_profile
 logger = logging.getLogger(__name__)
 
 _DEFAULT_GROUP_SIZE = 4
+
+
+def _build_relationship_agent_report(
+    turn_result: RunnerTurnResult,
+    *,
+    stage: str,
+    source_sheet_no: str = "",
+    target_sheet_no: str = "",
+    cleaned: List[Dict[str, Any]] | None = None,
+) -> RelationshipAgentReport:
+    event_kinds = {
+        str(item.event_kind or "").strip()
+        for item in (turn_result.events or [])
+        if str(item.event_kind or "").strip()
+    }
+    blocking_issues: List[Dict[str, Any]] = []
+    unstable = (
+        turn_result.status != "ok"
+        or turn_result.repair_attempts > 0
+        or "output_validation_failed" in event_kinds
+    )
+    if unstable:
+        blocking_issues.append(
+            {
+                "kind": "unstable_output",
+                "stage": stage,
+                "source_sheet_no": str(source_sheet_no or "").strip(),
+                "target_sheet_no": str(target_sheet_no or "").strip(),
+                "reason": turn_result.error or "runner_output_unstable",
+            }
+        )
+
+    scope = "关系候选复核" if stage == "candidate_review" else "关系分组整理"
+    pair_label = " / ".join(
+        item for item in [str(source_sheet_no or "").strip(), str(target_sheet_no or "").strip()] if item
+    )
+    summary = f"关系审查Agent 已完成一批{scope}"
+    if pair_label:
+        summary = f"{summary}（{pair_label}）"
+
+    if blocking_issues:
+        help_request = "restart_subsession"
+        next_action = "rerun_current_batch"
+        confidence = 0.35
+    else:
+        help_request = ""
+        next_action = "continue"
+        confidence = 0.86 if list(cleaned or []) else 0.6
+
+    return RelationshipAgentReport(
+        batch_summary=summary,
+        confirmed_findings=[],
+        suspected_findings=[],
+        blocking_issues=blocking_issues,
+        runner_help_request=help_request,
+        agent_confidence=confidence,
+        next_recommended_action=next_action,
+    )
 
 
 def get_evidence_service():
@@ -285,8 +344,14 @@ def _build_relationship_task_prompt(source_sheet: Dict[str, Any], target_sheet: 
         f"{target_sheet['sheet_no']} {target_sheet['sheet_name']} 是否存在跨图引用关系。\n"
         "你将收到两张图：第1张为源图全图，第2张为目标图全图。\n"
         "重点检查源图中是否明确指向目标图的索引、详图、剖面或放大标记。\n"
-        "只返回 JSON 数组，不要解释。\n"
-        '[{"source":"图号","target":"目标图号","relation":"index_ref|detail_ref|section_ref","confidence":0.0,"visual_evidence":"","global_pct":{"x":0,"y":0}}]'
+        "输出纪律：\n"
+        "1. 不要输出分析过程，不要解释你是怎么判断的\n"
+        "2. 不要输出 markdown，不要输出 ```json 代码块\n"
+        "3. 只有明确看到跨图引用时才输出；证据不够就不要猜\n"
+        "4. 没有跨图引用关系就只返回[]\n"
+        "5. target 必须就是当前目标图号，不允许输出其他目标图\n"
+        "只返回 JSON 数组，格式固定为：\n"
+        '[{"source":"图号","target":"目标图号","relation":"index_ref|detail_ref|section_ref|elevation_ref|callout_ref","confidence":0.0,"visual_evidence":"你看到的具体符号或文字","global_pct":{"x":0,"y":0},"index_label":"索引编号或标记文字"}]'
     )
 
 
@@ -473,9 +538,14 @@ def _build_discovery_prompt(
         "- 每个引用必须包含百分比坐标 global_pct（x=0最左, x=100最右, y=0最上, y=100最下）\n"
         "- 本图索引（下方短横线）不输出\n"
         "- target 图号必须来自项目目录\n\n"
-        "只返回JSON数组，不要解释。格式：\n"
-        '[{"source":"图号","target":"目标图号","relation":"index_ref|detail_ref|section_ref",'
-        '"global_pct":{"x":0,"y":0},"index_label":"索引编号","confidence":0.0,'
+        "输出纪律（必须严格遵守）：\n"
+        "- 不要输出分析过程，不要输出你的判断步骤\n"
+        "- 不要输出 ```json 代码块，不要输出 markdown，不要在 JSON 前后加任何文字\n"
+        "- 没有关系就只返回[]\n"
+        "- 只有证据明确时才输出，不要把模糊标记当成结果\n\n"
+        "只返回JSON数组，格式：\n"
+        '[{"source":"图号","target":"目标图号","relation":"index_ref|detail_ref|section_ref|elevation_ref|callout_ref",'
+        '"global_pct":{"x":0,"y":0},"index_label":"索引编号或标记文字","confidence":0.0,'
         '"visual_evidence":"描述你看到的符号"}]'
     )
 
@@ -557,7 +627,7 @@ async def _discover_group(
                 ),
                 should_cancel=lambda: is_cancel_requested(project_id),
             )
-            result = turn_result.output if turn_result.status != "needs_review" else []
+            result = turn_result.output if turn_result.status == "ok" else []
         else:
             runner = _get_relationship_runner(
                 project_id or "__adhoc_relationship__",
@@ -579,7 +649,7 @@ async def _discover_group(
                     meta={"mode": "legacy_group", "sheet_count": len(group_sheets)},
                 )
             )
-            result = turn_result.output if turn_result.status != "needs_review" else []
+            result = turn_result.output if turn_result.status == "ok" else []
     except AuditCancellationRequested:
         raise
     except Exception as exc:
@@ -589,8 +659,23 @@ async def _discover_group(
     if not isinstance(result, list):
         logger.warning("关系发现返回格式异常: type=%s", type(result).__name__)
         return []
-
-    return [item for item in result if isinstance(item, dict)]
+    cleaned = [item for item in result if isinstance(item, dict)]
+    report = _build_relationship_agent_report(
+        turn_result,
+        stage="group_discovery",
+        cleaned=cleaned,
+    )
+    if report.blocking_issues and project_id is not None and audit_version is not None:
+        append_agent_status_report(
+            project_id,
+            audit_version,
+            step_key="relationship_discovery",
+            agent_key="relationship_review_agent",
+            agent_name="关系审查Agent",
+            progress_hint=15,
+            report=report,
+        )
+    return cleaned
 
 
 async def _discover_relationship_task_v2(
@@ -679,7 +764,7 @@ async def _discover_relationship_task_v2(
                 ),
                 should_cancel=lambda: is_cancel_requested(project_id),
             )
-            result = turn_result.output if turn_result.status != "needs_review" else []
+            result = turn_result.output if turn_result.status == "ok" else []
         else:
             runner = _get_relationship_runner(
                 project_id or "__adhoc_relationship__",
@@ -708,7 +793,7 @@ async def _discover_relationship_task_v2(
                     },
                 )
             )
-            result = turn_result.output if turn_result.status != "needs_review" else []
+            result = turn_result.output if turn_result.status == "ok" else []
         if not isinstance(result, list):
             return []
         normalized = apply_relationship_runtime_policy(
@@ -716,6 +801,23 @@ async def _discover_relationship_task_v2(
             skill_profile=skill_profile,
             feedback_profile=feedback_profile,
         )
+        report = _build_relationship_agent_report(
+            turn_result,
+            stage="candidate_review",
+            source_sheet_no=source_sheet["sheet_no"],
+            target_sheet_no=target_sheet["sheet_no"],
+            cleaned=normalized,
+        )
+        if report.blocking_issues and project_id is not None and audit_version is not None:
+            append_agent_status_report(
+                project_id,
+                audit_version,
+                step_key="relationship_discovery",
+                agent_key="relationship_review_agent",
+                agent_name="关系审查Agent",
+                progress_hint=15,
+                report=report,
+            )
         for item in normalized:
             item["evidence_pack_id"] = plan_item.pack_type.value
             if hot_sheet_registry is not None:

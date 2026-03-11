@@ -88,6 +88,8 @@ def get_projects(
 
     changed = False
     for project in rows:
+        if project.status in ("new", "done"):
+            continue
         previous = project.status
         next_status = recalculate_project_status(project.id, db)
         if next_status and next_status != previous:

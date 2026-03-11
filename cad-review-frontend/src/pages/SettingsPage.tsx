@@ -4,17 +4,19 @@ import AppLayout from '@/components/layout/AppLayout';
 import SettingsPrompts from './settings/SettingsPrompts';
 import SettingsDataTuning from './settings/SettingsDataTuning';
 import SettingsSkillPack from './settings/SettingsSkillPack';
+import SettingsRuntimeSummary from './settings/SettingsRuntimeSummary';
 
-type SettingsTab = 'prompts' | 'skills' | 'tuning';
+type SettingsTab = 'prompts' | 'skills' | 'tuning' | 'runtime';
 
 const TABS: { key: SettingsTab; label: string }[] = [
   { key: 'prompts', label: '提示词设置' },
   { key: 'skills', label: '审查技能包' },
   { key: 'tuning', label: '误报调优' },
+  { key: 'runtime', label: '运行总结' },
 ];
 
 function isValidTab(value: string | null): value is SettingsTab {
-  return value === 'prompts' || value === 'skills' || value === 'tuning';
+  return value === 'prompts' || value === 'skills' || value === 'tuning' || value === 'runtime';
 }
 
 export default function SettingsPage() {
@@ -62,6 +64,7 @@ export default function SettingsPage() {
         {activeTab === 'prompts' ? <SettingsPrompts /> : null}
         {activeTab === 'skills' ? <SettingsSkillPack /> : null}
         {activeTab === 'tuning' ? <SettingsDataTuning /> : null}
+        {activeTab === 'runtime' ? <SettingsRuntimeSummary /> : null}
       </div>
     </AppLayout>
   );

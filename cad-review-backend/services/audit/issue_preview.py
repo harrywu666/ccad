@@ -232,9 +232,24 @@ def parse_issue_anchors(result: AuditResult) -> List[Dict[str, Any]]:
     for anchor in anchors:
         if not isinstance(anchor, dict):
             continue
-        if not anchor.get("sheet_no"):
+        normalized = build_anchor(
+            role=str(anchor.get("role") or "single").strip() or "single",
+            sheet_no=str(anchor.get("sheet_no") or "").strip() or None,
+            grid=str(anchor.get("grid") or "").strip() or None,
+            global_pct=anchor.get("global_pct") if isinstance(anchor.get("global_pct"), dict) else None,
+            confidence=anchor.get("confidence"),
+            origin=str(anchor.get("origin") or "stored").strip() or "stored",
+            highlight_region=anchor.get("highlight_region") if isinstance(anchor.get("highlight_region"), dict) else None,
+            meta={
+                key: value
+                for key, value in anchor.items()
+                if key
+                not in {"role", "sheet_no", "grid", "global_pct", "confidence", "origin", "highlight_region"}
+            },
+        )
+        if not normalized:
             continue
-        result_anchors.append(anchor)
+        result_anchors.append(normalized)
     return result_anchors
 
 

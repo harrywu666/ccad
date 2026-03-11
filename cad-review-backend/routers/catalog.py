@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict
 from database import get_db
-from models import Project, Catalog
+from models import Project, Catalog, Drawing, JsonData
 from services.storage_path_service import resolve_project_dir
 
 
@@ -63,7 +63,16 @@ async def upload_catalog(project_id: str, file: UploadFile = File(...), db: Sess
     old_catalog_items = db.query(Catalog).filter(Catalog.project_id == project_id).all()
     for item in old_catalog_items:
         db.delete(item)
-    
+
+    db.query(Drawing).filter(
+        Drawing.project_id == project_id,
+        Drawing.replaced_at == None,
+    ).update({Drawing.catalog_id: None, Drawing.status: "unmatched"}, synchronize_session=False)
+    db.query(JsonData).filter(
+        JsonData.project_id == project_id,
+        JsonData.is_latest == 1,
+    ).update({JsonData.catalog_id: None, JsonData.status: "unmatched"}, synchronize_session=False)
+
     file_path = project_dir / _safe_filename(file.filename or "upload.png")
     content = await file.read()
     if len(content) > 50 * 1024 * 1024:

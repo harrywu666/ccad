@@ -91,7 +91,7 @@ def test_plan_audit_tasks_runs_ai_relationship_discovery(monkeypatch, tmp_path):
     monkeypatch.setattr(
         relationship_discovery,
         "discover_relationships",
-        lambda project_id, db: [
+        lambda project_id, db, audit_version=None: [
             {
                 "source": "A1.01",
                 "target": "A4.01",
@@ -163,12 +163,14 @@ def test_plan_audit_tasks_uses_v2_relationship_runner_when_flag_enabled(monkeypa
     monkeypatch.setattr(
         relationship_discovery,
         "discover_relationships",
-        lambda project_id, db: (_ for _ in ()).throw(AssertionError("legacy runner should not be used")),
+        lambda project_id, db, audit_version=None: (_ for _ in ()).throw(
+            AssertionError("legacy runner should not be used")
+        ),
     )
     monkeypatch.setattr(
         relationship_discovery,
         "discover_relationships_v2",
-        lambda project_id, db: [],
+        lambda project_id, db, audit_version=None: [],
     )
 
     with TestClient(app) as client:

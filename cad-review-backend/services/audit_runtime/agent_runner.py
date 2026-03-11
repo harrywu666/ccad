@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import threading
 import time
@@ -88,6 +89,16 @@ class ProjectAuditAgentRunner:
         with cls._registry_lock:
             return cls._registry.get((project_id, int(audit_version)))
 
+    @classmethod
+    def drop(
+        cls,
+        project_id: str,
+        *,
+        audit_version: int,
+    ) -> None:
+        with cls._registry_lock:
+            cls._registry.pop((project_id, int(audit_version)), None)
+
     def resolve_subsession(self, request: RunnerTurnRequest) -> RunnerSubsession:
         with self._subsession_lock:
             subsession = self._subsessions.get(request.agent_key)
@@ -105,6 +116,26 @@ class ProjectAuditAgentRunner:
     def get_existing_subsession(self, agent_key: str) -> Optional[RunnerSubsession]:
         with self._subsession_lock:
             return self._subsessions.get(agent_key)
+
+    async def _cancel_active_turns_async(self) -> bool:
+        cancelled = False
+        with self._subsession_lock:
+            subsessions = list(self._subsessions.values())
+
+        for subsession in subsessions:
+            if str(subsession.current_turn_status or "").lower() != "running":
+                continue
+            try:
+                cancelled = await self.provider.cancel(subsession) or cancelled
+            except Exception:
+                continue
+            subsession.current_turn_status = "cancelled"
+            subsession.current_phase = "cancelled"
+            subsession.stall_reason = "user_cancelled"
+        return cancelled
+
+    def cancel_active_turns(self) -> bool:
+        return asyncio.run(self._cancel_active_turns_async())
 
     def _provider_name(self) -> str:
         provider_name = getattr(self.provider, "provider_name", "")
@@ -270,14 +301,14 @@ class ProjectAuditAgentRunner:
                 if self._retry_stalled_turn(request, subsession, exc):
                     continue
                 subsession.current_turn_status = "idle"
-                subsession.current_phase = "needs_review"
+                subsession.current_phase = "deferred"
                 subsession.stall_reason = "idle_timeout"
-                self._set_runner_broadcast(request, subsession, state="needs_review")
+                self._set_runner_broadcast(request, subsession, state="deferred")
                 self._append_event(
                     request,
-                    event_kind="runner_turn_needs_review",
+                    event_kind="runner_turn_deferred",
                     level="warning",
-                    message=f"{request.agent_name or request.agent_key} 这一轮长时间没有新进展，已转为待人工确认",
+                    message=f"{request.agent_name or request.agent_key} 这一轮长时间没有新进展，Runner 先记下并继续推进后续步骤",
                     meta={
                         "turn_kind": request.turn_kind,
                         "session_key": subsession.session_key,
@@ -290,7 +321,7 @@ class ProjectAuditAgentRunner:
                 return RunnerTurnResult(
                     provider_name=self._provider_name(),
                     output=None,
-                    status="needs_review",
+                    status="deferred",
                     raw_output="",
                     subsession_key=subsession.session_key,
                     repair_attempts=0,
@@ -398,15 +429,15 @@ class ProjectAuditAgentRunner:
         try:
             repaired_output = guard_output(result.raw_output)
         except Exception as exc:
-            result.status = "needs_review"
+            result.status = "deferred"
             result.error = str(exc)
             result.repair_attempts += 1
-            self._set_runner_broadcast(request, subsession, state="needs_review")
+            self._set_runner_broadcast(request, subsession, state="deferred")
             self._append_event(
                 request,
-                event_kind="runner_turn_needs_review",
+                event_kind="runner_turn_deferred",
                 level="warning",
-                message=f"{request.agent_name or request.agent_key} 仍然无法整理出稳定结果，已转为待人工确认",
+                message=f"{request.agent_name or request.agent_key} 仍然没有整理出稳定结果，Runner 先记下并继续推进后续步骤",
                 meta={
                     "session_key": subsession.session_key,
                     "error": str(exc),

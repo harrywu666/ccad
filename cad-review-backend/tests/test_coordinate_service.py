@@ -112,6 +112,69 @@ def test_enrich_json_prefers_explicit_layout_page_range_over_viewport_bbox():
     assert index2["grid"] == "K8"
 
 
+def test_enrich_json_uses_fragment_bbox_for_layout_space_items():
+    layout_json = {
+        "layout_page_range": {
+            "min": [0.0, 0.0],
+            "max": [1000.0, 1000.0],
+        },
+        "fragment_bbox": {
+            "min": [100.0, 100.0],
+            "max": [300.0, 300.0],
+        },
+        "indexes": [
+            {
+                "index_no": "A1",
+                "position": [150.0, 250.0],
+                "source": "layout_space",
+            }
+        ],
+    }
+
+    enriched = enrich_json_with_coordinates(layout_json)
+    index_item = enriched["indexes"][0]
+
+    assert index_item["global_pct"] == {"x": 25.0, "y": 25.0}
+    assert index_item["grid"] == "G5"
+
+
+def test_enrich_json_projects_model_space_items_through_fragment_viewport():
+    layout_json = {
+        "layout_page_range": {
+            "min": [0.0, 0.0],
+            "max": [1000.0, 1000.0],
+        },
+        "fragment_bbox": {
+            "min": [100.0, 100.0],
+            "max": [300.0, 300.0],
+        },
+        "viewports": [
+            {
+                "viewport_id": 2,
+                "position": [200.0, 200.0],
+                "width": 200.0,
+                "height": 200.0,
+                "model_range": {
+                    "min": [0.0, 0.0],
+                    "max": [100.0, 100.0],
+                },
+            }
+        ],
+        "dimensions": [
+            {
+                "text_position": [25.0, 75.0],
+                "source": "model_space",
+            }
+        ],
+    }
+
+    enriched = enrich_json_with_coordinates(layout_json)
+    dim_item = enriched["dimensions"][0]
+
+    assert dim_item["global_pct"] == {"x": 25.0, "y": 25.0}
+    assert dim_item["grid"] == "G5"
+
+
 def _scaled_layout_case(
     scale_x: float,
     scale_y: float,

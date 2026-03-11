@@ -54,7 +54,7 @@ def test_runner_repairs_code_fence_json_before_failing():
     assert repaired == [{"x": 1}]
 
 
-def test_runner_marks_needs_review_after_repair_exhausted():
+def test_runner_marks_deferred_after_repair_exhausted():
     runner = ProjectAuditAgentRunner(
         project_id="proj-runner-needs-review",
         audit_version=2,
@@ -72,7 +72,7 @@ def test_runner_marks_needs_review_after_repair_exhausted():
 
     result = asyncio.run(runner.run_stream(request))
 
-    assert result.status == "needs_review"
+    assert result.status == "deferred"
     assert result.repair_attempts == 1
 
 

@@ -7,8 +7,8 @@ from typing import Any, Dict, List
 
 
 @dataclass(slots=True)
-class DimensionAgentReport:
-    """尺寸审查 Agent 的一份批次工作汇报。"""
+class AgentStatusReport:
+    """审查 Agent 的一份内部工作汇报。"""
 
     batch_summary: str
     confirmed_findings: List[Dict[str, Any]] = field(default_factory=list)
@@ -19,4 +19,16 @@ class DimensionAgentReport:
     next_recommended_action: str = "continue"
 
 
-__all__ = ["DimensionAgentReport"]
+DimensionAgentReport = AgentStatusReport
+RelationshipAgentReport = AgentStatusReport
+MaterialAgentReport = AgentStatusReport
+IndexAgentReport = AgentStatusReport
+
+
+__all__ = [
+    "AgentStatusReport",
+    "DimensionAgentReport",
+    "RelationshipAgentReport",
+    "MaterialAgentReport",
+    "IndexAgentReport",
+]

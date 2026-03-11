@@ -18,6 +18,8 @@ interface UploadCardProps {
     uploadProgress?: number;
     uploadProgressText?: string;
     buttonClassName?: string;
+    /** 文件夹模式：弹出文件夹选择框，递归收集其中所有文件 */
+    folderMode?: boolean;
 }
 
 export default function UploadCard({
@@ -32,7 +34,8 @@ export default function UploadCard({
     compact = false,
     uploadProgress = 0,
     uploadProgressText,
-    buttonClassName = 'bg-primary hover:bg-primary/90 text-white'
+    buttonClassName = 'bg-primary hover:bg-primary/90 text-white',
+    folderMode = false,
 }: UploadCardProps) {
     return (
         <div className={`flex flex-col ${compact ? 'gap-3 p-4' : 'gap-6 p-8'} bg-secondary/30 border border-border rounded-none w-full max-w-[436px] ${className}`}>
@@ -48,22 +51,23 @@ export default function UploadCard({
             <div className={`group relative border border-dashed border-border/80 bg-white text-center hover:border-primary/50 transition-colors duration-300 ${compact ? 'p-4' : 'p-10'}`}>
                 <CloudUpload className={`${compact ? 'h-7 w-7 mb-2' : 'h-12 w-12 mb-4'} mx-auto text-primary group-hover:scale-110 transition-transform duration-300`} />
                 <h3 className={`${compact ? 'text-[13px] mb-2' : 'text-[15px] mb-2'} font-sans font-semibold text-foreground`}>
-                    拖拽或点击上传
+                    {folderMode ? '点击选择文件夹' : '拖拽或点击上传'}
                 </h3>
                 {!compact && (
                     <p className="text-[12px] text-muted-foreground mb-6 font-sans">
-                        {multiple ? '支持拖拽多份文件' : '支持单个文件压缩包或图片'}
+                        {folderMode ? '自动识别文件夹内所有 DWG 文件（含子文件夹）' : multiple ? '支持拖拽多份文件' : '支持单个文件压缩包或图片'}
                     </p>
                 )}
 
                 <Label className="cursor-pointer block">
                     <Input
                         type="file"
-                        accept={accept}
-                        multiple={multiple}
+                        accept={folderMode ? undefined : accept}
+                        multiple={folderMode ? undefined : multiple}
                         className="hidden"
                         onChange={onUpload}
                         disabled={uploading}
+                        {...(folderMode ? { webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement> : {})}
                     />
                     <Button asChild className={`rounded-none shadow-none text-[14px] w-full ${buttonClassName} ${compact ? 'h-10 px-4' : 'px-8 py-5 h-auto'}`}>
                         <span>

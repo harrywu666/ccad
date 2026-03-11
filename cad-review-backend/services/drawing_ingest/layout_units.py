@@ -27,6 +27,13 @@ def _fragment_content_score(fragment: Dict[str, Any]) -> int:
     )
 
 
+def _fragment_text_count(fragment: Dict[str, Any]) -> int:
+    try:
+        return int(fragment.get("text_count") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _sheet_prefix(sheet_no: str) -> str:
     text = str(sheet_no or "").strip().upper()
     match = re.match(r"([A-Z]{2,})[\-._]?\d", text)
@@ -55,8 +62,8 @@ def _build_fragment_payload(layout_payload: Dict[str, Any], fragment: Dict[str, 
     fragment_payload["indexes"] = deepcopy(fragment.get("indexes") or [])
     fragment_payload["dimensions"] = deepcopy(fragment.get("dimensions") or [])
     fragment_payload["materials"] = deepcopy(fragment.get("materials") or [])
+    fragment_payload["pseudo_texts"] = deepcopy(fragment.get("pseudo_texts") or [])
     fragment_payload["viewports"] = deepcopy(fragment.get("viewports") or [])
-    fragment_payload["pseudo_texts"] = []
     fragment_payload["material_table"] = []
     fragment_payload["fragment_id"] = str(fragment.get("fragment_id") or "")
     fragment_payload["fragment_bbox"] = deepcopy(fragment.get("fragment_bbox") or {})
@@ -78,6 +85,26 @@ def expand_layout_json_units(json_info: Dict[str, Any]) -> List[Dict[str, Any]]:
         return [deepcopy(json_info)]
 
     contentful_fragments = [fragment for fragment in identified_fragments if _fragment_content_score(fragment) > 0]
+
+    text_only_fragments = [
+        fragment
+        for fragment in identified_fragments
+        if _fragment_content_score(fragment) <= 0 and _fragment_text_count(fragment) >= 20
+    ]
+
+    text_prefix_counts: Dict[str, int] = {}
+    for fragment in text_only_fragments:
+        prefix = _sheet_prefix(str(fragment.get("sheet_no") or ""))
+        if prefix:
+            text_prefix_counts[prefix] = text_prefix_counts.get(prefix, 0) + 1
+
+    clustered_text_only_fragments = [
+        fragment
+        for fragment in text_only_fragments
+        if text_prefix_counts.get(_sheet_prefix(str(fragment.get("sheet_no") or "")), 0) >= 2
+    ]
+
+    contentful_fragments.extend(clustered_text_only_fragments)
     if not contentful_fragments:
         return [deepcopy(json_info)]
 

@@ -7,19 +7,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from domain.sheet_normalization import normalize_sheet_no
 from models import Catalog, Drawing, JsonData, SheetContext, SheetEdge
-
-
-def _norm_sheet_no(value: Optional[str]) -> str:
-    if not value:
-        return ""
-    s = str(value).strip().upper()
-    s = re.sub(r"[\s\-_./\\()（）【】\[\]{}:：|]+", "", s)
-    return s
 
 
 def _pick_latest_drawing(rows: List[Drawing]) -> Optional[Drawing]:
@@ -315,7 +307,7 @@ def build_sheet_contexts(project_id: str, db) -> Dict[str, Any]:
         active_context_ids.append(context.id)
         contexts_total += 1
 
-        key = _norm_sheet_no(sheet_no)
+        key = normalize_sheet_no(sheet_no)
         if status == "ready" and key and payload:
             ready_payloads[key] = {
                 "sheet_no": sheet_no,
@@ -336,8 +328,11 @@ def build_sheet_contexts(project_id: str, db) -> Dict[str, Any]:
     else:
         db.query(SheetContext).filter(SheetContext.project_id == project_id).delete(synchronize_session=False)
 
-    # 关系边重建（当前仅 index_ref）
-    db.query(SheetEdge).filter(SheetEdge.project_id == project_id).delete(synchronize_session=False)
+    # 关系边重建（仅清除 index_ref，保留 ai_visual 由后续 AI 发现步骤管理）
+    db.query(SheetEdge).filter(
+        SheetEdge.project_id == project_id,
+        SheetEdge.edge_type == "index_ref",
+    ).delete(synchronize_session=False)
 
     pair_mentions: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
     for source_key, info in ready_payloads.items():
@@ -347,7 +342,7 @@ def build_sheet_contexts(project_id: str, db) -> Dict[str, Any]:
             if not isinstance(idx, dict):
                 continue
             target_raw = str(idx.get("target_sheet", "")).strip()
-            target_key = _norm_sheet_no(target_raw)
+            target_key = normalize_sheet_no(target_raw)
             if not target_key or target_key == source_key or target_key not in ready_payloads:
                 continue
 

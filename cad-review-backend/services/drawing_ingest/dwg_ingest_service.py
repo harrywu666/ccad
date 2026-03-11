@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -19,6 +20,27 @@ from services.drawing_ingest.layout_units import expand_layout_json_units
 from services.storage_path_service import resolve_project_dir
 
 logger = logging.getLogger(__name__)
+
+
+def _cleanup_temp_files(dwg_file_infos: List[Dict[str, str]], dxf_dir: Path) -> None:
+    """删除原始 DWG 文件和持久化 DXF 目录（均为临时中间产物）。"""
+    # 删除上传的原始 DWG 文件
+    for item in dwg_file_infos:
+        dwg_path = Path(item.get("path", ""))
+        if dwg_path.exists():
+            try:
+                dwg_path.unlink()
+                logger.info("已清理 DWG 文件: %s", dwg_path.name)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("清理 DWG 文件失败: %s (%s)", dwg_path.name, exc)
+
+    # 删除持久化 DXF 目录（渲染缩略图后不再需要）
+    if dxf_dir.exists():
+        try:
+            shutil.rmtree(dxf_dir)
+            logger.info("已清理 DXF 目录: %s", dxf_dir)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("清理 DXF 目录失败: %s (%s)", dxf_dir, exc)
 
 
 def _safe_filename(raw: str) -> str:
@@ -54,13 +76,24 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
     placeholder_layouts = 0
 
     dwg_file_infos: List[Dict[str, str]] = []
+    used_filenames: set[str] = set()
     for idx, file in enumerate(files):
         file_name = file.filename or ""
         if not file_name.lower().endswith(".dwg"):
             logger.warning("跳过非DWG文件: %s", file_name)
             continue
 
-        dwg_path = dwg_dir / _safe_filename(file_name)
+        safe_name = _safe_filename(file_name)
+        if safe_name.lower() in used_filenames:
+            stem = Path(safe_name).stem
+            suffix = Path(safe_name).suffix
+            counter = 2
+            while f"{stem}_{counter}{suffix}".lower() in used_filenames:
+                counter += 1
+            safe_name = f"{stem}_{counter}{suffix}"
+        used_filenames.add(safe_name.lower())
+
+        dwg_path = dwg_dir / safe_name
         with open(dwg_path, "wb") as stream:
             content = await file.read()
             stream.write(content)
@@ -73,11 +106,18 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
 
     from services.cad_service import extract_dwg_batch_data
 
+    dxf_dir = project_dir / "dwg" / "dxf"
+    dxf_dir.mkdir(parents=True, exist_ok=True)
+    thumbnail_dir = project_dir / "dwg" / "thumbnails"
+    thumbnail_dir.mkdir(parents=True, exist_ok=True)
+
     set_progress(project_id, "processing", 22, "开始解析DWG布局")
     logger.info("批量DWG提取开始: files=%s", len(dwg_file_infos))
-    extracted_by_file = extract_dwg_batch_data(
+    extracted_by_file = await asyncio.to_thread(
+        extract_dwg_batch_data,
         dwg_paths=[item["path"] for item in dwg_file_infos],
         output_dir=str(json_dir),
+        dxf_dir=str(dxf_dir),
     )
     logger.info("批量DWG提取完成: files=%s", len(dwg_file_infos))
     set_progress(project_id, "processing", 45, "布局解析完成，开始目录匹配")
@@ -142,18 +182,15 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
                     sheet_name = matched_catalog.sheet_name
                 status = "matched"
             else:
+                unmatched_layouts += 1
+                status = "unmatched"
                 if catalog_items:
-                    skipped_extra_layouts += 1
                     logger.info(
-                        "跳过额外布局(未命中目录): dwg=%s layout=%s sheet_no=%s",
+                        "未匹配布局(已保存): dwg=%s layout=%s sheet_no=%s",
                         file_name,
                         layout_name,
                         sheet_no,
                     )
-                    continue
-
-                unmatched_layouts += 1
-                status = "unmatched"
 
             if matched_catalog:
                 existing_versions = (
@@ -200,20 +237,47 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
                 versioned_json_path = json_dir / f"{normalized_base}_v{next_version}.json"
 
             try:
+                payload = json_info.get("data") or {}
+                if payload:
+                    payload = dict(payload)
+                    if sheet_no:
+                        payload["sheet_no"] = sheet_no
+                    if sheet_name:
+                        payload["sheet_name"] = sheet_name
+                    if matched_catalog and matched_catalog.sheet_name:
+                        payload["matched_catalog_sheet_name"] = matched_catalog.sheet_name
                 if source_json_path and source_json_path.exists():
-                    if source_json_path.resolve() != versioned_json_path.resolve():
-                        shutil.copy2(source_json_path, versioned_json_path)
-                else:
-                    payload = json_info.get("data") or {}
+                    source_payload = json.loads(source_json_path.read_text(encoding="utf-8"))
                     if payload:
-                        versioned_json_path.write_text(
-                            json.dumps(payload, ensure_ascii=False, indent=2),
-                            encoding="utf-8",
-                        )
+                        source_payload.update(payload)
+                    versioned_json_path.write_text(
+                        json.dumps(source_payload, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                elif payload:
+                    versioned_json_path.write_text(
+                        json.dumps(payload, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
                 if versioned_json_path.exists():
                     json_path = str(versioned_json_path)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("JSON版本化落盘失败，保留原路径: %s (%s)", json_path, str(exc))
+
+            # 只对未匹配布局按需渲染缩略图（已匹配的不需要）
+            resolved_thumbnail = None
+            if status == "unmatched":
+                dxf_path_for_thumb = json_info.get("dxf_path")
+                if dxf_path_for_thumb and Path(dxf_path_for_thumb).exists():
+                    from services.dxf.pipeline import render_layout_thumbnail
+                    thumb_filename = re.sub(r'[\\/:*?"<>|]+', "_", f"{Path(file_name).stem}_{layout_name}").strip("_") + ".png"
+                    thumb_out = str(thumbnail_dir / thumb_filename)
+                    resolved_thumbnail = render_layout_thumbnail(
+                        __import__("ezdxf").readfile(dxf_path_for_thumb),
+                        layout_name,
+                        thumb_out,
+                        dpi=96,
+                    )
 
             new_json = JsonData(
                 project_id=project_id,
@@ -224,6 +288,9 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
                 is_latest=1,
                 summary=summary,
                 status=status,
+                thumbnail_path=resolved_thumbnail,
+                layout_name=layout_name or None,
+                source_dwg=file_name or None,
             )
             db.add(new_json)
             db.flush()
@@ -344,6 +411,9 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
     set_progress(project_id, "processing", 96, "写入数据库并刷新缓存")
     recalculate_project_status(project_id, db)
     db.commit()
+
+    # 清理临时文件：DXF（中间产物）和原始 DWG（已提取完 JSON，不再需要）
+    _cleanup_temp_files(dwg_file_infos, dxf_dir)
 
     increment_cache_version(project_id, db)
     set_progress(project_id, "done", 100, "处理完成", success=True)

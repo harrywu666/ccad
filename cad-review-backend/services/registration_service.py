@@ -299,7 +299,7 @@ def apply_image_evidence(
             right = min(width, center_x + radius)
             bottom = min(height, center_y + radius)
             crop = source.crop((left, top, right, bottom))
-            data = crop.getdata()
+            data = crop.tobytes()
     except Exception:
         return pdf_anchor
 
@@ -307,7 +307,8 @@ def apply_image_evidence(
     white_threshold = 246
     total = 0
     dark = 0
-    for r, g, b, a in data:
+    for i in range(0, len(data), 4):
+        r, g, b, a = data[i : i + 4]
         if a < alpha_threshold:
             continue
         total += 1

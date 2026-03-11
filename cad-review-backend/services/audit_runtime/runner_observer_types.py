@@ -47,6 +47,7 @@ class RunnerObserverMemory:
     recent_events: List[Dict[str, Any]] = field(default_factory=list)
     recent_decisions: List[Dict[str, Any]] = field(default_factory=list)
     intervention_history: List[Dict[str, Any]] = field(default_factory=list)
+    master_status_summary: Dict[str, Any] = field(default_factory=dict)
 
 
 def _extract_json_object(text: str) -> Dict[str, Any]:

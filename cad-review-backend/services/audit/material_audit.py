@@ -16,22 +16,74 @@ from models import AuditResult, Drawing, JsonData
 from services.ai_prompt_service import resolve_stage_system_prompt_with_skills
 from services.audit.common import build_anchor, to_evidence_json
 from services.audit.prompt_builder import build_material_review_prompt, compact_material_rows
+from services.audit_runtime.agent_reports import MaterialAgentReport
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
 from services.audit_runtime.contracts import EvidencePack, EvidencePackType, EvidenceRequest
 from services.audit_runtime.evidence_planner import plan_evidence_requests
 from services.audit_runtime.evidence_service import get_evidence_service
-from services.audit_runtime.finding_schema import Finding, apply_finding_to_audit_result
+from services.audit_runtime.finding_schema import Finding, GroundingRequiredError, apply_finding_to_audit_result
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
-from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
+from services.audit_runtime.providers.factory import build_runner_provider
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
-from services.audit_runtime.state_transitions import append_run_event
+from services.audit_runtime.state_transitions import (
+    append_agent_status_report,
+    append_result_upsert_events,
+    append_run_event,
+)
 from services.coordinate_service import enrich_json_with_coordinates
 from services.feedback_runtime_service import load_feedback_runtime_profile
 from services.kimi_service import call_kimi, call_kimi_stream
 from services.skill_pack_service import load_runtime_skill_profile
 
 logger = logging.getLogger(__name__)
+
+
+def _build_material_agent_report(
+    turn_result: RunnerTurnResult,
+    *,
+    sheet_no: str,
+    cleaned: List[Dict[str, Any]],
+) -> MaterialAgentReport:
+    event_kinds = {
+        str(item.event_kind or "").strip()
+        for item in (turn_result.events or [])
+        if str(item.event_kind or "").strip()
+    }
+    blocking_issues: List[Dict[str, Any]] = []
+    unstable = (
+        turn_result.status != "ok"
+        or turn_result.repair_attempts > 0
+        or "output_validation_failed" in event_kinds
+    )
+    if unstable:
+        blocking_issues.append(
+            {
+                "kind": "unstable_output",
+                "stage": "material_review",
+                "sheet_no": str(sheet_no or "").strip(),
+                "reason": turn_result.error or "runner_output_unstable",
+            }
+        )
+
+    if blocking_issues:
+        help_request = "restart_subsession"
+        next_action = "rerun_current_batch"
+        confidence = 0.35
+    else:
+        help_request = ""
+        next_action = "continue"
+        confidence = 0.84 if cleaned else 0.6
+
+    return MaterialAgentReport(
+        batch_summary=f"材料审查Agent 已完成一批材料一致性检查（{sheet_no or 'UNKNOWN'}）",
+        confirmed_findings=[],
+        suspected_findings=[],
+        blocking_issues=blocking_issues,
+        runner_help_request=help_request,
+        agent_confidence=confidence,
+        next_recommended_action=next_action,
+    )
 
 
 def _get_material_runner(
@@ -41,7 +93,7 @@ def _get_material_runner(
     return ProjectAuditAgentRunner.get_or_create(
         project_id,
         audit_version=audit_version,
-        provider=KimiApiProvider(
+        provider=build_runner_provider(
             run_once_func=call_kimi,
             run_stream_func=call_kimi_stream,
         ),
@@ -93,7 +145,7 @@ def _apply_material_finding(
         triggered_by=triggered_by,
         description=str(issue.description or "").strip(),
     )
-    return apply_finding_to_audit_result(issue, finding)
+    return apply_finding_to_audit_result(issue, finding, require_grounding=True)
 
 
 def _material_v2_enabled() -> bool:
@@ -229,7 +281,7 @@ async def _run_material_ai_review(
             ),
             should_cancel=lambda: is_cancel_requested(project_id),
         )
-        result = turn_result.output if turn_result.status != "needs_review" else []
+        result = turn_result.output if turn_result.status == "ok" else []
     else:
         runner = _get_material_runner(project_id or "__adhoc_material__", audit_version or 0)
         turn_result: RunnerTurnResult = await runner.run_once(
@@ -253,10 +305,26 @@ async def _run_material_ai_review(
                 meta={"sheet_no": sheet_no, "material_rows": len(material_table), "used_rows": len(material_used)},
             )
         )
-        result = turn_result.output if turn_result.status != "needs_review" else []
+        result = turn_result.output if turn_result.status == "ok" else []
     if not isinstance(result, list):
         return []
-    return [item for item in result if isinstance(item, dict)]
+    cleaned = [item for item in result if isinstance(item, dict)]
+    report = _build_material_agent_report(
+        turn_result,
+        sheet_no=sheet_no,
+        cleaned=cleaned,
+    )
+    if report.blocking_issues and project_id is not None and audit_version is not None:
+        append_agent_status_report(
+            project_id,
+            audit_version,
+            step_key="material",
+            agent_key="material_review_agent",
+            agent_name="材料审查Agent",
+            progress_hint=36,
+            report=report,
+        )
+    return cleaned
 
 
 async def _prepare_material_images(job: Dict[str, Any]) -> Optional[List[bytes]]:
@@ -402,7 +470,32 @@ def audit_materials(
         if key in seen_keys:
             return
         seen_keys.add(key)
-        _apply_material_finding(issue)
+        try:
+            _apply_material_finding(issue)
+        except GroundingRequiredError:
+            append_agent_status_report(
+                project_id,
+                audit_version,
+                step_key="material",
+                agent_key="material_review_agent",
+                agent_name="材料审查Agent",
+                progress_hint=62,
+                report=MaterialAgentReport(
+                    batch_summary="材料问题已经识别出来，但这次没把图上的精确位置框稳，Runner 正在帮它重启后重试。",
+                    blocking_issues=[
+                        {
+                            "issue_type": "grounding_missing",
+                            "sheet_no": issue.sheet_no_a or issue.sheet_no_b,
+                            "location": issue.location,
+                            "reason": "missing_highlight_region",
+                        }
+                    ],
+                    runner_help_request="restart_subsession",
+                    agent_confidence=0.0,
+                    next_recommended_action="restart_subsession",
+                ),
+            )
+            return
         db.add(issue)
         issues.append(issue)
 
@@ -428,6 +521,7 @@ def audit_materials(
         raw_used = data.get("materials", []) or []
 
         material_anchor_by_code: Dict[str, Dict[str, Any]] = {}
+        material_table_anchor_by_code: Dict[str, Dict[str, Any]] = {}
         for mat in raw_used:
             code_raw = str(mat.get("code", "") or "").strip()
             code_key = norm_code(code_raw)
@@ -442,6 +536,8 @@ def audit_materials(
                 global_pct=mat.get("global_pct") if isinstance(mat.get("global_pct"), dict) else None,
                 confidence=1.0,
                 origin="material",
+                highlight_region=mat.get("highlight_region") if isinstance(mat.get("highlight_region"), dict) else None,
+                meta={"material_code": code_raw or None},
             )
             if anchor:
                 material_anchor_by_code[code_key] = anchor
@@ -455,6 +551,18 @@ def audit_materials(
                 continue
             if code_key not in table_map:
                 table_map[code_key] = {"code": code_raw, "name": name_raw}
+            table_anchor = build_anchor(
+                role="single",
+                sheet_no=json_data.sheet_no,
+                grid=str(item.get("grid") or "").strip(),
+                global_pct=item.get("global_pct") if isinstance(item.get("global_pct"), dict) else None,
+                confidence=1.0,
+                origin="material_table",
+                highlight_region=item.get("highlight_region") if isinstance(item.get("highlight_region"), dict) else None,
+                meta={"material_code": code_raw or None},
+            )
+            if table_anchor and code_key not in material_table_anchor_by_code:
+                material_table_anchor_by_code[code_key] = table_anchor
 
         used_map: Dict[str, Dict[str, str]] = {}
         for item in raw_used:
@@ -502,7 +610,10 @@ def audit_materials(
                     f"材料表中定义了材料编号{table_item['code']}（{table_item['name'] or '未命名'}），"
                     "但在图纸标注中未使用。"
                 ),
-                evidence_json=to_evidence_json([], unlocated_reason="material_table_only_no_anchor"),
+                evidence_json=to_evidence_json(
+                    [material_table_anchor_by_code.get(code_key)] if material_table_anchor_by_code.get(code_key) else [],
+                    unlocated_reason=None if material_table_anchor_by_code.get(code_key) else "material_table_only_no_anchor",
+                ),
             )
             append_issue(issue)
 
@@ -648,6 +759,11 @@ def audit_materials(
                 append_issue(issue)
 
     db.commit()
+    append_result_upsert_events(
+        project_id,
+        audit_version,
+        issue_ids=[issue.id for issue in issues],
+    )
     if hot_sheet_registry is not None:
         for issue in issues:
             hot_sheet_registry.publish(

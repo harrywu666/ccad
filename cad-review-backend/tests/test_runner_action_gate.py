@@ -41,18 +41,25 @@ def test_action_gate_executes_restart_subsession_callback():
     assert called["count"] == 1
 
 
-def test_action_gate_executes_mark_needs_review_callback():
+def test_action_gate_rejects_mark_needs_review_action():
     gate = RunnerActionGate(project_root="/tmp/project")
-    called = {"count": 0}
 
     result = gate.execute(
         "mark_needs_review",
-        context={
-            "mark_needs_review": lambda: called.__setitem__("count", called["count"] + 1) or "updated",
-        },
     )
 
-    assert result["allowed"] is True
-    assert result["executed"] is True
-    assert result["result"] == "updated"
-    assert called["count"] == 1
+    assert result["allowed"] is False
+    assert result["executed"] is False
+    assert result["reason"] == "action_not_allowed"
+
+
+def test_action_gate_rejects_cancel_turn_and_rerun_current_step_actions():
+    gate = RunnerActionGate(project_root="/tmp/project")
+
+    cancel_result = gate.execute("cancel_turn")
+    rerun_result = gate.execute("rerun_current_step")
+
+    assert cancel_result["allowed"] is False
+    assert cancel_result["reason"] == "action_not_allowed"
+    assert rerun_result["allowed"] is False
+    assert rerun_result["reason"] == "action_not_allowed"

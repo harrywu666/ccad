@@ -8,58 +8,19 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
-from services.dxf_service import process_dwg_files
+from services.dxf_service import (
+    _extract_sheet_name_from_layout,
+    _extract_sheet_no_from_text,
+    _is_model_layout,
+    _sanitize_filename,
+    process_dwg_files,
+)
 
 logger = logging.getLogger(__name__)
-
-
-MODEL_LAYOUT_NAMES = {
-    "model",
-    "modelspace",
-    "model_space",
-    "模型",
-    "模型空间",
-}
-
-
-def _normalize_layout_name(name: str) -> str:
-    return re.sub(r"[\s\-_./\\()（）【】\[\]{}]+", "", (name or "").strip().lower())
-
-
-def _is_model_layout(layout_name: str) -> bool:
-    return _normalize_layout_name(layout_name) in MODEL_LAYOUT_NAMES
-
-
-def _sanitize_filename(value: str) -> str:
-    return re.sub(r'[\\/:*?"<>|]+', "_", value).strip("_") or "layout"
-
-
-def _extract_sheet_no_from_text(text: str) -> str:
-    if not text:
-        return ""
-    patterns = [
-        r"[A-Za-z]{1,3}\d{0,3}[.\-_]\d{1,3}[a-zA-Z]?",
-        r"[A-Za-z]\d{1,4}[a-zA-Z]?",
-        r"\d{2}[.\-_]\d{2}[a-zA-Z]?",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(0)
-    return ""
-
-
-def _extract_sheet_name_from_layout(layout_name: str, sheet_no: str) -> str:
-    if not layout_name:
-        return ""
-    if not sheet_no:
-        return layout_name.strip()
-    return layout_name.replace(sheet_no, "", 1).strip(" -_:.|")
 
 
 def _default_layout_payload(dwg_name: str, layout_name: str, sheet_no: str, sheet_name: str) -> Dict[str, Any]:
@@ -95,9 +56,13 @@ def _to_layout_info(payload: Dict[str, Any], json_path: str) -> Dict[str, Any]:
         "pseudo_texts": payload.get("pseudo_texts") or [],
         "indexes": payload.get("indexes") or [],
         "title_blocks": payload.get("title_blocks") or [],
+        "detail_titles": payload.get("detail_titles") or [],
         "materials": payload.get("materials") or [],
         "material_table": payload.get("material_table") or [],
         "layers": payload.get("layers") or [],
+        "layout_frames": payload.get("layout_frames") or [],
+        "layout_fragments": payload.get("layout_fragments") or [],
+        "is_multi_sheet_layout": bool(payload.get("is_multi_sheet_layout")),
         "data": payload,
     }
 
@@ -193,10 +158,14 @@ def extract_dwg_data(dwg_path: str, output_dir: str) -> List[Dict[str, Any]]:
     return result_map.get(key, [])
 
 
-def extract_dwg_batch_data(dwg_paths: Iterable[str], output_dir: str) -> Dict[str, List[Dict[str, Any]]]:
+def extract_dwg_batch_data(dwg_paths: Iterable[str], output_dir: str, thumbnail_dir: Optional[str] = None, dxf_dir: Optional[str] = None) -> Dict[str, List[Dict[str, Any]]]:
     """
     批量提取DWG布局数据。
     返回：{dwg_path: [layout_json_info, ...]}
+
+    Args:
+        thumbnail_dir: 已废弃，不再于提取阶段渲染缩略图。
+        dxf_dir: 若提供，DXF 文件将复制到该目录，供后续按需渲染缩略图（仅对未匹配布局）。
     """
     resolved_paths = [str(Path(path).resolve()) for path in dwg_paths if str(path).strip()]
     result_map: Dict[str, List[Dict[str, Any]]] = {path: [] for path in resolved_paths}
@@ -218,6 +187,7 @@ def extract_dwg_batch_data(dwg_paths: Iterable[str], output_dir: str) -> Dict[st
             project_id="",
             output_dir=str(out_dir),
             progress_callback=None,
+            dxf_dir=dxf_dir,
         )
 
         for record in records:
@@ -227,6 +197,8 @@ def extract_dwg_batch_data(dwg_paths: Iterable[str], output_dir: str) -> Dict[st
 
             payload = record.get("data") or {}
             info = _to_layout_info(payload, str(record.get("json_path", "")))
+            info["thumbnail_path"] = None          # 未匹配时由 ingest_service 按需填充
+            info["dxf_path"] = record.get("dxf_path")  # 持久化 DXF 路径
             if not _is_model_layout(info.get("layout_name", "")):
                 result_map[key].append(info)
 
@@ -234,8 +206,13 @@ def extract_dwg_batch_data(dwg_paths: Iterable[str], output_dir: str) -> Dict[st
             logger.info("DWG提取完成: dwg=%s layouts=%s", Path(path).name, len(result_map[path]))
 
     except Exception as exc:  # noqa: BLE001
-        logger.warning("DXF提取失败，回退mock: %s", str(exc))
-        for path in resolved_paths:
-            result_map[path] = mock_extract_dwg_data(path, str(out_dir))
+        allow_mock_fallback = os.getenv("CAD_FORCE_MOCK", "").strip() == "1" or os.getenv("CAD_MOCK_FALLBACK", "").strip() == "1"
+        if allow_mock_fallback:
+            logger.warning("DXF提取失败，回退mock（CAD_MOCK_FALLBACK=1）: %s", str(exc))
+            for path in resolved_paths:
+                result_map[path] = mock_extract_dwg_data(path, str(out_dir))
+        else:
+            logger.error("DXF提取失败: %s", str(exc))
+            raise RuntimeError(f"DWG提取失败，请检查ODA File Converter是否正确安装: {exc}") from exc
 
     return result_map

@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import JsonData, Project
+from models import Catalog, JsonData, Project
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -216,3 +216,74 @@ def batch_delete_json_data(project_id: str, request: JsonBatchDeleteRequest, db:
     from services.cache_service import increment_cache_version
     increment_cache_version(project_id, db)
     return {"success": True, "deleted": len(rows)}
+
+
+class ManualJsonBindRequest(BaseModel):
+    catalog_id: str
+
+
+@router.patch("/projects/{project_id}/json-data/{json_id}/bind-catalog")
+def bind_json_to_catalog(
+    project_id: str,
+    json_id: str,
+    request: ManualJsonBindRequest,
+    db: Session = Depends(get_db),
+):
+    """手动将未匹配的 JsonData 绑定到指定目录项。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    json_data = db.query(JsonData).filter(
+        JsonData.id == json_id,
+        JsonData.project_id == project_id,
+        JsonData.is_latest == 1,
+    ).first()
+    if not json_data:
+        raise HTTPException(status_code=404, detail="JSON数据不存在")
+
+    catalog = db.query(Catalog).filter(
+        Catalog.id == request.catalog_id,
+        Catalog.project_id == project_id,
+    ).first()
+    if not catalog:
+        raise HTTPException(status_code=404, detail="目录项不存在")
+
+    json_data.catalog_id = catalog.id
+    json_data.status = "matched"
+    if catalog.sheet_no and not json_data.sheet_no:
+        json_data.sheet_no = catalog.sheet_no
+
+    from services.cache_service import increment_cache_version, recalculate_project_status
+    recalculate_project_status(project_id, db)
+    db.commit()
+    increment_cache_version(project_id, db)
+
+    return {"success": True, "json_id": json_id, "catalog_id": catalog.id}
+
+
+@router.get("/projects/{project_id}/json-data/{json_id}/thumbnail")
+def get_json_thumbnail(project_id: str, json_id: str, db: Session = Depends(get_db)):
+    """获取 JsonData 对应的 DXF 布局缩略图。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    json_data = db.query(JsonData).filter(
+        JsonData.id == json_id,
+        JsonData.project_id == project_id,
+    ).first()
+    if not json_data:
+        raise HTTPException(status_code=404, detail="JSON数据不存在")
+
+    thumb_path = getattr(json_data, "thumbnail_path", None)
+    if not thumb_path:
+        raise HTTPException(status_code=404, detail="缩略图不存在")
+
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    path = Path(thumb_path).expanduser()
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="缩略图文件不存在")
+
+    return FileResponse(str(path), media_type="image/png")

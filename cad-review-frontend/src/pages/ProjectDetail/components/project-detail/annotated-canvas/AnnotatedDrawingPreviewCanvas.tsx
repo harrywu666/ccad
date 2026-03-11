@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Circle, Group, Image as KonvaImage, Layer, Line, Stage, Text as KonvaText, Transformer } from 'react-konva';
+import { Group, Image as KonvaImage, Layer, Line, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type { Text as KonvaTextNode } from 'konva/lib/shapes/Text';
 import type { Transformer as KonvaTransformerNode } from 'konva/lib/shapes/Transformer';
@@ -19,7 +19,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { DrawingCanvasFloatingControls, DrawingCanvasLoadingOverlay } from '../DrawingCanvasOverlay';
-import type { AnnotatedDrawingPreviewCanvasProps, TextAnnotationItem, ToolMode } from './types';
+import type { AnnotatedDrawingPreviewCanvasProps, ExtraAnchor, TextAnnotationItem, ToolMode } from './types';
 import {
   BRUSH_COLOR,
   BRUSH_WIDTH_OPTIONS,
@@ -32,6 +32,7 @@ import {
   makeId,
   normalizeText,
 } from './constants';
+import { toCanvasCloudHighlight } from './highlightRegions';
 import { useAnnotationBoard } from './useAnnotationBoard';
 import { useCanvasViewport } from './useCanvasViewport';
 import { useIssueFocus } from './useIssueFocus';
@@ -85,6 +86,7 @@ export default function AnnotatedDrawingPreviewCanvas({
   availableVersions,
   overlayVersions,
   onToggleOverlayVersion,
+  extraAnchors,
 }: AnnotatedDrawingPreviewCanvasProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<import('konva/lib/Stage').Stage | null>(null);
@@ -154,34 +156,6 @@ export default function AnnotatedDrawingPreviewCanvas({
 
   const issueHighlight = useMemo(() => {
     if (!imageAsset) return null;
-    const region = previewDrawing.focusHighlightRegion?.bbox_pct;
-    if (previewDrawing.focusHighlightRegion && !region) {
-      return null;
-    }
-    if (
-      region
-      && typeof region.x === 'number'
-      && typeof region.y === 'number'
-      && typeof region.width === 'number'
-      && typeof region.height === 'number'
-      && region.width > 0
-      && region.height > 0
-      && previewDrawing.focusAnchorStatus !== 'pdf_visual_mismatch'
-    ) {
-      return {
-        kind: 'region' as const,
-        variant: previewDrawing.focusAnchorStatus === 'pdf_low_confidence' ? 'estimated' as const : 'exact' as const,
-        x: imageAsset.width * (region.x / 100),
-        y: imageAsset.height * (region.y / 100),
-        width: imageAsset.width * (region.width / 100),
-        height: imageAsset.height * (region.height / 100),
-      };
-    }
-
-    const point = previewDrawing.focusAnchor?.global_pct;
-    if (!imageAsset || !point || typeof point.x !== 'number' || typeof point.y !== 'number') {
-      return null;
-    }
     if (previewDrawing.focusAnchorStatus === 'pdf_visual_mismatch') {
       return null;
     }
@@ -192,13 +166,28 @@ export default function AnnotatedDrawingPreviewCanvas({
     ) {
       return null;
     }
-    return {
-      kind: 'point' as const,
-      x: imageAsset.width * (point.x / 100),
-      y: imageAsset.height * (point.y / 100),
-      variant: previewDrawing.focusAnchorStatus === 'pdf_low_confidence' ? 'estimated' as const : 'exact' as const,
-    };
+    return toCanvasCloudHighlight({
+      imageAsset,
+      key: 'primary',
+      point: previewDrawing.focusAnchor?.global_pct ?? null,
+      region: previewDrawing.focusHighlightRegion,
+      variant: previewDrawing.focusAnchorStatus === 'pdf_low_confidence' ? 'estimated' : 'exact',
+    });
   }, [imageAsset, previewDrawing.focusAnchor, previewDrawing.focusAnchorStatus, previewDrawing.focusHighlightRegion]);
+
+  const extraHighlights = useMemo(() => {
+    if (!imageAsset || !extraAnchors?.length) return [];
+    return extraAnchors.map((anchor: ExtraAnchor, idx: number) => (
+      toCanvasCloudHighlight({
+        imageAsset,
+        key: `extra-${anchor.issue_id || idx}`,
+        point: anchor.global_pct ?? null,
+        region: anchor.highlight_region,
+        variant: 'exact',
+        label: anchor.location || undefined,
+      })
+    )).filter(Boolean);
+  }, [imageAsset, extraAnchors]);
 
   // ── 切换图纸时重置编辑状态 ──
   useEffect(() => {
@@ -532,47 +521,19 @@ export default function AnnotatedDrawingPreviewCanvas({
 
               {issueHighlight ? (
                 <Group listening={false}>
-                  {issueHighlight.kind === 'region' ? (
-                    <Line
-                      points={buildCloudRectPoints(issueHighlight.x, issueHighlight.y, issueHighlight.width, issueHighlight.height)}
-                      stroke={issueHighlight.variant === 'estimated' ? '#d97706' : '#ef4444'}
-                      strokeWidth={3}
-                      closed
-                      tension={0.28}
-                      dash={issueHighlight.variant === 'estimated' ? [8, 5] : undefined}
-                      listening={false}
-                    />
-                  ) : (
-                    <>
-                      <Circle
-                        x={issueHighlight.x}
-                        y={issueHighlight.y}
-                        radius={18}
-                        fill={issueHighlight.variant === 'estimated' ? 'rgba(217, 119, 6, 0.12)' : 'rgba(239, 68, 68, 0.15)'}
-                        stroke={issueHighlight.variant === 'estimated' ? '#d97706' : '#ef4444'}
-                        strokeWidth={2}
-                        dash={issueHighlight.variant === 'estimated' ? [6, 4] : undefined}
-                      />
-                      <Line
-                        points={[issueHighlight.x - 26, issueHighlight.y, issueHighlight.x + 26, issueHighlight.y]}
-                        stroke={issueHighlight.variant === 'estimated' ? '#d97706' : '#ef4444'}
-                        strokeWidth={2}
-                        dash={issueHighlight.variant === 'estimated' ? [6, 4] : undefined}
-                        listening={false}
-                      />
-                      <Line
-                        points={[issueHighlight.x, issueHighlight.y - 26, issueHighlight.x, issueHighlight.y + 26]}
-                        stroke={issueHighlight.variant === 'estimated' ? '#d97706' : '#ef4444'}
-                        strokeWidth={2}
-                        dash={issueHighlight.variant === 'estimated' ? [6, 4] : undefined}
-                        listening={false}
-                      />
-                    </>
-                  )}
+                  <Line
+                    points={buildCloudRectPoints(issueHighlight.x, issueHighlight.y, issueHighlight.width, issueHighlight.height)}
+                    stroke={issueHighlight.variant === 'estimated' ? '#d97706' : '#ef4444'}
+                    strokeWidth={3}
+                    closed
+                    tension={0.28}
+                    dash={issueHighlight.variant === 'estimated' ? [8, 5] : undefined}
+                    listening={false}
+                  />
                   {issueHighlight.variant === 'estimated' ? (
                     <KonvaText
-                      x={(issueHighlight.kind === 'region' ? issueHighlight.x + issueHighlight.width : issueHighlight.x) + 18}
-                      y={(issueHighlight.kind === 'region' ? issueHighlight.y : issueHighlight.y) - 34}
+                      x={issueHighlight.x + issueHighlight.width + 18}
+                      y={issueHighlight.y - 34}
                       text="估计位置"
                       fontSize={18}
                       fill="#b45309"
@@ -581,6 +542,29 @@ export default function AnnotatedDrawingPreviewCanvas({
                   ) : null}
                 </Group>
               ) : null}
+
+              {extraHighlights.map((eh) => (
+                <Group key={eh.key} listening={false}>
+                  <Line
+                    points={buildCloudRectPoints(eh.x, eh.y, eh.width, eh.height)}
+                    stroke="#ef4444"
+                    strokeWidth={2.5}
+                    closed
+                    tension={0.28}
+                    listening={false}
+                  />
+                  {eh.label ? (
+                    <KonvaText
+                      x={eh.x + eh.width + 14}
+                      y={eh.y - 28}
+                      text={eh.label}
+                      fontSize={16}
+                      fill="#b91c1c"
+                      listening={false}
+                    />
+                  ) : null}
+                </Group>
+              ))}
 
               {/* 叠加层：其他版本标注（蓝色 80% 透明度，只读） */}
               {overlayLayers.map((layer) => (
