@@ -27,4 +27,5 @@ codex-bridge/node_modules/
 # Local project runtime data (do not commit)
 projecs/
 projects/
+test-files/
 ui.pen
