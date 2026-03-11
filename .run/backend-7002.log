@@ -1,6 +1,0 @@
-INFO:     Started server process [74373]
-INFO:     Waiting for application startup.
-INFO:main:正在初始化数据库...
-INFO:main:数据库初始化完成
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:7002 (Press CTRL+C to quit)

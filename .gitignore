@@ -4,9 +4,12 @@
 .trae/
 .cursor/
 .tmp_test3_jsons/
+.artifacts/
+.run/
 
 # Backend
 cad-review-backend/.env
+cad-review-backend/.run/
 cad-review-backend/venv/
 cad-review-backend/__pycache__/
 cad-review-backend/.pytest_cache/
@@ -19,6 +22,7 @@ cad-review-frontend/node_modules/
 cad-review-frontend/dist/
 cad-review-frontend/.env
 cad-review-frontend/.env.*
+codex-bridge/node_modules/
 
 # Local project runtime data (do not commit)
 projecs/
