@@ -55,6 +55,10 @@ def _extract_anchor_list(evidence_json: Optional[str]) -> List[Dict[str, Any]]:
         if isinstance(evidence_bundle, dict):
             anchors = evidence_bundle.get("anchors")
     if not isinstance(anchors, list):
+        finding = payload.get("finding")
+        if isinstance(finding, dict):
+            anchors = finding.get("anchors")
+    if not isinstance(anchors, list):
         return []
     return [anchor for anchor in anchors if isinstance(anchor, dict)]
 

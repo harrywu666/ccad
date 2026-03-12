@@ -60,11 +60,47 @@ def _load_evidence(result) -> Dict[str, Any]:  # noqa: ANN001
     return {}
 
 
+def _extract_anchors(evidence: Dict[str, Any]) -> List[Dict[str, Any]]:
+    anchors = evidence.get("anchors")
+    if not isinstance(anchors, list):
+        evidence_bundle = evidence.get("evidence_bundle")
+        if isinstance(evidence_bundle, dict):
+            anchors = evidence_bundle.get("anchors")
+    if not isinstance(anchors, list):
+        finding = evidence.get("finding")
+        if isinstance(finding, dict):
+            anchors = finding.get("anchors")
+    if not isinstance(anchors, list):
+        return []
+    return [anchor for anchor in anchors if isinstance(anchor, dict)]
+
+
 def _safe_float(value: Any) -> Optional[float]:
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _resolve_anchor_point(anchor: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+    point = anchor.get("global_pct") if isinstance(anchor.get("global_pct"), dict) else None
+    x = _safe_float(point.get("x")) if point else None
+    y = _safe_float(point.get("y")) if point else None
+    if x is not None and y is not None:
+        return x, y
+
+    region = anchor.get("highlight_region") if isinstance(anchor.get("highlight_region"), dict) else None
+    bbox = region.get("bbox_pct") if region and isinstance(region.get("bbox_pct"), dict) else None
+    if not bbox:
+        return None, None
+
+    left = _safe_float(bbox.get("x"))
+    top = _safe_float(bbox.get("y"))
+    width = _safe_float(bbox.get("width", bbox.get("w")))
+    height = _safe_float(bbox.get("height", bbox.get("h")))
+    if left is None or top is None or width is None or height is None or width <= 0 or height <= 0:
+        return None, None
+    return left + width / 2.0, top + height / 2.0
 
 
 def _issue_code_prefix(issue_type: str) -> str:
@@ -90,8 +126,8 @@ def _severity_color(severity: str) -> Tuple[int, int, int]:
 def _issue_label(result) -> str:  # noqa: ANN001
     t = (result.type or "").strip().lower()
     if t == "dimension":
-        va = (result.value_a or "").strip()
-        vb = (result.value_b or "").strip()
+        va = (getattr(result, "value_a", None) or "").strip()
+        vb = (getattr(result, "value_b", None) or "").strip()
         if va or vb:
             return f"尺寸不一致 {va or '?'} vs {vb or '?'}"
         return "尺寸不一致"
@@ -305,7 +341,7 @@ def build_sheet_issue_map(
         code = item["code"]
         result = item["result"]
         evidence = item["evidence"]
-        anchors = evidence.get("anchors") if isinstance(evidence.get("anchors"), list) else []
+        anchors = _extract_anchors(evidence)
         located = False
         issue_debug = {
             "code": code,
@@ -328,9 +364,7 @@ def build_sheet_issue_map(
             if not sheet_entry:
                 continue
 
-            gp = anchor.get("global_pct") if isinstance(anchor.get("global_pct"), dict) else None
-            x = _safe_float(gp.get("x")) if gp else None
-            y = _safe_float(gp.get("y")) if gp else None
+            x, y = _resolve_anchor_point(anchor)
             if x is None or y is None:
                 continue
 
@@ -342,6 +376,7 @@ def build_sheet_issue_map(
                 "label": _issue_label(result),
                 "grid": anchor.get("grid"),
                 "role": anchor.get("role"),
+                "highlight_region": anchor.get("highlight_region"),
             }
             sheet_entry["marks"].append(mark)
             sheet_entry["issue_codes"].append(code)
@@ -360,7 +395,7 @@ def build_sheet_issue_map(
                     "sheet_no_b": result.sheet_no_b,
                     "location": result.location,
                     "description": result.description,
-                    "reason": evidence.get("unlocated_reason") or "missing_anchor_or_global_pct",
+                    "reason": evidence.get("unlocated_reason") or "missing_anchor_or_grounding",
                 }
             )
         debug_issues.append(issue_debug)

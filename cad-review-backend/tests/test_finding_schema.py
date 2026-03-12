@@ -184,3 +184,29 @@ def test_finding_schema_validate_grounded_evidence_json_accepts_evidence_bundle_
     grounded = validate_grounded_evidence_json(payload)
 
     assert len(grounded) == 1
+
+
+def test_finding_schema_validate_grounded_evidence_json_accepts_final_issue_finding_anchors():
+    from services.audit_runtime.finding_schema import validate_grounded_evidence_json
+
+    payload = json.dumps(
+        {
+            "finding": {
+                "anchors": [
+                    {
+                        "sheet_no": "A1.01",
+                        "role": "source",
+                        "highlight_region": {
+                            "shape": "cloud_rect",
+                            "bbox_pct": {"x": 40.0, "y": 59.0, "width": 4.2, "height": 4.2},
+                        },
+                    }
+                ]
+            }
+        },
+        ensure_ascii=False,
+    )
+
+    grounded = validate_grounded_evidence_json(payload)
+
+    assert len(grounded) == 1

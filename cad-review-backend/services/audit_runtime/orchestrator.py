@@ -931,9 +931,15 @@ def _final_issue_to_audit_result(final_issue) -> AuditResult:  # noqa: ANN001
     finding_type = str(getattr(final_issue, "finding_type", "") or "").strip()
     issue_type = _chief_finding_issue_type(finding_type)
     target_sheet_nos = list(getattr(final_issue, "target_sheet_nos", []) or [])
+    anchors = [anchor.model_dump() for anchor in list(getattr(final_issue, "anchors", []) or [])]
+    grounding = {
+        "status": "grounded" if anchors else "missing",
+        "anchor_count": len(anchors),
+    }
     evidence_json = json.dumps(
         {
-            "anchors": [anchor.model_dump() for anchor in list(getattr(final_issue, "anchors", []) or [])],
+            "anchors": anchors,
+            "grounding": grounding,
             "evidence_pack_id": getattr(final_issue, "evidence_pack_id", ""),
             "finding": final_issue.model_dump(),
         },

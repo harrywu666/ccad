@@ -445,3 +445,4 @@ def test_orchestrator_persists_final_issue_not_raw_worker_summary(monkeypatch):
     payload = json.loads(captured["rows"][0].evidence_json)
     assert payload["anchors"][0]["sheet_no"] == "A1.06"
     assert payload["finding"]["disposition"] == "accepted"
+    assert payload["grounding"]["status"] == "grounded"
