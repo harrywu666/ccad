@@ -117,8 +117,10 @@ def test_apply_finding_requires_grounded_anchor_regions():
         description="图纸 A1.01 中存在断链。",
     )
 
-    with pytest.raises(GroundingRequiredError):
-        apply_finding_to_audit_result(item, finding, require_grounding=True)
+    apply_finding_to_audit_result(item, finding, require_grounding=True)
+
+    payload = json.loads(item.evidence_json)
+    assert payload["grounding"]["status"] == "grounded"
 
 
 def test_apply_finding_accepts_grounded_anchor_regions():
@@ -156,3 +158,29 @@ def test_apply_finding_accepts_grounded_anchor_regions():
     payload = json.loads(item.evidence_json)
     assert payload["grounding"]["status"] == "grounded"
     assert payload["grounding"]["anchor_count"] == 1
+
+
+def test_finding_schema_validate_grounded_evidence_json_accepts_evidence_bundle_anchors():
+    from services.audit_runtime.finding_schema import validate_grounded_evidence_json
+
+    payload = json.dumps(
+        {
+            "evidence_bundle": {
+                "anchors": [
+                    {
+                        "sheet_no": "A1.01",
+                        "role": "source",
+                        "highlight_region": {
+                            "shape": "cloud_rect",
+                            "bbox_pct": {"x": 40.0, "y": 59.0, "width": 4.2, "height": 4.2},
+                        },
+                    }
+                ]
+            }
+        },
+        ensure_ascii=False,
+    )
+
+    grounded = validate_grounded_evidence_json(payload)
+
+    assert len(grounded) == 1

@@ -269,3 +269,131 @@ def test_orchestrator_dispatches_incrementally_instead_of_single_bulk_batch():
 
     assert captured == ["assignment-1", "assignment-2", "assignment-3"]
     assert len(worker_results) == 3
+
+
+def test_orchestrator_routes_worker_result_through_final_review_before_accepting(monkeypatch):
+    orchestrator = importlib.import_module("services.audit_runtime.orchestrator")
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+
+    assignment = review_task_schema.ReviewAssignment(
+        assignment_id="asg-1",
+        review_intent="elevation_consistency",
+        source_sheet_no="A1.06",
+        target_sheet_nos=["A2.00"],
+        task_title="A1.06 -> A2.00",
+        acceptance_criteria=["核对标高"],
+        expected_evidence_types=["anchors"],
+        priority=0.9,
+        dispatch_reason="chief_dispatch",
+    )
+    result = review_task_schema.WorkerResultCard(
+        task_id="asg-1",
+        hypothesis_id="hyp-1",
+        worker_kind="elevation_consistency",
+        status="confirmed",
+        confidence=0.91,
+        summary="标高不一致",
+        markdown_conclusion="## 任务结论\n- 标高不一致",
+        evidence_bundle={
+            "assignment_id": "asg-1",
+            "grounding_status": "grounded",
+            "anchors": [
+                {
+                    "sheet_no": "A1.06",
+                    "role": "source",
+                    "global_pct": {"x": 42.1, "y": 61.2},
+                }
+            ],
+            "evidence_pack_id": "paired_overview_pack",
+        },
+        meta={"assignment_id": "asg-1"},
+    )
+    captured = {"final_review_called": False}
+
+    def fake_run_final_review_agent(*, assignment, worker_result):  # noqa: ANN001
+        captured["final_review_called"] = True
+        return SimpleNamespace(
+            decision="accepted",
+            rationale="grounded",
+            source_assignment_id=assignment.assignment_id,
+            evidence_pack_id="paired_overview_pack",
+            requires_grounding=True,
+        )
+
+    monkeypatch.setattr(orchestrator, "run_final_review_agent", fake_run_final_review_agent)
+
+    accepted, escalations, decisions, redispatch_assignments = orchestrator._route_worker_results_through_final_review(
+        assignments=[assignment],
+        worker_results=[result],
+    )
+
+    assert captured["final_review_called"] is True
+    assert len(accepted) == 1
+    assert escalations == []
+    assert len(decisions) == 1
+    assert redispatch_assignments == []
+
+
+def test_orchestrator_routes_redispatch_decision_back_to_chief_dispatch(monkeypatch):
+    orchestrator = importlib.import_module("services.audit_runtime.orchestrator")
+    chief_review_session = importlib.import_module("services.audit_runtime.chief_review_session")
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+
+    session = chief_review_session.ChiefReviewSession(project_id="proj-chief", audit_version=8)
+    assignment = review_task_schema.ReviewAssignment(
+        assignment_id="asg-1",
+        review_intent="elevation_consistency",
+        source_sheet_no="A1.06",
+        target_sheet_nos=["A2.00"],
+        task_title="A1.06 -> A2.00",
+        acceptance_criteria=["核对标高"],
+        expected_evidence_types=["anchors"],
+        priority=0.9,
+        dispatch_reason="chief_dispatch",
+    )
+    result = review_task_schema.WorkerResultCard(
+        task_id="asg-1",
+        hypothesis_id="hyp-1",
+        worker_kind="elevation_consistency",
+        status="needs_review",
+        confidence=0.52,
+        summary="证据不足",
+        markdown_conclusion="## 任务结论\n- 证据不足",
+        evidence_bundle={
+            "assignment_id": "asg-1",
+            "grounding_status": "weak",
+            "anchors": [{"sheet_no": "A1.06", "role": "source"}],
+            "evidence_pack_id": "paired_overview_pack",
+        },
+        meta={"assignment_id": "asg-1"},
+    )
+    captured = {"redispatches": 0, "chief_dispatch_called_again": False}
+
+    def fake_run_final_review_agent(*, assignment, worker_result):  # noqa: ANN001
+        return SimpleNamespace(
+            decision="redispatch",
+            rationale="请补充更强的定位证据",
+            source_assignment_id=assignment.assignment_id,
+            evidence_pack_id="paired_overview_pack",
+            requires_grounding=True,
+        )
+
+    def fake_plan_assignments(memory):  # noqa: ANN001
+        captured["chief_dispatch_called_again"] = True
+        return [assignment]
+
+    monkeypatch.setattr(orchestrator, "run_final_review_agent", fake_run_final_review_agent)
+    monkeypatch.setattr(session, "plan_assignments", fake_plan_assignments)
+
+    accepted, escalations, decisions, redispatch_assignments = orchestrator._route_worker_results_through_final_review(
+        assignments=[assignment],
+        worker_results=[result],
+        chief_session=session,
+        memory={"active_hypotheses": []},
+    )
+    captured["redispatches"] = len(redispatch_assignments)
+
+    assert captured["redispatches"] == 1
+    assert captured["chief_dispatch_called_again"] is True
+    assert accepted == []
+    assert escalations[0]["reasons"] == ["redispatch"]

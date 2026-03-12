@@ -56,6 +56,8 @@ from services.task_planner_service import build_audit_tasks
 
 logger = logging.getLogger(__name__)
 
+from services.audit_runtime.final_review_agent import run_final_review_agent
+
 
 class AuditCancelledError(RuntimeError):
     """用户手动中断审核。"""
@@ -808,6 +810,79 @@ async def _dispatch_review_assignments_incrementally(
     return worker_results
 
 
+def _build_redispatch_hypothesis(assignment, rationale: str) -> dict:  # noqa: ANN001
+    return {
+        "id": str(getattr(assignment, "assignment_id", "") or "").split("::", 1)[0],
+        "topic": str(getattr(assignment, "review_intent", "") or "终审补派").strip(),
+        "objective": str(getattr(assignment, "task_title", "") or "").strip(),
+        "source_sheet_no": str(getattr(assignment, "source_sheet_no", "") or "").strip(),
+        "target_sheet_nos": list(getattr(assignment, "target_sheet_nos", []) or []),
+        "priority": float(getattr(assignment, "priority", 0.9) or 0.9),
+        "context": {
+            "suggested_worker_kind": str(getattr(assignment, "review_intent", "") or "").strip(),
+            "needs_chief_review": True,
+            "final_review_rationale": rationale,
+        },
+    }
+
+
+def _route_worker_results_through_final_review(
+    *,
+    assignments: list,
+    worker_results: list[WorkerResultCard],
+    chief_session=None,  # noqa: ANN001
+    memory: dict | None = None,
+):
+    assignment_by_id = {
+        str(getattr(item, "assignment_id", "") or "").strip(): item
+        for item in list(assignments or [])
+        if str(getattr(item, "assignment_id", "") or "").strip()
+    }
+    accepted: list[WorkerResultCard] = []
+    escalations: list[dict] = []
+    decisions: list[Any] = []
+    redispatch_assignments: list = []
+
+    for result in worker_results:
+        assignment_id = str(
+            (result.meta or {}).get("assignment_id")
+            or (result.evidence_bundle or {}).get("assignment_id")
+            or result.task_id
+            or ""
+        ).strip()
+        assignment = assignment_by_id.get(assignment_id)
+        if assignment is None:
+            accepted.append(result)
+            continue
+        decision = run_final_review_agent(
+            assignment=assignment,
+            worker_result=result,
+        )
+        decisions.append(decision)
+        if decision.decision == "accepted":
+            accepted.append(result)
+            continue
+        if decision.decision in {"needs_more_evidence", "redispatch"}:
+            escalations.append(
+                {
+                    "hypothesis_id": result.hypothesis_id,
+                    "task_id": result.task_id,
+                    "assignment_id": assignment_id,
+                    "escalate_to_chief": True,
+                    "reasons": [decision.decision],
+                    "rationale": decision.rationale,
+                }
+            )
+            if decision.decision == "redispatch" and chief_session is not None:
+                redispatch_memory = dict(memory or {})
+                redispatch_memory["active_hypotheses"] = [
+                    _build_redispatch_hypothesis(assignment, decision.rationale)
+                ]
+                redispatch_assignments.extend(chief_session.plan_assignments(memory=redispatch_memory))
+            continue
+    return accepted, escalations, decisions, redispatch_assignments
+
+
 def _persist_chief_findings(project_id: str, audit_version: int, findings: list) -> None:  # noqa: ANN001
     if not findings:
         return
@@ -1140,7 +1215,16 @@ def execute_pipeline_chief_review(
                 )
             ) or []
 
-        findings, escalations = synthesize_findings(worker_results=worker_results)
+        accepted_worker_results, final_review_escalations, final_review_decisions, redispatch_assignments = (
+            _route_worker_results_through_final_review(
+                assignments=assignments,
+                worker_results=worker_results,
+                chief_session=chief_session,
+                memory=memory,
+            )
+        )
+        findings, worker_escalations = synthesize_findings(worker_results=accepted_worker_results)
+        escalations = [*final_review_escalations, *worker_escalations]
         db = SessionLocal()
         try:
             memory = save_project_memory(
@@ -1155,6 +1239,8 @@ def execute_pipeline_chief_review(
                         "chief_dispatch_meta": {
                             **dict(memory.get("chief_dispatch_meta") or {}),
                             "completed_assignment_count": len(worker_results),
+                            "final_review_decision_count": len(final_review_decisions),
+                            "redispatch_assignment_count": len(redispatch_assignments),
                         },
                     },
                     worker_results=worker_results,
@@ -1178,6 +1264,7 @@ def execute_pipeline_chief_review(
                 meta={
                     "escalations": escalations[:10],
                     "task_stage": "chief_recheck",
+                    "redispatch_assignments": len(redispatch_assignments),
                 },
             )
 

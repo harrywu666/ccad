@@ -51,11 +51,24 @@ def _extract_anchor_list(evidence_json: Optional[str]) -> List[Dict[str, Any]]:
     payload = _safe_json_loads(evidence_json)
     anchors = payload.get("anchors")
     if not isinstance(anchors, list):
+        evidence_bundle = payload.get("evidence_bundle")
+        if isinstance(evidence_bundle, dict):
+            anchors = evidence_bundle.get("anchors")
+    if not isinstance(anchors, list):
         return []
     return [anchor for anchor in anchors if isinstance(anchor, dict)]
 
 
 def _is_grounded_anchor(anchor: Dict[str, Any]) -> bool:
+    point = anchor.get("global_pct")
+    if isinstance(point, dict):
+        try:
+            x = float(point.get("x"))
+            y = float(point.get("y"))
+        except (TypeError, ValueError):
+            x = y = None  # type: ignore[assignment]
+        if x is not None and y is not None:
+            return True
     region = anchor.get("highlight_region")
     if not isinstance(region, dict):
         return False
@@ -63,8 +76,8 @@ def _is_grounded_anchor(anchor: Dict[str, Any]) -> bool:
     if not isinstance(bbox, dict):
         return False
     try:
-        width = float(bbox.get("width"))
-        height = float(bbox.get("height"))
+        width = float(bbox.get("width", bbox.get("w")))
+        height = float(bbox.get("height", bbox.get("h")))
     except (TypeError, ValueError):
         return False
     return width > 0.0 and height > 0.0
