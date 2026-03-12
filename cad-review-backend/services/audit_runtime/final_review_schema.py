@@ -24,7 +24,7 @@ class BBoxPct(BaseModel):
 
 
 class HighlightRegion(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     shape: str = Field(min_length=1)
     bbox_pct: BBoxPct

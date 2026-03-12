@@ -638,3 +638,95 @@ def test_status_api_does_not_reinflate_worker_cards_when_assignment_and_legacy_e
         "assignment:asg-1",
         "assignment:asg-2",
     }
+
+
+def test_status_api_moves_completed_assignment_into_recent_completed(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    now = datetime.now()
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-status-assignment-completed", name="Assignment Completed", status="auditing"))
+        db.add(
+            models.AuditRun(
+                project_id="proj-status-assignment-completed",
+                audit_version=13,
+                status="running",
+                current_step="主审派发副审任务",
+                progress=53,
+                total_issues=0,
+                provider_mode="sdk",
+                started_at=now - timedelta(minutes=8),
+            )
+        )
+        db.add_all(
+            [
+                models.AuditRunEvent(
+                    project_id="proj-status-assignment-completed",
+                    audit_version=13,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="runner_turn_started",
+                    progress_hint=20,
+                    message="尺寸审查Agent 已通过 Runner 发起一次流式调用",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "assignment_id": "asg-1",
+                            "visible_session_key": "assignment:asg-1",
+                            "session_key": "proj-status-assignment-completed:13:dimension_review_agent:pair_compare:A101:A201",
+                            "skill_id": "elevation_consistency",
+                            "source_sheet_no": "A1.01",
+                            "target_sheet_no": "A2.01",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=2),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-assignment-completed",
+                    audit_version=13,
+                    level="success",
+                    step_key="dimension",
+                    agent_key="elevation_consistency_agent",
+                    agent_name="副审 Agent",
+                    event_kind="worker_assignment_completed",
+                    progress_hint=60,
+                    message="A1.01 与 A2.01 标高一致，无需继续升级",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "assignment_id": "asg-1",
+                            "visible_session_key": "assignment:asg-1",
+                            "session_key": "proj-status-assignment-completed:13:dimension_review_agent:pair_compare:A101:A201",
+                            "skill_id": "elevation_consistency",
+                            "worker_kind": "elevation_consistency",
+                            "worker_result_status": "rejected",
+                            "source_sheet_no": "A1.01",
+                            "target_sheet_no": "A2.01",
+                            "task_stage": "worker_skill_execution",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=1),
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.get("/api/projects/proj-status-assignment-completed/audit/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    ui_runtime = payload["ui_runtime"]
+    assert ui_runtime["chief"]["active_worker_count"] == 0
+    assert ui_runtime["chief"]["completed_worker_count"] == 1
+    assert ui_runtime["worker_sessions"] == []
+    assert len(ui_runtime["recent_completed"]) == 1
+    assert ui_runtime["recent_completed"][0]["session_key"] == "assignment:asg-1"
+    assert ui_runtime["recent_completed"][0]["status"] == "completed"

@@ -86,3 +86,23 @@ def test_final_issue_accepts_anchor_with_highlight_region_bbox():
     )
 
     assert issue.anchors[0].highlight_region is not None
+
+
+def test_final_issue_ignores_legacy_highlight_region_origin():
+    issue = FinalIssue(
+        **_build_payload(
+            anchors=[
+                {
+                    "sheet_no": "A1.06",
+                    "role": "source",
+                    "highlight_region": {
+                        "shape": "cloud_rect",
+                        "origin": "dimension",
+                        "bbox_pct": {"x": 40.0, "y": 59.0, "width": 4.2, "height": 4.2},
+                    },
+                }
+            ]
+        )
+    )
+
+    assert issue.anchors[0].highlight_region is not None

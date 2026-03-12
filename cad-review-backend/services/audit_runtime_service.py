@@ -94,7 +94,7 @@ _WORKER_NAME_LABELS = {
     "elevation_consistency": "标高副审",
 }
 _WORKER_BLOCKED_EVENT_KINDS = {"runner_turn_deferred", "runner_session_failed", "runner_turn_cancelled"}
-_WORKER_COMPLETED_EVENT_KINDS = {"raw_output_saved", "output_repair_succeeded"}
+_WORKER_COMPLETED_EVENT_KINDS = {"raw_output_saved", "output_repair_succeeded", "worker_assignment_completed"}
 _MEANINGFUL_ACTION_LABELS = {
     "runner_turn_started": "调用 Skill",
     "runner_broadcast": "现场播报",
@@ -105,6 +105,7 @@ _MEANINGFUL_ACTION_LABELS = {
     "runner_turn_deferred": "等待重试",
     "runner_session_failed": "执行失败",
     "runner_turn_cancelled": "已中断",
+    "worker_assignment_completed": "任务完成",
 }
 _ACTION_PRIORITY = {
     "runner_session_started": 0,
@@ -114,6 +115,7 @@ _ACTION_PRIORITY = {
     "output_repair_started": 3,
     "output_repair_succeeded": 4,
     "raw_output_saved": 4,
+    "worker_assignment_completed": 4,
     "runner_turn_deferred": 5,
     "runner_session_failed": 5,
     "runner_turn_cancelled": 5,

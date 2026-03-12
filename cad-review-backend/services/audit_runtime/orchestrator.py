@@ -143,6 +143,56 @@ def _append_worker_event(
     )
 
 
+def _worker_step_key(worker_kind: str) -> str:
+    mapping = {
+        "node_host_binding": "relationship_discovery",
+        "index_reference": "index",
+        "material_semantic_consistency": "material",
+        "elevation_consistency": "dimension",
+        "spatial_consistency": "dimension",
+    }
+    return mapping.get(str(worker_kind or "").strip(), "dimension")
+
+
+def _append_assignment_completed_event(
+    project_id: str,
+    audit_version: int,
+    *,
+    worker_task,
+    worker_result,
+) -> None:
+    assignment_id = str((worker_result.meta or {}).get("assignment_id") or worker_task.id or "").strip()
+    if not assignment_id:
+        return
+    visible_session_key = str((worker_result.meta or {}).get("visible_session_key") or f"assignment:{assignment_id}").strip()
+    worker_kind = str(getattr(worker_result, "worker_kind", "") or getattr(worker_task, "worker_kind", "") or "").strip()
+    summary = str(getattr(worker_result, "summary", "") or "").strip()
+    status = str(getattr(worker_result, "status", "") or "").strip().lower() or "completed"
+    targets = list(getattr(worker_task, "target_sheet_nos", []) or [])
+    _append_worker_event(
+        project_id,
+        audit_version,
+        step_key=_worker_step_key(worker_kind),
+        agent_key=f"{worker_kind or 'worker'}_agent",
+        agent_name="副审 Agent",
+        level="success" if status in {"confirmed", "rejected"} else "warning",
+        event_kind="worker_assignment_completed",
+        progress_hint=60,
+        message=summary or "副审任务已完成，等待主审继续处理",
+        meta={
+            "assignment_id": assignment_id,
+            "visible_session_key": visible_session_key,
+            "session_key": str((worker_result.meta or {}).get("session_key") or getattr(worker_task, "session_key", "") or "").strip() or None,
+            "skill_id": worker_kind,
+            "worker_kind": worker_kind,
+            "worker_result_status": status,
+            "source_sheet_no": getattr(worker_task, "source_sheet_no", None),
+            "target_sheet_no": targets[0] if targets else None,
+            "task_stage": "worker_skill_execution",
+        },
+    )
+
+
 def _run_with_session(callback):  # noqa: ANN001
     db = SessionLocal()
     try:
@@ -806,6 +856,13 @@ async def _dispatch_review_assignments_incrementally(
         pending_assignments.pop(0)
         worker_task = chief_session.build_worker_task_from_assignment(next_assignment)
         batch_results = await pool.run_batch([worker_task]) or []
+        for item in batch_results:
+            _append_assignment_completed_event(
+                chief_session.project_id,
+                chief_session.audit_version,
+                worker_task=worker_task,
+                worker_result=item,
+            )
         worker_results.extend(batch_results)
 
     return worker_results
