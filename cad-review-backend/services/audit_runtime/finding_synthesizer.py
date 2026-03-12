@@ -1,4 +1,10 @@
-"""把副审结果合成为主审 Findings。"""
+"""把副审结果合成为主审 Findings。
+
+兼容说明：
+- 这是老的 Finding 合成入口。
+- Task 6 之后，主链路的 accepted 结果应优先走 organizer Markdown + FinalIssue converter。
+- 这里只保留给测试和兼容路径使用。
+"""
 
 from __future__ import annotations
 

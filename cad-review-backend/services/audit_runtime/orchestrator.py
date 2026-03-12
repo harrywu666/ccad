@@ -9,6 +9,7 @@ import logging
 import os
 from dataclasses import replace
 import inspect
+from types import SimpleNamespace
 
 from database import SessionLocal
 from domain.sheet_normalization import normalize_sheet_no
@@ -840,7 +841,7 @@ def _route_worker_results_through_final_review(
     }
     accepted: list[WorkerResultCard] = []
     escalations: list[dict] = []
-    decisions: list[Any] = []
+    decisions: list[dict] = []
     redispatch_assignments: list = []
 
     for result in worker_results:
@@ -858,7 +859,14 @@ def _route_worker_results_through_final_review(
             assignment=assignment,
             worker_result=result,
         )
-        decisions.append(decision)
+        decisions.append(
+            {
+                "assignment_id": assignment_id,
+                "assignment": assignment,
+                "worker_result": result,
+                "final_review_decision": decision,
+            }
+        )
         if decision.decision == "accepted":
             accepted.append(result)
             continue
@@ -907,6 +915,65 @@ def _persist_chief_findings(project_id: str, audit_version: int, findings: list)
         )
         for item in findings
     ]
+    db = SessionLocal()
+    try:
+        add_and_commit(db, rows)
+        append_result_upsert_events(
+            project_id,
+            audit_version,
+            issue_ids=[str(row.id) for row in rows if getattr(row, "id", None)],
+        )
+    finally:
+        db.close()
+
+
+def _final_issue_to_audit_result(final_issue) -> AuditResult:  # noqa: ANN001
+    finding_type = str(getattr(final_issue, "finding_type", "") or "").strip()
+    issue_type = _chief_finding_issue_type(finding_type)
+    target_sheet_nos = list(getattr(final_issue, "target_sheet_nos", []) or [])
+    evidence_json = json.dumps(
+        {
+            "anchors": [anchor.model_dump() for anchor in list(getattr(final_issue, "anchors", []) or [])],
+            "evidence_pack_id": getattr(final_issue, "evidence_pack_id", ""),
+            "finding": final_issue.model_dump(),
+        },
+        ensure_ascii=False,
+    )
+    return AuditResult(
+        project_id="",
+        audit_version=1,
+        type=issue_type,
+        severity=getattr(final_issue, "severity", "warning"),
+        sheet_no_a=getattr(final_issue, "source_sheet_no", None),
+        sheet_no_b=target_sheet_nos[0] if target_sheet_nos else None,
+        location=getattr(final_issue, "location_text", None),
+        rule_id={
+            "missing_ref": "NODE-001",
+            "dim_mismatch": "ELEV-001",
+            "material_conflict": "MAT-001",
+            "index_conflict": "IDX-001",
+        }.get(finding_type, "CHIEF-001"),
+        finding_type=finding_type,
+        finding_status="confirmed",
+        source_agent=getattr(final_issue, "source_agent", None),
+        evidence_pack_id=getattr(final_issue, "evidence_pack_id", None),
+        review_round=getattr(final_issue, "review_round", 1),
+        triggered_by=getattr(final_issue, "source_assignment_id", None),
+        confidence=getattr(final_issue, "confidence", None),
+        description=getattr(final_issue, "description", None),
+        evidence_json=evidence_json,
+    )
+
+
+def _persist_final_issues(project_id: str, audit_version: int, final_issues: list) -> None:  # noqa: ANN001
+    if not final_issues:
+        return
+    rows = []
+    for issue in final_issues:
+        row = _final_issue_to_audit_result(issue)
+        row.project_id = project_id
+        row.audit_version = audit_version
+        rows.append(row)
     db = SessionLocal()
     try:
         add_and_commit(db, rows)
@@ -1011,7 +1078,9 @@ def execute_pipeline_chief_review(
 ) -> None:
     from services.audit_runtime.chief_review_session import ChiefReviewSession
     from services.audit_runtime.chief_review_planner import plan_chief_review_hypotheses
+    from services.audit_runtime.final_issue_converter import convert_markdown_and_evidence_to_final_issues
     from services.audit_runtime.finding_synthesizer import synthesize_findings
+    from services.audit_runtime.report_organizer_agent import run_report_organizer_agent
     from services.audit_runtime.review_worker_pool import ReviewWorkerPool
     from services.chief_review_memory_service import load_project_memory, save_project_memory
 
@@ -1223,8 +1292,46 @@ def execute_pipeline_chief_review(
                 memory=memory,
             )
         )
-        findings, worker_escalations = synthesize_findings(worker_results=accepted_worker_results)
+        accepted_decision_records = [
+            item
+            for item in final_review_decisions
+            if str(getattr(item.get("final_review_decision"), "decision", "") or "").strip() == "accepted"
+        ]
+        handled_assignment_ids = {
+            str(item.get("assignment_id") or "").strip()
+            for item in accepted_decision_records
+            if str(item.get("assignment_id") or "").strip()
+        }
+        compatibility_worker_results = [
+            item
+            for item in accepted_worker_results
+            if str(
+                (item.meta or {}).get("assignment_id")
+                or (item.evidence_bundle or {}).get("assignment_id")
+                or item.task_id
+                or ""
+            ).strip()
+            not in handled_assignment_ids
+        ]
+
+        organizer_markdown = ""
+        final_issues = []
+        if accepted_decision_records:
+            organizer_markdown = run_report_organizer_agent(
+                accepted_decisions=accepted_decision_records,
+            )
+            final_issues = convert_markdown_and_evidence_to_final_issues(
+                organizer_markdown=organizer_markdown,
+                accepted_decisions=accepted_decision_records,
+            )
+
+        findings, worker_escalations = synthesize_findings(worker_results=compatibility_worker_results)
         escalations = [*final_review_escalations, *worker_escalations]
+        resolved_refs = [
+            SimpleNamespace(triggered_by=str(item["worker_result"].hypothesis_id or "").strip())
+            for item in accepted_decision_records
+            if str(item["worker_result"].hypothesis_id or "").strip()
+        ]
         db = SessionLocal()
         try:
             memory = save_project_memory(
@@ -1241,15 +1348,17 @@ def execute_pipeline_chief_review(
                             "completed_assignment_count": len(worker_results),
                             "final_review_decision_count": len(final_review_decisions),
                             "redispatch_assignment_count": len(redispatch_assignments),
+                            "accepted_final_issue_count": len(final_issues),
                         },
                     },
                     worker_results=worker_results,
-                    findings=findings,
+                    findings=[*findings, *resolved_refs],
                     escalations=escalations,
                 ),
             )
         finally:
             db.close()
+        _persist_final_issues(project_id, audit_version, final_issues)
         _persist_chief_findings(project_id, audit_version, findings)
 
         if escalations:
@@ -1274,7 +1383,7 @@ def execute_pipeline_chief_review(
             status="done",
             current_step="主审完成结果收束",
             progress=100,
-            total_issues=len(findings),
+            total_issues=len(final_issues) + len(findings),
             finished=True,
         )
         _append_master_event(
@@ -1284,12 +1393,15 @@ def execute_pipeline_chief_review(
             level="success",
             event_kind="phase_completed",
             progress_hint=100,
-            message=f"主审 Agent 已整理完成审核报告，共汇总 {len(findings)} 处问题",
+            message=f"主审 Agent 已整理完成审核报告，共汇总 {len(final_issues) + len(findings)} 处问题",
             meta={
                 "planner": "chief_review_agent",
-                "total_issues": len(findings),
+                "total_issues": len(final_issues) + len(findings),
+                "final_issues": len(final_issues),
+                "compat_findings": len(findings),
+                "organizer_markdown_length": len(organizer_markdown),
                 "escalations": len(escalations),
-                "task_stage": "finding_synthesized",
+                "task_stage": "organizer_converted",
             },
         )
         append_result_summary_event(project_id, audit_version)

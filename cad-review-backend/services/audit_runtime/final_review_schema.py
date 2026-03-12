@@ -72,6 +72,7 @@ class FinalIssue(BaseModel):
     source_sheet_no: str = Field(min_length=1)
     target_sheet_nos: list[str]
     location_text: str = Field(min_length=1)
+    recommendation: str | None = None
     evidence_pack_id: str = Field(min_length=1)
     anchors: list[AnchorPayload]
     confidence: float = Field(ge=0.0, le=1.0)
@@ -114,6 +115,14 @@ class FinalIssue(BaseModel):
         if not any(anchor.has_location_evidence() for anchor in self.anchors):
             raise ValueError("FinalIssue requires at least one anchor with grounding coordinates")
         return self
+
+    @field_validator("recommendation", mode="before")
+    @classmethod
+    def _validate_optional_text(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value or "").strip()
+        return text or None
 
 
 __all__ = ["PctPoint", "BBoxPct", "HighlightRegion", "AnchorPayload", "FinalIssue"]

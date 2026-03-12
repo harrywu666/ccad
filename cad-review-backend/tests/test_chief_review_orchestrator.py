@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -397,3 +398,50 @@ def test_orchestrator_routes_redispatch_decision_back_to_chief_dispatch(monkeypa
     assert captured["chief_dispatch_called_again"] is True
     assert accepted == []
     assert escalations[0]["reasons"] == ["redispatch"]
+
+
+def test_orchestrator_persists_final_issue_not_raw_worker_summary(monkeypatch):
+    orchestrator = importlib.import_module("services.audit_runtime.orchestrator")
+    final_review_schema = importlib.import_module("services.audit_runtime.final_review_schema")
+
+    captured = {"rows": []}
+
+    def fake_add_and_commit(db, rows):  # noqa: ANN001
+        captured["rows"] = list(rows)
+        for index, row in enumerate(rows, start=1):
+            row.id = f"issue-{index}"
+
+    monkeypatch.setattr(orchestrator, "add_and_commit", fake_add_and_commit)
+    monkeypatch.setattr(orchestrator, "append_result_upsert_events", lambda *args, **kwargs: None)
+
+    issue = final_review_schema.FinalIssue(
+        issue_code="ISS-001",
+        title="标高不一致",
+        description="A1.06 与 A2.00 标高冲突",
+        severity="warning",
+        finding_type="dim_mismatch",
+        disposition="accepted",
+        source_agent="organizer_agent",
+        source_assignment_id="asg-1",
+        source_sheet_no="A1.06",
+        target_sheet_nos=["A2.00"],
+        location_text="A1.06 剖面标高 vs A2.00 立面标高",
+        evidence_pack_id="paired_overview_pack",
+        anchors=[
+            {
+                "sheet_no": "A1.06",
+                "role": "source",
+                "global_pct": {"x": 42.1, "y": 61.2},
+            }
+        ],
+        confidence=0.91,
+        review_round=2,
+        organizer_markdown_block="## 问题 1\n- 标高不一致",
+    )
+
+    orchestrator._persist_final_issues("proj-chief", 8, [issue])
+
+    assert len(captured["rows"]) == 1
+    payload = json.loads(captured["rows"][0].evidence_json)
+    assert payload["anchors"][0]["sheet_no"] == "A1.06"
+    assert payload["finding"]["disposition"] == "accepted"
