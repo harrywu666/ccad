@@ -21,6 +21,12 @@ class ReviewWorkerSkillAssetDefinition:
 
 SKILL_DEFINITIONS: tuple[ReviewWorkerSkillAssetDefinition, ...] = (
     ReviewWorkerSkillAssetDefinition(
+        key="node_host_binding",
+        title="节点归属 Skill",
+        description="负责跨图节点归属核查的能力说明，规定什么时候看源图、什么时候看目标图、什么时候需要升级回主审。",
+        skill_dir="node_host_binding",
+    ),
+    ReviewWorkerSkillAssetDefinition(
         key="index_reference",
         title="索引引用 Skill",
         description="负责索引引用核查的能力说明，规定什么时候触发、输入长什么样、输出怎么交付。",
@@ -31,6 +37,18 @@ SKILL_DEFINITIONS: tuple[ReviewWorkerSkillAssetDefinition, ...] = (
         title="材料语义一致性 Skill",
         description="负责材料语义一致性核查的能力说明，规定候选筛选、证据使用和结论格式。",
         skill_dir="material_semantic_consistency",
+    ),
+    ReviewWorkerSkillAssetDefinition(
+        key="elevation_consistency",
+        title="标高一致性 Skill",
+        description="负责跨图标高一致性核查的能力说明，规定如何比对成对图纸中的标高冲突。",
+        skill_dir="elevation_consistency",
+    ),
+    ReviewWorkerSkillAssetDefinition(
+        key="spatial_consistency",
+        title="空间一致性 Skill",
+        description="负责跨图空间与尺寸一致性核查的能力说明，规定配对范围、证据打包和升级条件。",
+        skill_dir="spatial_consistency",
     ),
 )
 

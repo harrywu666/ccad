@@ -45,8 +45,11 @@ def test_get_review_worker_skill_assets_returns_skill_items(monkeypatch, tmp_pat
         "list_review_worker_skill_assets",
         lambda: {
             "items": [
+                {"key": "node_host_binding", "title": "节点归属 Skill", "description": "desc", "file_name": "SKILL.md", "content": "node body"},
                 {"key": "index_reference", "title": "索引引用 Skill", "description": "desc", "file_name": "SKILL.md", "content": "index body"},
                 {"key": "material_semantic_consistency", "title": "材料语义一致性 Skill", "description": "desc", "file_name": "SKILL.md", "content": "material body"},
+                {"key": "elevation_consistency", "title": "标高一致性 Skill", "description": "desc", "file_name": "SKILL.md", "content": "elevation body"},
+                {"key": "spatial_consistency", "title": "空间一致性 Skill", "description": "desc", "file_name": "SKILL.md", "content": "spatial body"},
             ],
         },
     )
@@ -57,8 +60,11 @@ def test_get_review_worker_skill_assets_returns_skill_items(monkeypatch, tmp_pat
     assert response.status_code == 200
     payload = response.json()
     assert [item["key"] for item in payload["items"]] == [
+        "node_host_binding",
         "index_reference",
         "material_semantic_consistency",
+        "elevation_consistency",
+        "spatial_consistency",
     ]
 
 
@@ -72,8 +78,11 @@ def test_update_review_worker_skill_assets_round_trip(monkeypatch, tmp_path):
         ]
         return {
             "items": [
+                {"key": "node_host_binding", "title": "节点归属 Skill", "description": "desc", "file_name": "SKILL.md", "content": "old node skill"},
                 {"key": "index_reference", "title": "索引引用 Skill", "description": "desc", "file_name": "SKILL.md", "content": "new index skill"},
                 {"key": "material_semantic_consistency", "title": "材料语义一致性 Skill", "description": "desc", "file_name": "SKILL.md", "content": "old material skill"},
+                {"key": "elevation_consistency", "title": "标高一致性 Skill", "description": "desc", "file_name": "SKILL.md", "content": "old elevation skill"},
+                {"key": "spatial_consistency", "title": "空间一致性 Skill", "description": "desc", "file_name": "SKILL.md", "content": "old spatial skill"},
             ],
         }
 
@@ -91,4 +100,5 @@ def test_update_review_worker_skill_assets_round_trip(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["items"][0]["content"] == "new index skill"
+    index_item = next(item for item in payload["items"] if item["key"] == "index_reference")
+    assert index_item["content"] == "new index skill"

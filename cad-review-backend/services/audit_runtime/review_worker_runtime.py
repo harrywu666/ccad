@@ -7,6 +7,7 @@ from typing import Any
 from domain.sheet_normalization import normalize_sheet_no
 from services.audit_runtime.review_task_schema import WorkerResultCard, WorkerTaskCard
 from services.audit_runtime.worker_skill_contract import build_worker_skill_result
+from services.audit_runtime.worker_skill_loader import WorkerSkillBundle, load_worker_skill
 from services.audit_runtime.worker_skill_registry import get_worker_skill_executor
 from services.feedback_runtime_service import load_feedback_runtime_profile
 from services.kimi_service import call_kimi
@@ -38,27 +39,45 @@ def _build_native_result(
     rule_id: str = "relationship_visual_review",
     evidence_pack_id: str = "paired_overview_pack",
 ) -> WorkerResultCard:
-    return build_worker_skill_result(
-        task=task,
-        skill_bundle=type(
-            "_NativeWorkerBundle",
-            (),
-            {
-                "worker_kind": str(task.worker_kind or "").strip(),
+    skill_bundle = _load_native_skill_bundle(str(task.worker_kind or "").strip())
+    if skill_bundle is None:
+        return build_worker_skill_result(
+            task=task,
+            skill_bundle=type(
+                "_NativeWorkerBundle",
+                (),
+                {
+                    "worker_kind": str(task.worker_kind or "").strip(),
+                    "skill_path": "builtin://native_worker_runtime",
+                },
+            )(),
+            status=status,
+            confidence=confidence,
+            summary=summary,
+            rule_id=rule_id,
+            evidence_pack_id=evidence_pack_id,
+            meta={
+                "skill_mode": "builtin_worker",
+                "skill_id": str(task.worker_kind or "").strip(),
                 "skill_path": "builtin://native_worker_runtime",
             },
-        )(),
+        )
+    return build_worker_skill_result(
+        task=task,
+        skill_bundle=skill_bundle,
         status=status,
         confidence=confidence,
         summary=summary,
         rule_id=rule_id,
         evidence_pack_id=evidence_pack_id,
-        meta={
-            "skill_mode": "builtin_worker",
-            "skill_id": str(task.worker_kind or "").strip(),
-            "skill_path": "builtin://native_worker_runtime",
-        },
     )
+
+
+def _load_native_skill_bundle(worker_kind: str) -> WorkerSkillBundle | None:
+    try:
+        return load_worker_skill(worker_kind)
+    except FileNotFoundError:
+        return None
 
 
 async def _run_node_host_binding_worker(
@@ -66,6 +85,7 @@ async def _run_node_host_binding_worker(
     task: WorkerTaskCard,
     db,
 ) -> WorkerResultCard:
+    skill_bundle = _load_native_skill_bundle(str(task.worker_kind or "").strip())
     from services.audit.relationship_discovery import (
         _discover_relationship_task_v2,
         _load_ready_sheets,
@@ -149,6 +169,10 @@ async def _run_node_host_binding_worker(
     result = _relationship_worker_result_from_relationships(task, relationships)
     meta = dict(result.meta or {})
     meta["compat_mode"] = "native_worker"
+    if skill_bundle is not None:
+        meta["skill_mode"] = "worker_skill"
+        meta["skill_id"] = skill_bundle.worker_kind
+        meta["skill_path"] = str(skill_bundle.skill_path)
     return WorkerResultCard(
         task_id=result.task_id,
         hypothesis_id=result.hypothesis_id,
@@ -167,6 +191,7 @@ async def _run_dimension_consistency_worker(
     task: WorkerTaskCard,
     db,
 ) -> WorkerResultCard:
+    skill_bundle = _load_native_skill_bundle(str(task.worker_kind or "").strip())
     from services.audit.dimension_audit import (
         _collect_dimension_pair_issues_async,
         _dimension_issue_evidence,
@@ -217,6 +242,9 @@ async def _run_dimension_consistency_worker(
         escalate_to_chief=(status == "needs_review"),
         meta={
             "compat_mode": "native_worker",
+            "skill_mode": "worker_skill" if skill_bundle is not None else "builtin_worker",
+            "skill_id": skill_bundle.worker_kind if skill_bundle is not None else str(task.worker_kind or "").strip(),
+            "skill_path": str(skill_bundle.skill_path) if skill_bundle is not None else "builtin://native_worker_runtime",
             "sheet_no": first["sheet_no"],
             "location": first["location"],
             "rule_id": first["rule_id"],

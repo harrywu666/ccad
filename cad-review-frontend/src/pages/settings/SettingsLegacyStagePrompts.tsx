@@ -6,6 +6,7 @@ import type { AIPromptStage } from '@/types/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import SettingsFileEditorDialog from './SettingsFileEditorDialog';
 
 type EditablePromptStage = AIPromptStage & {
   draftSystemPrompt: string;
@@ -22,9 +23,6 @@ type PromptAgentGroup = {
   details: string;
   stageKeys: string[];
 };
-
-const textareaClassName =
-  'min-h-[220px] w-full resize-y border border-border bg-secondary px-4 py-4 text-[14px] leading-7 text-foreground outline-none transition-colors focus:border-primary';
 
 const statusTone: Record<string, 'outline' | 'warning' | 'success'> = {
   default: 'outline',
@@ -135,6 +133,10 @@ export default function SettingsLegacyStagePrompts() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingStageKey, setSavingStageKey] = useState<string | null>(null);
+  const [activeEditor, setActiveEditor] = useState<{
+    stageKey: string;
+    field: 'draftSystemPrompt' | 'draftUserPrompt';
+  } | null>(null);
   const [error, setError] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
   const hasUnsavedChanges = stages.some(stage => stage.dirty);
@@ -274,6 +276,68 @@ export default function SettingsLegacyStagePrompts() {
     }
   };
 
+  const activeStage = activeEditor
+    ? stages.find(stage => stage.stage_key === activeEditor.stageKey) ?? null
+    : null;
+
+  const renderStageCard = (stage: EditablePromptStage) => {
+    const stateLabel = stage.dirty ? '未保存' : stage.justSaved ? '已保存' : '';
+
+    return (
+      <section
+        key={stage.stage_key}
+        className="h-full rounded-none border border-border/80 bg-secondary/20 px-5 py-5"
+      >
+        <div className="flex h-full flex-col gap-4">
+          <div className="flex-1 space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="text-[18px] font-semibold text-foreground">{stage.title}</div>
+              <Badge variant="outline" className="rounded-none">
+                stage: {stage.stage_key}
+              </Badge>
+              {stateLabel ? (
+                <Badge
+                  variant={statusTone[stage.dirty ? 'dirty' : stage.justSaved ? 'saved' : 'default']}
+                  className="rounded-none"
+                >
+                  {stateLabel}
+                </Badge>
+              ) : null}
+            </div>
+            <div className="text-[14px] leading-7 text-muted-foreground">
+              {stage.description}
+            </div>
+            <div className="border-l-2 border-primary pl-3 text-[13px] leading-6 text-foreground">
+              当前调用位置：{stage.call_site}
+            </div>
+            {stage.placeholders.length > 0 ? (
+              <div className="rounded-none border border-primary/20 bg-primary/5 px-4 py-3 text-[13px] leading-6 text-foreground">
+                可用变量：{stage.placeholders.map(item => `{{${item}}}`).join('、')}
+              </div>
+            ) : null}
+          </div>
+          <div className="mt-auto flex flex-wrap gap-3">
+            <Button
+              type="button"
+              className="rounded-none"
+              onClick={() => setActiveEditor({ stageKey: stage.stage_key, field: 'draftSystemPrompt' })}
+            >
+              编辑 System Prompt
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-none"
+              onClick={() => setActiveEditor({ stageKey: stage.stage_key, field: 'draftUserPrompt' })}
+            >
+              编辑 User Prompt
+            </Button>
+          </div>
+        </div>
+      </section>
+    );
+  };
+
   return (
     <section className="flex flex-col gap-6">
       <section className="flex items-start justify-between gap-6 border border-primary/20 bg-primary/5 px-5 py-4 text-[14px] leading-7 text-foreground">
@@ -320,96 +384,8 @@ export default function SettingsLegacyStagePrompts() {
                   {group.details}
                 </div>
               </CardHeader>
-              <CardContent className="flex flex-col gap-6 pt-6">
-                {group.stages.map(stage => {
-                  const stateLabel = stage.dirty ? '未保存' : stage.justSaved ? '已保存' : '';
-                  const isSavingThisStage = savingStageKey === stage.stage_key;
-
-                  return (
-                    <section
-                      key={stage.stage_key}
-                      className="rounded-none border border-border/80 bg-secondary/20"
-                    >
-                      <div className="border-b border-border/80 px-6 py-5">
-                        <div className="flex items-start justify-between gap-6">
-                          <div className="space-y-3">
-                            <div className="flex flex-wrap items-center gap-3">
-                              <div className="text-[20px] font-semibold text-foreground">{stage.title}</div>
-                              <Badge variant="outline" className="rounded-none">
-                                stage: {stage.stage_key}
-                              </Badge>
-                            </div>
-                            <div className="max-w-[920px] text-[14px] leading-7 text-muted-foreground">
-                              {stage.description}
-                            </div>
-                            <div className="inline-flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
-                              <span className="border-l-2 border-primary pl-3 text-foreground">
-                                当前调用位置：{stage.call_site}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-3">
-                            {stateLabel ? (
-                              <Badge
-                                variant={statusTone[stage.dirty ? 'dirty' : stage.justSaved ? 'saved' : 'default']}
-                                className="rounded-none"
-                              >
-                                {stateLabel}
-                              </Badge>
-                            ) : null}
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="rounded-none"
-                              onClick={() => handleRestoreDefault(stage.stage_key)}
-                            >
-                              恢复默认
-                            </Button>
-                            <Button
-                              type="button"
-                              className="rounded-none"
-                              onClick={() => handleSaveStage(stage.stage_key)}
-                              disabled={saving || isSavingThisStage || !stage.dirty}
-                            >
-                              {isSavingThisStage ? '保存中...' : '保存'}
-                            </Button>
-                          </div>
-                        </div>
-                        {stage.placeholders.length > 0 ? (
-                          <div className="mt-4 rounded-none border border-primary/20 bg-primary/5 px-4 py-3 text-[13px] leading-6 text-foreground">
-                            可用变量：{stage.placeholders.map(item => `{{${item}}}`).join('、')}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="grid gap-6 px-6 py-6 lg:grid-cols-2">
-                        <div className="space-y-3">
-                          <div className="text-[13px] font-medium tracking-wide text-muted-foreground">
-                            System Prompt
-                          </div>
-                          <textarea
-                            value={stage.draftSystemPrompt}
-                            onChange={event =>
-                              handlePromptChange(stage.stage_key, 'draftSystemPrompt', event.target.value)
-                            }
-                            className={`${textareaClassName} rounded-none`}
-                          />
-                        </div>
-                        <div className="space-y-3">
-                          <div className="text-[13px] font-medium tracking-wide text-muted-foreground">
-                            User Prompt
-                          </div>
-                          <textarea
-                            value={stage.draftUserPrompt}
-                            onChange={event =>
-                              handlePromptChange(stage.stage_key, 'draftUserPrompt', event.target.value)
-                            }
-                            className={`${textareaClassName} rounded-none`}
-                          />
-                        </div>
-                      </div>
-                    </section>
-                  );
-                })}
+              <CardContent className="grid gap-4 pt-6 md:grid-cols-2">
+                {group.stages.map(renderStageCard)}
               </CardContent>
             </Card>
           ))}
@@ -427,101 +403,40 @@ export default function SettingsLegacyStagePrompts() {
                   {FALLBACK_AGENT_GROUP.details}
                 </div>
               </CardHeader>
-              <CardContent className="flex flex-col gap-6 pt-6">
-                {fallbackStages.map(stage => {
-                  const stateLabel = stage.dirty ? '未保存' : stage.justSaved ? '已保存' : '';
-                  const isSavingThisStage = savingStageKey === stage.stage_key;
-
-                  return (
-                    <section
-                      key={stage.stage_key}
-                      className="rounded-none border border-border/80 bg-secondary/20"
-                    >
-                      <div className="border-b border-border/80 px-6 py-5">
-                        <div className="flex items-start justify-between gap-6">
-                          <div className="space-y-3">
-                            <div className="flex flex-wrap items-center gap-3">
-                              <div className="text-[20px] font-semibold text-foreground">{stage.title}</div>
-                              <Badge variant="outline" className="rounded-none">
-                                stage: {stage.stage_key}
-                              </Badge>
-                            </div>
-                            <div className="max-w-[920px] text-[14px] leading-7 text-muted-foreground">
-                              {stage.description}
-                            </div>
-                            <div className="inline-flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
-                              <span className="border-l-2 border-primary pl-3 text-foreground">
-                                当前调用位置：{stage.call_site}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-3">
-                            {stateLabel ? (
-                              <Badge
-                                variant={statusTone[stage.dirty ? 'dirty' : stage.justSaved ? 'saved' : 'default']}
-                                className="rounded-none"
-                              >
-                                {stateLabel}
-                              </Badge>
-                            ) : null}
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="rounded-none"
-                              onClick={() => handleRestoreDefault(stage.stage_key)}
-                            >
-                              恢复默认
-                            </Button>
-                            <Button
-                              type="button"
-                              className="rounded-none"
-                              onClick={() => handleSaveStage(stage.stage_key)}
-                              disabled={saving || isSavingThisStage || !stage.dirty}
-                            >
-                              {isSavingThisStage ? '保存中...' : '保存'}
-                            </Button>
-                          </div>
-                        </div>
-                        {stage.placeholders.length > 0 ? (
-                          <div className="mt-4 rounded-none border border-primary/20 bg-primary/5 px-4 py-3 text-[13px] leading-6 text-foreground">
-                            可用变量：{stage.placeholders.map(item => `{{${item}}}`).join('、')}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="grid gap-6 px-6 py-6 lg:grid-cols-2">
-                        <div className="space-y-3">
-                          <div className="text-[13px] font-medium tracking-wide text-muted-foreground">
-                            System Prompt
-                          </div>
-                          <textarea
-                            value={stage.draftSystemPrompt}
-                            onChange={event =>
-                              handlePromptChange(stage.stage_key, 'draftSystemPrompt', event.target.value)
-                            }
-                            className={`${textareaClassName} rounded-none`}
-                          />
-                        </div>
-                        <div className="space-y-3">
-                          <div className="text-[13px] font-medium tracking-wide text-muted-foreground">
-                            User Prompt
-                          </div>
-                          <textarea
-                            value={stage.draftUserPrompt}
-                            onChange={event =>
-                              handlePromptChange(stage.stage_key, 'draftUserPrompt', event.target.value)
-                            }
-                            className={`${textareaClassName} rounded-none`}
-                          />
-                        </div>
-                      </div>
-                    </section>
-                  );
-                })}
+              <CardContent className="grid gap-4 pt-6 md:grid-cols-2">
+                {fallbackStages.map(renderStageCard)}
               </CardContent>
             </Card>
           ) : null}
         </>
       )}
+
+      {activeStage && activeEditor ? (
+        <SettingsFileEditorDialog
+          open={Boolean(activeStage && activeEditor)}
+          onOpenChange={open => {
+            if (!open) setActiveEditor(null);
+          }}
+          title={`${activeStage.title} · ${activeEditor.field === 'draftSystemPrompt' ? 'System Prompt' : 'User Prompt'}`}
+          description={`${activeStage.description} 当前调用位置：${activeStage.call_site}`}
+          fileLabel={activeStage.stage_key}
+          statusLabel={activeStage.dirty ? '未保存' : activeStage.justSaved ? '已保存' : undefined}
+          statusTone={activeStage.justSaved ? 'success' : 'warning'}
+          value={
+            activeEditor.field === 'draftSystemPrompt'
+              ? activeStage.draftSystemPrompt
+              : activeStage.draftUserPrompt
+          }
+          onChange={value => handlePromptChange(activeStage.stage_key, activeEditor.field, value)}
+          onSave={async () => {
+            await handleSaveStage(activeStage.stage_key);
+          }}
+          saveDisabled={!activeStage.dirty}
+          saving={savingStageKey === activeStage.stage_key}
+          onRestoreDefault={() => handleRestoreDefault(activeStage.stage_key)}
+          restoreDisabled={!activeStage.dirty && !activeStage.pendingReset}
+        />
+      ) : null}
     </section>
   );
 }

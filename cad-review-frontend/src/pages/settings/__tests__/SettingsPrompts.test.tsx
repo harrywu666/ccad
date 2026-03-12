@@ -85,10 +85,11 @@ describe('SettingsPrompts', () => {
 
     render(<SettingsPrompts />);
 
+    const editButtons = await screen.findAllByRole('button', { name: '编辑 AGENTS.md' });
+    fireEvent.click(editButtons[0]);
     const chiefAgentTextarea = await screen.findByDisplayValue('chief_review agent body');
     fireEvent.change(chiefAgentTextarea, { target: { value: 'new chief agent body' } });
-    const saveButtons = screen.getAllByRole('button', { name: '保存' });
-    fireEvent.click(saveButtons[0]);
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => {
       expect(api.updateAgentAssets).toHaveBeenCalledWith('chief_review', [

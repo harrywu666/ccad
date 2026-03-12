@@ -271,6 +271,9 @@ def test_native_review_worker_returns_native_card_for_node_host_binding(monkeypa
     assert result is not None
     assert result.status == "confirmed"
     assert result.meta["compat_mode"] == "native_worker"
+    assert result.meta["skill_mode"] == "worker_skill"
+    assert result.meta["skill_id"] == "node_host_binding"
+    assert result.meta["skill_path"].endswith("agents/review_worker/skills/node_host_binding/SKILL.md")
 
 
 def test_default_chief_worker_runner_prefers_native_worker(monkeypatch):
@@ -638,6 +641,9 @@ def test_native_review_worker_returns_native_card_for_dimension_consistency(monk
     assert result is not None
     assert result.status == "confirmed"
     assert result.meta["compat_mode"] == "native_worker"
+    assert result.meta["skill_mode"] == "worker_skill"
+    assert result.meta["skill_id"] == "spatial_consistency"
+    assert result.meta["skill_path"].endswith("agents/review_worker/skills/spatial_consistency/SKILL.md")
     assert result.meta["issue_count"] == 1
 
 

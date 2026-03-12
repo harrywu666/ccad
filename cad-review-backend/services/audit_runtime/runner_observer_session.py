@@ -77,6 +77,7 @@ class ProjectRunnerObserverSession:
             project_id=self.project_id,
             audit_version=self.audit_version,
             provider_mode=self.provider_mode,
+            provider_name=getattr(self.provider, "provider_name", None),
         )
         release_llm_slot = await gate.acquire()
         try:

@@ -32,8 +32,11 @@ def test_worker_skill_loader_rejects_unknown_worker_kind():
 @pytest.mark.parametrize(
     ("worker_kind", "expected_name"),
     [
+        ("node_host_binding", "name: node-host-binding"),
         ("index_reference", "name: index-reference"),
         ("material_semantic_consistency", "name: material-semantic-consistency"),
+        ("elevation_consistency", "name: elevation-consistency"),
+        ("spatial_consistency", "name: spatial-consistency"),
     ],
 )
 def test_worker_skill_markdown_has_callable_sections(worker_kind: str, expected_name: str):

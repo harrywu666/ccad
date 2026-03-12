@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import SettingsFeedbackAgentPrompts from './SettingsFeedbackAgentPrompts';
 import SettingsLegacyStagePrompts from './SettingsLegacyStagePrompts';
 import SettingsReviewWorkerSkills from './SettingsReviewWorkerSkills';
+import SettingsFileEditorDialog from './SettingsFileEditorDialog';
 
 type AgentId = 'chief_review' | 'review_worker' | 'runtime_guardian';
 
@@ -19,9 +20,6 @@ type EditableAgentAsset = AgentAssetItem & {
   dirty: boolean;
   justSaved: boolean;
 };
-
-const textareaClassName =
-  'min-h-[220px] w-full resize-y border border-border bg-secondary px-4 py-4 text-[14px] leading-7 text-foreground outline-none transition-colors focus:border-primary';
 
 type AgentCardCopy = {
   title: string;
@@ -108,99 +106,116 @@ function AgentAssetCard({
   children?: ReactNode;
 }) {
   const hasUnsavedChanges = items.some(item => item.dirty);
+  const [activeKey, setActiveKey] = useState<EditableAgentAsset['key'] | null>(null);
+  const activeItem = activeKey ? items.find(item => item.key === activeKey) ?? null : null;
 
   return (
-    <Card className="rounded-none border border-border shadow-none">
-      <CardHeader className="gap-3 border-b border-border/80 pb-5">
-        <div className="flex items-start justify-between gap-6">
-          <div className="space-y-3">
-            <CardTitle className="text-[24px] font-semibold text-foreground">{title}</CardTitle>
-            <CardDescription className="max-w-[980px] text-[14px] leading-7 text-muted-foreground">
-              {summary}
-            </CardDescription>
-            <div className="border-l-2 border-primary pl-3 text-[13px] leading-6 text-foreground">
-              {details}
+    <>
+      <Card className="rounded-none border border-border shadow-none">
+        <CardHeader className="gap-3 border-b border-border/80 pb-5">
+          <div className="flex items-start justify-between gap-6">
+            <div className="space-y-3">
+              <CardTitle className="text-[24px] font-semibold text-foreground">{title}</CardTitle>
+              <CardDescription className="max-w-[980px] text-[14px] leading-7 text-muted-foreground">
+                {summary}
+              </CardDescription>
+              <div className="border-l-2 border-primary pl-3 text-[13px] leading-6 text-foreground">
+                {details}
+              </div>
             </div>
-          </div>
-          <Button
-            type="button"
-            className="h-11 shrink-0 rounded-none px-6 text-[14px]"
-            onClick={() => void onSaveAll()}
-            disabled={saving || !hasUnsavedChanges}
-          >
-            {saving ? '保存中...' : '保存全部'}
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6 pt-6">
-        {saveMessage ? (
-          <section className="border border-success/30 bg-success/10 px-5 py-4 text-[14px] text-foreground">
-            {saveMessage}
-          </section>
-        ) : null}
-
-        {error ? (
-          <section className="border border-destructive/20 bg-destructive/5 px-5 py-4 text-[14px] text-foreground">
-            {error}
-          </section>
-        ) : null}
-
-        {loading ? (
-          <section className="border border-border bg-secondary px-5 py-10 text-[15px] text-muted-foreground">
-            正在读取 Agent 文件...
-          </section>
-        ) : (
-          items.map(item => (
-            <section
-              key={item.key}
-              className="rounded-none border border-border/80 bg-secondary/20"
+            <Button
+              type="button"
+              className="h-11 shrink-0 rounded-none px-6 text-[14px]"
+              onClick={() => void onSaveAll()}
+              disabled={saving || !hasUnsavedChanges}
             >
-              <div className="border-b border-border/80 px-6 py-5">
-                <div className="flex items-start justify-between gap-6">
-                  <div className="space-y-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="text-[20px] font-semibold text-foreground">{item.title}</div>
-                      <Badge variant="outline" className="rounded-none">
-                        {item.file_name}
-                      </Badge>
-                      {item.dirty ? (
-                        <Badge variant="secondary" className="rounded-none border border-amber-300 bg-amber-50 text-amber-900">
-                          未保存
-                        </Badge>
-                      ) : item.justSaved ? (
-                        <Badge variant="secondary" className="rounded-none border border-emerald-300 bg-emerald-50 text-emerald-900">
-                          已保存
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <div className="max-w-[920px] text-[14px] leading-7 text-muted-foreground">
-                      {item.description}
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    className="rounded-none"
-                    onClick={() => void onSave(item.key)}
-                    disabled={saving || savingKey === item.key || !item.dirty}
-                  >
-                    {savingKey === item.key ? '保存中...' : '保存'}
-                  </Button>
-                </div>
-              </div>
-              <div className="px-6 py-6">
-                <textarea
-                  value={item.draftContent}
-                  onChange={event => onChange(item.key, event.target.value)}
-                  className={`${textareaClassName} rounded-none`}
-                />
-              </div>
+              {saving ? '保存中...' : '保存全部'}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-6 pt-6">
+          {saveMessage ? (
+            <section className="border border-success/30 bg-success/10 px-5 py-4 text-[14px] text-foreground">
+              {saveMessage}
             </section>
-          ))
-        )}
+          ) : null}
 
-        {children}
-      </CardContent>
-    </Card>
+          {error ? (
+            <section className="border border-destructive/20 bg-destructive/5 px-5 py-4 text-[14px] text-foreground">
+              {error}
+            </section>
+          ) : null}
+
+          {loading ? (
+            <section className="border border-border bg-secondary px-5 py-10 text-[15px] text-muted-foreground">
+              正在读取 Agent 文件...
+            </section>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-3">
+              {items.map(item => (
+                <section
+                  key={item.key}
+                  className="h-full rounded-none border border-border/80 bg-secondary/20 px-5 py-5"
+                >
+                  <div className="flex h-full flex-col gap-4">
+                    <div className="flex-1 space-y-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="text-[18px] font-semibold text-foreground">{item.title}</div>
+                        <Badge variant="outline" className="rounded-none">
+                          {item.file_name}
+                        </Badge>
+                        {item.dirty ? (
+                          <Badge variant="secondary" className="rounded-none border border-amber-300 bg-amber-50 text-amber-900">
+                            未保存
+                          </Badge>
+                        ) : item.justSaved ? (
+                          <Badge variant="secondary" className="rounded-none border border-emerald-300 bg-emerald-50 text-emerald-900">
+                            已保存
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <div className="text-[14px] leading-7 text-muted-foreground">
+                        {item.description}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      className="mt-auto rounded-none self-start"
+                      onClick={() => setActiveKey(item.key)}
+                    >
+                      编辑 {item.file_name}
+                    </Button>
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
+
+          {children}
+        </CardContent>
+      </Card>
+
+      {activeItem ? (
+        <SettingsFileEditorDialog
+          open={Boolean(activeItem)}
+          onOpenChange={open => {
+            if (!open) setActiveKey(null);
+          }}
+          title={activeItem.title}
+          description={activeItem.description}
+          fileLabel={activeItem.file_name}
+          statusLabel={activeItem.dirty ? '未保存' : activeItem.justSaved ? '已保存' : undefined}
+          statusTone={activeItem.justSaved ? 'success' : 'warning'}
+          value={activeItem.draftContent}
+          onChange={value => onChange(activeItem.key, value)}
+          onSave={async () => {
+            await onSave(activeItem.key);
+          }}
+          saveDisabled={!activeItem.dirty}
+          saving={savingKey === activeItem.key}
+        />
+      ) : null}
+    </>
   );
 }
 

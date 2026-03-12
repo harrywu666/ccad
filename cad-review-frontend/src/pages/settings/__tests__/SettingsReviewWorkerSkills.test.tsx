@@ -20,8 +20,9 @@ describe('SettingsReviewWorkerSkills', () => {
     render(<SettingsReviewWorkerSkills />);
 
     expect(await screen.findByText('Worker Skills')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('index body')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('material body')).toBeInTheDocument();
+    expect(screen.getByText('索引引用 Skill')).toBeInTheDocument();
+    expect(screen.getByText('材料语义一致性 Skill')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '编辑 SKILL.md' })).toHaveLength(2);
   });
 
   it('saves edited worker skill content', async () => {
@@ -39,15 +40,16 @@ describe('SettingsReviewWorkerSkills', () => {
 
     render(<SettingsReviewWorkerSkills />);
 
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 SKILL.md' }));
     const textarea = await screen.findByDisplayValue('index body');
     fireEvent.change(textarea, { target: { value: 'new index body' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存全部' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => {
       expect(api.updateReviewWorkerSkillAssets).toHaveBeenCalledWith([
         { key: 'index_reference', content: 'new index body' },
       ]);
     });
-    expect(await screen.findByText(/skills 已保存/)).toBeInTheDocument();
+    expect(await screen.findByText(/后面新的 review_worker 会直接用这版 skill/)).toBeInTheDocument();
   });
 });

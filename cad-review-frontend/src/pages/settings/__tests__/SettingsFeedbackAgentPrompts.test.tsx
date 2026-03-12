@@ -21,9 +21,9 @@ describe('SettingsFeedbackAgentPrompts', () => {
     render(<SettingsFeedbackAgentPrompts />);
 
     expect(await screen.findByText('误报反馈 Agent')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('prompt body')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('agent body')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('soul body')).toBeInTheDocument();
+    expect(screen.getByText('误报反馈 PROMPT.md')).toBeInTheDocument();
+    expect(screen.getByText('误报反馈 AGENT.md')).toBeInTheDocument();
+    expect(screen.getByText('误报反馈 SOUL.md')).toBeInTheDocument();
   });
 
   it('saves edited asset content', async () => {
@@ -45,15 +45,16 @@ describe('SettingsFeedbackAgentPrompts', () => {
 
     render(<SettingsFeedbackAgentPrompts />);
 
-    const textareas = await screen.findAllByRole('textbox');
-    fireEvent.change(textareas[0], { target: { value: 'new prompt body' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存全部' }));
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 PROMPT.md' }));
+    const textarea = await screen.findByDisplayValue('prompt body');
+    fireEvent.change(textarea, { target: { value: 'new prompt body' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => {
       expect(api.updateFeedbackAgentPromptAssets).toHaveBeenCalledWith([
         { key: 'prompt', content: 'new prompt body' },
       ]);
     });
-    expect(await screen.findByText(/文件已保存/)).toBeInTheDocument();
+    expect(await screen.findByText(/后面的误报反馈会直接用新内容/)).toBeInTheDocument();
   });
 });

@@ -4,6 +4,7 @@ import * as api from '@/api';
 import type { ReviewWorkerSkillAsset } from '@/types/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import SettingsFileEditorDialog from './SettingsFileEditorDialog';
 
 type EditableSkill = ReviewWorkerSkillAsset & {
   draftContent: string;
@@ -37,6 +38,7 @@ export default function SettingsReviewWorkerSkills() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
 
@@ -106,6 +108,8 @@ export default function SettingsReviewWorkerSkills() {
     }
   };
 
+  const activeItem = activeKey ? items.find(item => item.key === activeKey) ?? null : null;
+
   return (
     <section className="flex flex-col gap-6 rounded-none border border-border/80 bg-background">
       <div className="border-b border-border/80 px-6 py-5">
@@ -148,16 +152,16 @@ export default function SettingsReviewWorkerSkills() {
             正在读取 review_worker skills...
           </section>
         ) : (
-          items.map(item => (
-            <section
-              key={item.key}
-              className="rounded-none border border-border/80 bg-secondary/20"
-            >
-              <div className="border-b border-border/80 px-6 py-5">
-                <div className="flex items-start justify-between gap-6">
-                  <div className="space-y-3">
+          <div className="grid gap-4 md:grid-cols-2">
+            {items.map(item => (
+              <section
+                key={item.key}
+                className="h-full rounded-none border border-border/80 bg-secondary/20 px-5 py-5"
+              >
+                <div className="flex h-full flex-col gap-4">
+                  <div className="flex-1 space-y-3">
                     <div className="flex flex-wrap items-center gap-3">
-                      <div className="text-[20px] font-semibold text-foreground">{item.title}</div>
+                      <div className="text-[18px] font-semibold text-foreground">{item.title}</div>
                       <Badge variant="outline" className="rounded-none">
                         {item.file_name}
                       </Badge>
@@ -171,31 +175,44 @@ export default function SettingsReviewWorkerSkills() {
                         </Badge>
                       ) : null}
                     </div>
-                    <div className="max-w-[920px] text-[14px] leading-7 text-muted-foreground">
+                    <div className="text-[14px] leading-7 text-muted-foreground">
                       {item.description}
                     </div>
                   </div>
                   <Button
                     type="button"
-                    className="rounded-none"
-                    onClick={() => void handleSave(item.key)}
-                    disabled={saving || savingKey === item.key || !item.dirty}
+                    className="mt-auto rounded-none self-start"
+                    onClick={() => setActiveKey(item.key)}
                   >
-                    {savingKey === item.key ? '保存中...' : '保存'}
+                    编辑 {item.file_name}
                   </Button>
                 </div>
-              </div>
-              <div className="px-6 py-6">
-                <textarea
-                  value={item.draftContent}
-                  onChange={event => handleContentChange(item.key, event.target.value)}
-                  className={`${textareaClassName} rounded-none`}
-                />
-              </div>
-            </section>
-          ))
+              </section>
+            ))}
+          </div>
         )}
       </div>
+
+      {activeItem ? (
+        <SettingsFileEditorDialog
+          open={Boolean(activeItem)}
+          onOpenChange={open => {
+            if (!open) setActiveKey(null);
+          }}
+          title={activeItem.title}
+          description={activeItem.description}
+          fileLabel={activeItem.file_name}
+          statusLabel={activeItem.dirty ? '未保存' : activeItem.justSaved ? '已保存' : undefined}
+          statusTone={activeItem.justSaved ? 'success' : 'warning'}
+          value={activeItem.draftContent}
+          onChange={value => handleContentChange(activeItem.key, value)}
+          onSave={async () => {
+            await handleSave(activeItem.key);
+          }}
+          saveDisabled={!activeItem.dirty}
+          saving={savingKey === activeItem.key}
+        />
+      ) : null}
     </section>
   );
 }

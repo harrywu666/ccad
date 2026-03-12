@@ -7,13 +7,38 @@ import os
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Iterable, Tuple
 
 from services.audit_runtime.cancel_registry import AuditCancellationRequested
 
 
+def _first_env(names: Iterable[str]) -> str | None:
+    for name in names:
+        raw = os.getenv(name)
+        if raw is None:
+            continue
+        value = str(raw).strip()
+        if value:
+            return value
+    return None
+
+
 def _read_float_env(name: str, default: float) -> float:
-    raw = os.getenv(name)
+    return _read_first_float_env((name,), default)
+
+
+def _read_first_int_env(names: Iterable[str], default: int) -> int:
+    raw = _first_env(names)
+    if raw is None:
+        return default
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _read_first_float_env(names: Iterable[str], default: float) -> float:
+    raw = _first_env(names)
     if raw is None:
         return default
     try:
@@ -23,41 +48,83 @@ def _read_float_env(name: str, default: float) -> float:
 
 
 def _read_int_env(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
+    return _read_first_int_env((name,), default)
 
 
-def _default_parallel_limit(provider_mode: str) -> int:
-    normalized = str(provider_mode or "").strip().lower()
-    if normalized in {"sdk", "kimi_sdk", "api", "cli"}:
+def _api_backend_key() -> str:
+    raw = str(os.getenv("KIMI_PROVIDER", "official") or "official").strip().lower()
+    if raw in {"openrouter", "open_router"}:
+        return "openrouter"
+    if raw in {"official", "moonshot", "openai"}:
+        return "official_api"
+    return "api"
+
+
+def resolve_llm_gate_provider_key(
+    *,
+    provider_mode: str | None,
+    provider_name: str | None = None,
+) -> str:
+    normalized_mode = str(provider_mode or "").strip().lower()
+    normalized_name = str(provider_name or "").strip().lower()
+
+    if normalized_mode in {"sdk", "kimi_sdk"} or normalized_name == "sdk":
+        return "kimi_sdk"
+    if normalized_mode in {"cli"} or normalized_name == "cli":
+        return "cli"
+    if normalized_mode in {"openrouter", "openrouter_api"}:
+        return "openrouter"
+    if normalized_mode in {"api", "kimi_api"} or normalized_name == "api":
+        return _api_backend_key()
+    if normalized_mode:
+        return normalized_mode
+    if normalized_name:
+        return normalized_name
+    return "unknown"
+
+
+def _default_parallel_limit(provider_key: str) -> int:
+    normalized = str(provider_key or "").strip().lower()
+    if normalized == "openrouter":
+        return 2
+    if normalized in {"kimi_sdk", "official_api", "api", "cli"}:
         return 1
     return 1
 
 
-def _default_min_interval_seconds(provider_mode: str) -> float:
-    normalized = str(provider_mode or "").strip().lower()
-    if normalized in {"sdk", "kimi_sdk", "api", "cli"}:
+def _default_min_interval_seconds(provider_key: str) -> float:
+    normalized = str(provider_key or "").strip().lower()
+    if normalized in {"openrouter", "kimi_sdk", "official_api", "api", "cli"}:
         return 0.0
     return 0.0
 
 
-def _gate_parallel_limit(provider_mode: str) -> int:
-    value = _read_int_env(
-        "AUDIT_PROJECT_LLM_MAX_CONCURRENCY",
-        _default_parallel_limit(provider_mode),
+def _gate_parallel_limit(provider_key: str) -> int:
+    normalized = str(provider_key or "").strip().lower()
+    env_names = ["AUDIT_PROJECT_LLM_MAX_CONCURRENCY"]
+    if normalized == "openrouter":
+        env_names.insert(0, "AUDIT_PROJECT_OPENROUTER_MAX_CONCURRENCY")
+    elif normalized == "kimi_sdk":
+        env_names.insert(0, "AUDIT_PROJECT_KIMI_SDK_MAX_CONCURRENCY")
+
+    value = _read_first_int_env(
+        env_names,
+        _default_parallel_limit(normalized),
     )
     return max(1, min(16, value))
 
 
-def _gate_min_interval_seconds(provider_mode: str) -> float:
-    value = _read_float_env(
-        "AUDIT_PROJECT_LLM_MIN_INTERVAL_SECONDS",
-        _default_min_interval_seconds(provider_mode),
+def _gate_min_interval_seconds(provider_key: str) -> float:
+    normalized = str(provider_key or "").strip().lower()
+    env_names = ["AUDIT_PROJECT_LLM_MIN_INTERVAL_SECONDS"]
+    if normalized == "openrouter":
+        env_names.insert(0, "AUDIT_PROJECT_OPENROUTER_MIN_INTERVAL_SECONDS")
+    elif normalized == "kimi_sdk":
+        env_names.insert(0, "AUDIT_PROJECT_KIMI_SDK_MIN_INTERVAL_SECONDS")
+
+    value = _read_first_float_env(
+        env_names,
+        _default_min_interval_seconds(normalized),
     )
     return max(0.0, min(60.0, value))
 
@@ -71,7 +138,7 @@ def _gate_poll_interval_seconds() -> float:
 class GateKey:
     project_id: str
     audit_version: int
-    provider_mode: str
+    provider_key: str
 
 
 class ProjectLlmRequestGate:
@@ -80,13 +147,13 @@ class ProjectLlmRequestGate:
         *,
         project_id: str,
         audit_version: int,
-        provider_mode: str,
+        provider_key: str,
         max_concurrency: int,
         min_interval_seconds: float,
     ) -> None:
         self.project_id = project_id
         self.audit_version = int(audit_version)
-        self.provider_mode = provider_mode
+        self.provider_key = provider_key
         self.max_concurrency = max(1, int(max_concurrency or 1))
         self.min_interval_seconds = max(0.0, float(min_interval_seconds or 0.0))
         self._semaphore = threading.BoundedSemaphore(self.max_concurrency)
@@ -138,12 +205,16 @@ def get_project_llm_gate(
     project_id: str,
     audit_version: int,
     provider_mode: str,
+    provider_name: str | None = None,
 ) -> ProjectLlmRequestGate:
-    normalized_mode = str(provider_mode or "").strip().lower() or "unknown"
+    provider_key = resolve_llm_gate_provider_key(
+        provider_mode=provider_mode,
+        provider_name=provider_name,
+    )
     key = GateKey(
         project_id=str(project_id or "").strip(),
         audit_version=int(audit_version),
-        provider_mode=normalized_mode,
+        provider_key=provider_key,
     )
     with _GATES_LOCK:
         gate = _GATES.get(key)
@@ -151,9 +222,9 @@ def get_project_llm_gate(
             gate = ProjectLlmRequestGate(
                 project_id=key.project_id,
                 audit_version=key.audit_version,
-                provider_mode=key.provider_mode,
-                max_concurrency=_gate_parallel_limit(normalized_mode),
-                min_interval_seconds=_gate_min_interval_seconds(normalized_mode),
+                provider_key=key.provider_key,
+                max_concurrency=_gate_parallel_limit(provider_key),
+                min_interval_seconds=_gate_min_interval_seconds(provider_key),
             )
             _GATES[key] = gate
         return gate
@@ -168,4 +239,5 @@ __all__ = [
     "ProjectLlmRequestGate",
     "clear_project_llm_gates",
     "get_project_llm_gate",
+    "resolve_llm_gate_provider_key",
 ]

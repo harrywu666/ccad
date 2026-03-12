@@ -31,7 +31,16 @@ def get_worker_skill_executor(worker_kind: str) -> WorkerSkillExecutor | None:
 
 
 def is_skillized_worker(worker_kind: str) -> bool:
-    return get_worker_skill_executor(worker_kind) is not None
+    normalized = str(worker_kind or "").strip()
+    if not normalized:
+        return False
+    if get_worker_skill_executor(normalized) is not None:
+        return True
+    try:
+        load_worker_skill(normalized)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 __all__ = ["get_worker_skill_executor", "is_skillized_worker"]

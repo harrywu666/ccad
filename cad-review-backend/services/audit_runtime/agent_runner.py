@@ -12,6 +12,7 @@ from services.audit_runtime.output_guard import guard_output
 from services.audit_runtime.cancel_registry import AuditCancellationRequested
 from services.audit_runtime.llm_request_gate import get_project_llm_gate
 from services.audit_runtime.providers.kimi_sdk_provider import SdkStreamIdleTimeoutError
+from services.audit_runtime.raw_output_store import save_runner_raw_output
 from services.audit_runtime.runner_broadcasts import build_runner_broadcast_message
 from services.audit_runtime.runner_types import (
     ProviderStreamEvent,
@@ -178,6 +179,7 @@ class ProjectAuditAgentRunner:
             project_id=self.project_id,
             audit_version=self.audit_version,
             provider_mode=self._provider_mode(),
+            provider_name=self._provider_name(),
         )
         return await gate.acquire(should_cancel=should_cancel)
 
@@ -209,6 +211,7 @@ class ProjectAuditAgentRunner:
                 result = await self.provider.run_once(request, subsession)
             finally:
                 release_llm_slot()
+            self._persist_raw_output_artifact(request, subsession, result)
             self._mark_progress(subsession, phase="completed")
             subsession.current_turn_status = "idle"
             subsession.current_phase = "idle"
@@ -313,6 +316,7 @@ class ProjectAuditAgentRunner:
                     )
                 finally:
                     release_llm_slot()
+                self._persist_raw_output_artifact(request, subsession, result)
                 result = self._apply_output_guard(request, subsession, result)
                 self._mark_progress(subsession, phase="completed")
                 subsession.current_turn_status = "idle"
@@ -420,6 +424,7 @@ class ProjectAuditAgentRunner:
         message: str,
         level: str = "info",
         meta: Optional[Dict[str, Any]] = None,
+        dispatch_observer: bool = True,
     ) -> None:
         from services.audit_runtime.state_transitions import append_run_event
 
@@ -434,6 +439,60 @@ class ProjectAuditAgentRunner:
             progress_hint=request.progress_hint,
             message=message,
             meta=meta,
+            dispatch_observer=dispatch_observer,
+        )
+
+    def _persist_raw_output_artifact(
+        self,
+        request: RunnerTurnRequest,
+        subsession: RunnerSubsession,
+        result: RunnerTurnResult,
+    ) -> None:
+        raw_output = str(getattr(result, "raw_output", "") or "").strip()
+        if not raw_output:
+            return
+
+        status = str(getattr(result, "status", "") or "").strip() or "unknown"
+        repair_attempts = int(getattr(result, "repair_attempts", 0) or 0)
+        error = getattr(result, "error", None)
+
+        artifact_path = save_runner_raw_output(
+            project_id=self.project_id,
+            audit_version=self.audit_version,
+            agent_key=request.agent_key,
+            turn_kind=request.turn_kind,
+            session_key=subsession.session_key,
+            provider_name=self._provider_name(),
+            provider_mode=self._provider_mode(),
+            status=status,
+            raw_output=raw_output,
+            meta={
+                "agent_name": request.agent_name,
+                "step_key": request.step_key,
+                "progress_hint": request.progress_hint,
+                "repair_attempts": repair_attempts,
+                "error": error,
+            },
+        )
+        if artifact_path is None:
+            return
+
+        preview = raw_output[:240]
+        self._append_event(
+            request,
+            event_kind="raw_output_saved",
+            message=f"{request.agent_name or request.agent_key} 的原始输出已保存，便于后续排查",
+            meta={
+                "session_key": subsession.session_key,
+                "turn_kind": request.turn_kind,
+                "provider_name": self._provider_name(),
+                "provider_mode": self._provider_mode(),
+                "status": status,
+                "artifact_path": str(artifact_path),
+                "raw_output_chars": len(raw_output),
+                "raw_output_preview": preview,
+            },
+            dispatch_observer=False,
         )
 
     def _apply_output_guard(

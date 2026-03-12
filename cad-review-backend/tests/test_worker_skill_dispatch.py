@@ -40,7 +40,8 @@ def test_chief_session_marks_skillized_worker_tasks():
 
     assert index_task.context["execution_mode"] == "worker_skill"
     assert index_task.context["skill_id"] == "index_reference"
-    assert "execution_mode" not in node_task.context
+    assert node_task.context["execution_mode"] == "worker_skill"
+    assert node_task.context["skill_id"] == "node_host_binding"
 
 
 def test_finding_synthesizer_preserves_skill_metadata():
