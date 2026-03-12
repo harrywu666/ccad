@@ -164,10 +164,6 @@ def summarize_runner_metrics(
     runtime_status: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     provider_mode = str(requested_provider_mode or "").strip().lower() or None
-    codex_thread_ids: set[str] = set()
-    codex_resume_count = 0
-    codex_cancel_count = 0
-    codex_stream_event_count = 0
     sdk_session_reuse_count = 0
     sdk_repair_attempts = 0
     sdk_repair_successes = 0
@@ -215,20 +211,6 @@ def summarize_runner_metrics(
                 sdk_repair_successes += 1
             elif event_kind == "provider_stream_delta":
                 sdk_stream_event_count += 1
-        if effective_provider != "codex_sdk":
-            continue
-        thread_id = str(meta.get("thread_id") or "").strip()
-        if thread_id:
-            codex_thread_ids.add(thread_id)
-        if event_kind == "runner_session_reused":
-            codex_resume_count += 1
-        elif event_kind == "provider_stream_delta":
-            codex_stream_event_count += 1
-        elif event_kind in {"runner_turn_cancelled", "runner_session_cancelled"}:
-            codex_cancel_count += 1
-        elif str(meta.get("reason") or "").strip().lower() in {"user_cancelled", "cancel_turn"}:
-            codex_cancel_count += 1
-
     if not provider_mode:
         status_provider_mode = str((runtime_status or {}).get("provider_mode") or "").strip().lower()
         if status_provider_mode:
@@ -255,10 +237,6 @@ def summarize_runner_metrics(
     return {
         "provider_mode": provider_mode,
         "provider_names_seen": sorted(provider_names),
-        "codex_thread_count": len(codex_thread_ids),
-        "codex_resume_count": codex_resume_count,
-        "codex_cancel_count": codex_cancel_count,
-        "codex_stream_event_count": codex_stream_event_count,
         "sdk_session_reuse_count": sdk_session_reuse_count,
         "sdk_repair_attempts": sdk_repair_attempts,
         "sdk_repair_successes": sdk_repair_successes,
@@ -356,12 +334,12 @@ def _run_mode_env(run_mode: str) -> Dict[str, Optional[str]]:
 def _build_output_name(args: argparse.Namespace, effective_run_mode: str) -> str:
     output_name = f"{args.project_id}-{effective_run_mode}-runner-supervisor-check.json"
     if args.provider_mode:
-        output_name = f"{args.project_id}-{effective_run_mode}-{args.provider_mode}-codex-switch-check.json"
+        output_name = f"{args.project_id}-{effective_run_mode}-{args.provider_mode}-runner-supervisor-check.json"
     if args.base_url:
         safe_host = args.base_url.replace("://", "_").replace("/", "_").replace(":", "_")
         output_name = f"{args.project_id}-{effective_run_mode}-{safe_host}-runner-supervisor-check.json"
         if args.provider_mode:
-            output_name = f"{args.project_id}-{effective_run_mode}-{args.provider_mode}-{safe_host}-codex-switch-check.json"
+            output_name = f"{args.project_id}-{effective_run_mode}-{args.provider_mode}-{safe_host}-runner-supervisor-check.json"
     return output_name
 
 
@@ -472,7 +450,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable-orchestrator-v2", action="store_true", help="Enable AUDIT_ORCHESTRATOR_V2_ENABLED in local mode")
     parser.add_argument("--enable-evidence-planner", action="store_true", help="Mark evidence planner enabled for this run")
     parser.add_argument("--enable-feedback-runtime", action="store_true", help="Mark feedback runtime injection enabled for this run")
-    parser.add_argument("--provider-mode", choices=["kimi_sdk", "codex_sdk"], help="Per-audit provider mode to request")
+    parser.add_argument("--provider-mode", choices=["api", "openrouter"], help="Per-audit provider mode to request")
     parser.add_argument("--run-mode", choices=list(RUN_MODES), default="legacy", help="Audit run mode: legacy, chief_review, or shadow_compare")
     return parser.parse_args()
 

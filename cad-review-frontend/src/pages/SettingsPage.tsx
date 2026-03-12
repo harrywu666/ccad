@@ -6,30 +6,31 @@ import SettingsDataTuning from './settings/SettingsDataTuning';
 import SettingsSkillPack from './settings/SettingsSkillPack';
 import SettingsRuntimeSummary from './settings/SettingsRuntimeSummary';
 
-type SettingsTab = 'prompts' | 'skills' | 'tuning' | 'runtime';
+type SettingsTab = 'agents' | 'skills' | 'tuning' | 'runtime';
 
 const TABS: { key: SettingsTab; label: string }[] = [
-  { key: 'prompts', label: '提示词设置' },
+  { key: 'agents', label: 'Agent设置' },
   { key: 'skills', label: '审查技能包' },
   { key: 'tuning', label: '误报调优' },
   { key: 'runtime', label: '运行总结' },
 ];
 
 function isValidTab(value: string | null): value is SettingsTab {
-  return value === 'prompts' || value === 'skills' || value === 'tuning' || value === 'runtime';
+  return value === 'agents' || value === 'skills' || value === 'tuning' || value === 'runtime';
+}
+
+function normalizeTab(value: string | null): SettingsTab {
+  if (value === 'prompts') return 'agents';
+  return isValidTab(value) ? value : 'agents';
 }
 
 export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const paramTab = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState<SettingsTab>(
-    isValidTab(paramTab) ? paramTab : 'prompts',
-  );
+  const [activeTab, setActiveTab] = useState<SettingsTab>(normalizeTab(paramTab));
 
   useEffect(() => {
-    if (isValidTab(paramTab)) {
-      setActiveTab(paramTab);
-    }
+    setActiveTab(normalizeTab(paramTab));
   }, [paramTab]);
 
   const switchTab = (tab: SettingsTab) => {
@@ -61,7 +62,7 @@ export default function SettingsPage() {
       </nav>
 
       <div className="flex flex-col gap-6">
-        {activeTab === 'prompts' ? <SettingsPrompts /> : null}
+        {activeTab === 'agents' ? <SettingsPrompts /> : null}
         {activeTab === 'skills' ? <SettingsSkillPack /> : null}
         {activeTab === 'tuning' ? <SettingsDataTuning /> : null}
         {activeTab === 'runtime' ? <SettingsRuntimeSummary /> : null}

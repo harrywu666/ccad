@@ -131,7 +131,7 @@ describe('FeedbackThread status presentation', () => {
           source_agent: 'index_review_agent',
           rule_id: 'index_alias_rule',
           issue_type: 'index',
-          summary: '误报反馈Agent（Kimi SDK）当前未联通，请稍后再试。',
+          summary: '误报反馈Agent（OpenRouter）当前未联通，请稍后再试。',
           resolution_reason: null,
           escalation_reason: 'kimi sdk unavailable',
           created_at: null,

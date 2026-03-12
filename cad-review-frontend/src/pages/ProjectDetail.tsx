@@ -23,7 +23,6 @@ import {
   DEFAULT_AUDIT_PROVIDER_MODE,
   type AuditEvent,
   type AuditHistoryItem,
-  type AuditProviderMode,
 } from '@/types/api';
 
 // Layout & UI Components
@@ -41,12 +40,6 @@ import AuditProgressDialog, {
 import { createAuditEventStreamController } from './ProjectDetail/components/auditEventStream';
 import { createAuditResultStreamController } from './ProjectDetail/components/auditResultStream';
 import { useAuditProgressViewModel } from './ProjectDetail/components/useAuditProgressViewModel';
-
-function readDefaultAuditProviderMode(): AuditProviderMode {
-  if (typeof window === 'undefined') return DEFAULT_AUDIT_PROVIDER_MODE;
-  const raw = window.localStorage.getItem(AUDIT_PROVIDER_STORAGE_KEY);
-  return raw === 'codex_sdk' ? 'codex_sdk' : DEFAULT_AUDIT_PROVIDER_MODE;
-}
 
 type AuditProgressUiState = 'minimized' | 'dismissed';
 
@@ -170,7 +163,6 @@ export default function ProjectDetail() {
   const [isAuditProgressMinimized, setIsAuditProgressMinimized] = useState(initialAuditProgressUiState === 'minimized');
   const [isAuditProgressDismissed, setIsAuditProgressDismissed] = useState(initialAuditProgressUiState === 'dismissed');
   const [awaitingAuditStatusSync, setAwaitingAuditStatusSync] = useState(false);
-  const [defaultAuditProviderMode, setDefaultAuditProviderMode] = useState<AuditProviderMode>(readDefaultAuditProviderMode);
   const [previewDrawing, setPreviewDrawing] = useState<{
     sheetNo: string;
     sheetName: string;
@@ -215,13 +207,8 @@ export default function ProjectDetail() {
   }, [id]);
 
   useEffect(() => {
-    const handleDefaultChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ providerMode?: AuditProviderMode }>).detail;
-      const next = detail?.providerMode === 'codex_sdk' ? 'codex_sdk' : DEFAULT_AUDIT_PROVIDER_MODE;
-      setDefaultAuditProviderMode(next);
-    };
-    window.addEventListener('ccad:audit-provider-default-changed', handleDefaultChange);
-    return () => window.removeEventListener('ccad:audit-provider-default-changed', handleDefaultChange);
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem(AUDIT_PROVIDER_STORAGE_KEY);
   }, []);
 
   useEffect(() => {
@@ -275,7 +262,7 @@ export default function ProjectDetail() {
     || auditStatusValue === 'auditing'
     || isAuditRunActiveStatus(auditRunStatus);
   const shouldShowAuditProgress = isAuditRunning || awaitingAuditStatusSync;
-  const currentAuditProviderLabel = getAuditProviderLabel(auditStatus?.provider_mode || defaultAuditProviderMode);
+  const currentAuditProviderLabel = getAuditProviderLabel(auditStatus?.provider_mode || DEFAULT_AUDIT_PROVIDER_MODE);
   const auditProgressViewModel = useAuditProgressViewModel({
     auditStatus,
     events: auditEvents,
@@ -624,7 +611,7 @@ export default function ProjectDetail() {
       setIsAuditProgressDialogOpen(true);
       persistAuditProgressUiState(id, null);
       const started = await api.startAudit(id, {
-        provider_mode: defaultAuditProviderMode,
+        provider_mode: DEFAULT_AUDIT_PROVIDER_MODE,
         ...(allowIncomplete ? { allow_incomplete: true } : {}),
       });
       setSelectedAuditVersion(started.audit_version ?? null);
@@ -637,7 +624,7 @@ export default function ProjectDetail() {
         progress: 0,
         total_issues: 0,
         run_status: 'planning',
-        provider_mode: defaultAuditProviderMode,
+        provider_mode: DEFAULT_AUDIT_PROVIDER_MODE,
         error: null,
         started_at: previous?.started_at ?? null,
         finished_at: null,

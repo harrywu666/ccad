@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from services.audit_runtime.providers.codex_sdk_provider import CodexSdkProvider
 from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
 from services.audit_runtime.providers.kimi_cli_provider import KimiCliProvider
 from services.audit_runtime.providers.kimi_sdk_provider import KimiSdkProvider
@@ -18,13 +17,15 @@ def normalize_provider_mode(raw: Optional[str]) -> str:
     value = str(raw or "").strip().lower()
     aliases = {
         "kimi_api": "api",
+        "openrouter": "api",
+        "openrouter_api": "api",
         "kimi_cli": "cli",
         "kimi_sdk": "kimi_sdk",
-        "codex": "codex_sdk",
-        "codex_sdk": "codex_sdk",
+        "codex": "kimi_sdk",
+        "codex_sdk": "kimi_sdk",
     }
     normalized = aliases.get(value, value)
-    if normalized in {"cli", "api", "sdk", "auto", "kimi_sdk", "codex_sdk"}:
+    if normalized in {"cli", "api", "sdk", "auto", "kimi_sdk"}:
         return normalized
     return "api"
 
@@ -57,9 +58,6 @@ def build_runner_provider(
 ):
     mode = _provider_mode(requested_mode)
     explicit_mode = requested_mode is not None
-
-    if mode == "codex_sdk":
-        return CodexSdkProvider()
 
     cli_provider = KimiCliProvider(binary=cli_binary or os.getenv("KIMI_CLI_BINARY", "kimi"))
     sdk_provider = KimiSdkProvider(work_dir=Path(work_dir).expanduser() if work_dir else None)

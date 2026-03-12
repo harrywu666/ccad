@@ -21,20 +21,20 @@ class FeedbackAgentPromptAssetDefinition:
 ASSET_DEFINITIONS: tuple[FeedbackAgentPromptAssetDefinition, ...] = (
     FeedbackAgentPromptAssetDefinition(
         key="prompt",
-        title="误报反馈 Prompt",
-        description="这是发给误报反馈 Agent 的用户任务模板，决定它看到的约束、字段格式和上下文结构。",
+        title="误报反馈 PROMPT.md",
+        description="这是误报反馈 Agent 的用户任务模板文件，决定它看到的约束、字段格式和上下文结构。",
         file_name="PROMPT.md",
     ),
     FeedbackAgentPromptAssetDefinition(
         key="agent",
         title="误报反馈 AGENT.md",
-        description="这是误报反馈 Agent 的角色说明，决定它该做什么、不该做什么。",
+        description="这是误报反馈 Agent 的角色说明文件，决定它该做什么、不该做什么。",
         file_name="AGENT.md",
     ),
     FeedbackAgentPromptAssetDefinition(
         key="soul",
         title="误报反馈 SOUL.md",
-        description="这是误报反馈 Agent 的气质和判断原则，决定它回答时的风格和底线。",
+        description="这是误报反馈 Agent 的气质和判断原则文件，决定它回答时的风格和底线。",
         file_name="SOUL.md",
     ),
 )

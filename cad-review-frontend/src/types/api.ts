@@ -1,7 +1,7 @@
 export type UiPreferencesMap = Record<string, unknown>;
-export type AuditProviderMode = 'kimi_sdk' | 'codex_sdk';
+export type AuditProviderMode = 'api' | 'kimi_sdk' | 'sdk' | 'cli' | 'auto';
 
-export const DEFAULT_AUDIT_PROVIDER_MODE: AuditProviderMode = 'kimi_sdk';
+export const DEFAULT_AUDIT_PROVIDER_MODE: AuditProviderMode = 'api';
 export const AUDIT_PROVIDER_STORAGE_KEY = 'ccad.auditProvider.default';
 
 export interface ProjectUiPreferencesResponse {
@@ -106,6 +106,41 @@ export interface AIPromptStage {
 
 export interface AIPromptStagesResponse {
   stages: AIPromptStage[];
+}
+
+export interface AgentAssetGroupSummary {
+  agent_id: string;
+  title: string;
+}
+
+export interface AgentAssetGroupListResponse {
+  items: AgentAssetGroupSummary[];
+}
+
+export interface AgentAssetItem {
+  key: 'agent' | 'soul' | 'memory';
+  title: string;
+  description: string;
+  file_name: string;
+  content: string;
+}
+
+export interface AgentAssetsResponse {
+  agent_id: string;
+  title: string;
+  items: AgentAssetItem[];
+}
+
+export interface ReviewWorkerSkillAsset {
+  key: string;
+  title: string;
+  description: string;
+  file_name: string;
+  content: string;
+}
+
+export interface ReviewWorkerSkillAssetsResponse {
+  items: ReviewWorkerSkillAsset[];
 }
 
 export interface SkillPackStageOption {

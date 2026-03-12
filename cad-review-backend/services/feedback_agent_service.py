@@ -103,16 +103,16 @@ def _feedback_agent_max_tokens() -> int:
 
 
 def _feedback_agent_provider_mode() -> str:
-    raw = str(os.getenv("FEEDBACK_AGENT_PROVIDER", "sdk") or "sdk").strip().lower()
+    raw = str(os.getenv("FEEDBACK_AGENT_PROVIDER", "api") or "api").strip().lower()
     if raw in {"sdk", "kimi_sdk"}:
         return "sdk"
-    if raw in {"api", "kimi_api"}:
+    if raw in {"api", "kimi_api", "openrouter", "openrouter_api"}:
         return "api"
     if raw == "cli":
         return "cli"
     if raw == "auto":
         return "auto"
-    return "sdk"
+    return "api"
 
 
 def _build_feedback_agent_provider():

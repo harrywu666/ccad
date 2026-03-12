@@ -457,7 +457,7 @@ def _run_feedback_agent_review(
         meta={
             "thread_id": thread.id,
             "audit_result_id": thread.audit_result_id,
-            "provider_mode": str(os.getenv("FEEDBACK_AGENT_PROVIDER", "sdk") or "sdk").strip() or "sdk",
+            "provider_mode": str(os.getenv("FEEDBACK_AGENT_PROVIDER", "api") or "api").strip() or "api",
             "agent_mode": str(os.getenv("FEEDBACK_AGENT_MODE", "llm") or "llm").strip() or "llm",
         },
     )
@@ -658,18 +658,18 @@ def _process_feedback_thread_review_async(project_id: str, thread_id: str) -> No
             thread.status = "agent_unavailable"
             thread.agent_decision = "agent_unavailable"
             thread.learning_decision = "pending"
-            thread.summary = "误报反馈Agent（Kimi SDK）当前未联通，请稍后再试。"
+            thread.summary = "误报反馈Agent（OpenRouter）当前未联通，请稍后再试。"
             thread.escalation_reason = str(exc)
             thread.updated_at = datetime.now()
             system_message = FeedbackMessage(
                 thread_id=thread.id,
                 role="system",
                 message_type="note",
-                content="误报反馈Agent（Kimi SDK）当前未联通，请稍后再试。",
+                content="误报反馈Agent（OpenRouter）当前未联通，请稍后再试。",
                 structured_json=json.dumps(
                     {
                         "status": "agent_unavailable",
-                        "provider_mode": str(os.getenv("FEEDBACK_AGENT_PROVIDER", "sdk") or "sdk").strip() or "sdk",
+                        "provider_mode": str(os.getenv("FEEDBACK_AGENT_PROVIDER", "api") or "api").strip() or "api",
                         "error": str(exc),
                     },
                     ensure_ascii=False,
@@ -682,11 +682,11 @@ def _process_feedback_thread_review_async(project_id: str, thread_id: str) -> No
                 project_id=project_id,
                 audit_version=thread.audit_version,
                 event_kind="feedback_agent_review_failed",
-                message="误报反馈Agent（Kimi SDK）未联通",
+                message="误报反馈Agent（OpenRouter）未联通",
                 meta={
                     "thread_id": thread.id,
                     "error": str(exc),
-                    "provider_mode": str(os.getenv("FEEDBACK_AGENT_PROVIDER", "sdk") or "sdk").strip() or "sdk",
+                    "provider_mode": str(os.getenv("FEEDBACK_AGENT_PROVIDER", "api") or "api").strip() or "api",
                     "agent_mode": str(os.getenv("FEEDBACK_AGENT_MODE", "llm") or "llm").strip() or "llm",
                 },
             )

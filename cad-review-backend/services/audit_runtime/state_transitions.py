@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from domain.sheet_normalization import normalize_sheet_no
 from database import SessionLocal
 from models import AuditResult, AuditRun, AuditRunEvent, AuditTask, Project
+from services.audit_runtime.providers.factory import normalize_provider_mode
 from services.audit_runtime.result_view import (
     group_results_for_view,
     serialize_audit_result,
@@ -506,10 +507,15 @@ def _load_observer_runtime_status(project_id: str, audit_version: int) -> Dict[s
                 if not isinstance(meta, dict):
                     meta = {}
                 if provider_mode is None:
-                    provider_mode = (
+                    raw_provider_mode = (
                         str(meta.get("provider_mode") or "").strip()
                         or str(meta.get("provider_name") or "").strip()
                         or None
+                    )
+                    provider_mode = (
+                        normalize_provider_mode(raw_provider_mode)
+                        if raw_provider_mode
+                        else None
                     )
                 if current_step and progress is not None and provider_mode:
                     break
@@ -524,7 +530,7 @@ def _load_observer_runtime_status(project_id: str, audit_version: int) -> Dict[s
             "status": getattr(run, "status", None),
             "current_step": getattr(run, "current_step", None),
             "progress": getattr(run, "progress", None),
-            "provider_mode": getattr(run, "provider_mode", None),
+                "provider_mode": normalize_provider_mode(getattr(run, "provider_mode", None)),
             "has_persisted_run": True,
         }
     finally:
@@ -757,7 +763,8 @@ def _dispatch_runner_observer(
 
     runtime_status = _load_observer_runtime_status(project_id, audit_version)
     recent_events = _load_recent_observer_events(project_id, audit_version)
-    provider_mode = str(runtime_status.get("provider_mode") or "").strip() or None
+    raw_provider_mode = str(runtime_status.get("provider_mode") or "").strip() or None
+    provider_mode = normalize_provider_mode(raw_provider_mode) if raw_provider_mode else None
     use_active_provider = bool(runtime_status.get("has_persisted_run"))
     observer = ProjectRunnerObserverSession.get_or_create(
         project_id,

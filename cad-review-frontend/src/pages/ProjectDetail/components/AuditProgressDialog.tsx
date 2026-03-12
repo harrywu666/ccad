@@ -15,9 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
 import type { AuditEvent } from "@/types/api";
-import type { AuditProviderMode } from "@/types/api";
 import AuditEventList from "./AuditEventList";
 import PipelineVisualization from "./PipelineVisualization";
 import type { AuditPipelineItem } from "./useAuditProgressViewModel";
@@ -50,8 +48,12 @@ interface AuditProgressDialogProps {
   closeDisabled?: boolean;
 }
 
-export function getAuditProviderLabel(value?: AuditProviderMode | string | null) {
-  return value === "codex_sdk" ? "Codex SDK" : "Kimi SDK";
+export function getAuditProviderLabel(_value?: string | null) {
+  const value = String(_value || "").trim().toLowerCase();
+  if (value === "sdk" || value === "kimi_sdk") return "Kimi SDK";
+  if (value === "cli") return "Kimi CLI";
+  if (value === "auto") return "自动选择";
+  return "OpenRouter";
 }
 
 export function formatAuditElapsedText(startedAt?: string | null, now = new Date()) {
@@ -66,53 +68,6 @@ export function formatAuditElapsedText(startedAt?: string | null, now = new Date
     return `已运行 ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
   return `已运行 ${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-export function AuditProviderSelector({
-  value,
-  onChange,
-  defaultLabel,
-}: {
-  value: AuditProviderMode;
-  onChange: (next: AuditProviderMode) => void;
-  defaultLabel?: string;
-}) {
-  return (
-    <fieldset className="space-y-3">
-      <legend className="text-[13px] font-semibold text-foreground">默认审核引擎</legend>
-      <p className="text-[12px] leading-5 text-muted-foreground">
-        {defaultLabel ? `当前默认值：${defaultLabel}` : '选择后，后面新发起的审核会用这个引擎。'}
-      </p>
-      <div className="grid grid-cols-1 gap-3">
-        {([
-          { value: "kimi_sdk", label: "Kimi SDK", description: "走 Kimi SDK 路线。", },
-          { value: "codex_sdk", label: "Codex SDK", description: "走 Codex SDK 路线。", },
-        ] as const).map((option) => (
-          <label
-            key={option.value}
-            className={cn(
-              "flex cursor-pointer items-start gap-3 border px-4 py-3 transition-colors",
-              value === option.value ? "border-primary bg-primary/5" : "border-border bg-white hover:border-primary/40",
-            )}
-          >
-            <input
-              type="radio"
-              name="audit-provider-mode"
-              value={option.value}
-              checked={value === option.value}
-              onChange={() => onChange(option.value)}
-              className="mt-1 h-4 w-4 accent-primary"
-              aria-label={option.label}
-            />
-            <span className="space-y-1">
-              <span className="block text-[14px] font-semibold text-foreground">{option.label}</span>
-              <span className="block text-[12px] leading-5 text-muted-foreground">{option.description}</span>
-            </span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
 }
 
 export function AuditProgressPill({
