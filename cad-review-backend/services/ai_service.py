@@ -471,6 +471,29 @@ async def call_kimi_stream(
         except Exception:
             return ""
 
+    async def _retry_meaningful_idle(attempt: int) -> bool:
+        if attempt >= max_retries:
+            raise RuntimeError(
+                f"AI 流式长时间没有可解析新内容（>{idle_timeout:.1f} 秒）"
+            )
+        delay = _retry_sleep_seconds(attempt + 1)
+        logger.warning(
+            "AI 流式长时间没有可解析新内容，第 %d 次重试前等待 %.1f 秒",
+            attempt + 1,
+            delay,
+        )
+        await _emit_retry(
+            on_retry,
+            {
+                "attempt": attempt + 1,
+                "status_code": None,
+                "delay_seconds": delay,
+                "reason": "idle_timeout",
+            },
+        )
+        await asyncio.sleep(delay)
+        return True
+
     async with httpx.AsyncClient(timeout=_http_timeout_config(), trust_env=False) as client:
         for attempt in range(max_retries + 1):
             chunks: List[str] = []
@@ -506,6 +529,8 @@ async def call_kimi_stream(
                         continue
 
                     iterator = resp.aiter_lines().__aiter__()
+                    loop = asyncio.get_running_loop()
+                    last_meaningful_output_at = loop.time()
                     while True:
                         _raise_if_stream_cancelled(should_cancel)
                         try:
@@ -537,15 +562,25 @@ async def call_kimi_stream(
 
                         text = (line or "").strip()
                         if not text or not text.startswith("data:"):
+                            if loop.time() - last_meaningful_output_at > idle_timeout:
+                                if await _retry_meaningful_idle(attempt):
+                                    break
                             continue
                         body = text[5:].strip()
                         if not body or body == "[DONE]":
+                            if loop.time() - last_meaningful_output_at > idle_timeout:
+                                if await _retry_meaningful_idle(attempt):
+                                    break
                             continue
                         payload_json = json.loads(body)
                         delta = _extract_stream_delta(provider, payload_json)
                         if not delta:
+                            if loop.time() - last_meaningful_output_at > idle_timeout:
+                                if await _retry_meaningful_idle(attempt):
+                                    break
                             continue
                         chunks.append(delta)
+                        last_meaningful_output_at = loop.time()
                         await _emit_delta(on_delta, delta)
 
                     else:

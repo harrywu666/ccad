@@ -514,6 +514,8 @@ def test_call_kimi_stream_retries_when_no_new_content_for_too_long(monkeypatch):
     monkeypatch.setenv("KIMI_OFFICIAL_API_KEY", "official-secret")
     monkeypatch.setenv("KIMI_MAX_RETRIES", "1")
     monkeypatch.setenv("KIMI_STREAM_IDLE_TIMEOUT_SECONDS", "0.01")
+    monkeypatch.setenv("KIMI_RETRY_BASE_SECONDS", "0.01")
+    monkeypatch.setenv("KIMI_RETRY_MAX_SECONDS", "0.01")
     monkeypatch.setattr("httpx.AsyncClient", DummyClient)
 
     result = asyncio.run(
@@ -521,6 +523,78 @@ def test_call_kimi_stream_retries_when_no_new_content_for_too_long(monkeypatch):
             system_prompt="你是 Kimi。",
             user_prompt="请返回 JSON",
             on_retry=on_retry,
+        )
+    )
+
+    assert result == {"status": "ok"}
+    assert captured["attempts"] == 2
+    assert captured["retries"] == ["idle_timeout"]
+
+
+def test_call_kimi_stream_retries_when_stream_only_emits_non_content_events(monkeypatch):
+    captured = {"attempts": 0, "retries": []}
+
+    class DummyStreamResponse:
+        def __init__(self, *, endless_non_content=False, lines=None):
+            self.status_code = 200
+            self.headers = {}
+            self._endless_non_content = endless_non_content
+            self._lines = lines or []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def aiter_lines(self):
+            if self._endless_non_content:
+                while True:
+                    await asyncio.sleep(0.005)
+                    yield 'data: {"choices":[{"delta":{"reasoning":"thinking"}}]}'
+            for line in self._lines:
+                yield line
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method, url, headers=None, json=None):
+            captured["attempts"] += 1
+            if captured["attempts"] == 1:
+                return DummyStreamResponse(endless_non_content=True)
+            return DummyStreamResponse(
+                lines=[
+                    'data: {"choices":[{"delta":{"content":"{\\"status\\":\\"ok\\"}"}}]}',
+                    "data: [DONE]",
+                ]
+            )
+
+    async def on_retry(payload):
+        captured["retries"].append(payload["reason"])
+
+    monkeypatch.setenv("KIMI_PROVIDER", "official")
+    monkeypatch.setenv("KIMI_OFFICIAL_API_KEY", "official-secret")
+    monkeypatch.setenv("KIMI_MAX_RETRIES", "1")
+    monkeypatch.setenv("KIMI_STREAM_IDLE_TIMEOUT_SECONDS", "0.01")
+    monkeypatch.setenv("KIMI_RETRY_BASE_SECONDS", "0.01")
+    monkeypatch.setenv("KIMI_RETRY_MAX_SECONDS", "0.01")
+    monkeypatch.setattr("httpx.AsyncClient", DummyClient)
+
+    result = asyncio.run(
+        asyncio.wait_for(
+            ai_service.call_kimi_stream(
+                system_prompt="你是 Kimi。",
+                user_prompt="请返回 JSON",
+                on_retry=on_retry,
+            ),
+            timeout=0.2,
         )
     )
 

@@ -105,6 +105,54 @@ class AuditStatusResponse(BaseModel):
     finished_at: Optional[str] = None
     scope_mode: Optional[str] = None
     scope_summary: Optional[str] = None
+    ui_runtime: Optional["AuditUiRuntimeResponse"] = None
+
+
+class AuditUiRuntimeActionResponse(BaseModel):
+    at: Optional[str] = None
+    label: str
+    text: str
+
+
+class AuditUiRuntimeContextResponse(BaseModel):
+    source_sheet_no: Optional[str] = None
+    target_sheet_no: Optional[str] = None
+    sheet_no: Optional[str] = None
+
+
+class AuditUiRuntimeWorkerResponse(BaseModel):
+    session_key: str
+    worker_name: str
+    skill_id: Optional[str] = None
+    skill_label: str
+    task_title: str
+    current_action: str
+    status: Literal["active", "completed", "blocked"]
+    updated_at: Optional[str] = None
+    context: AuditUiRuntimeContextResponse
+    recent_actions: List[AuditUiRuntimeActionResponse] = Field(default_factory=list)
+
+
+class AuditUiRuntimeChiefResponse(BaseModel):
+    title: str
+    current_action: str
+    summary: str
+    assigned_task_count: int = 0
+    active_worker_count: int = 0
+    completed_worker_count: int = 0
+    blocked_worker_count: int = 0
+    queued_task_count: int = 0
+    issue_count: int = 0
+    updated_at: Optional[str] = None
+
+
+class AuditUiRuntimeResponse(BaseModel):
+    chief: AuditUiRuntimeChiefResponse
+    worker_sessions: List[AuditUiRuntimeWorkerResponse] = Field(default_factory=list)
+    recent_completed: List[AuditUiRuntimeWorkerResponse] = Field(default_factory=list)
+
+
+AuditStatusResponse.model_rebuild()
 
 
 class AuditResultUpdateRequest(BaseModel):
@@ -358,6 +406,7 @@ def get_audit_status(project_id: str, db: Session = Depends(get_db)):
     from services.audit_runtime_service import (
         build_recent_event_snapshot,
         build_run_snapshot,
+        build_ui_runtime_snapshot,
         enrich_snapshot_from_latest_event,
         get_audit_started_at_from_events,
         get_latest_run,
@@ -399,6 +448,13 @@ def get_audit_status(project_id: str, db: Session = Depends(get_db)):
             )
             .count()
         )
+    ui_runtime = build_ui_runtime_snapshot(
+        project_id,
+        audit_version,
+        snapshot,
+        total_issues=total_issues,
+        db=db,
+    )
 
     return AuditStatusResponse(
         project_id=project_id,
@@ -423,6 +479,7 @@ def get_audit_status(project_id: str, db: Session = Depends(get_db)):
         finished_at=snapshot["finished_at"],
         scope_mode=snapshot.get("scope_mode"),
         scope_summary=snapshot.get("scope_summary"),
+        ui_runtime=AuditUiRuntimeResponse.model_validate(ui_runtime),
     )
 
 

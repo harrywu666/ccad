@@ -1,75 +1,57 @@
 import { useMemo } from 'react';
-import type { AuditStatus } from '@/types';
+import type {
+  AuditStatus,
+  AuditUiRuntime,
+  AuditUiRuntimeAction,
+  AuditUiRuntimeContext,
+  AuditUiRuntimeWorkerSession,
+} from '@/types';
 import type { AuditEvent } from '@/types/api';
 
-export type AuditPipelineState = 'complete' | 'current' | 'pending';
-export type AuditPhaseState = 'complete' | 'current' | 'pending';
-export type AuditWorkerTaskState = 'running' | 'completed' | 'blocked';
+export type AuditWorkerSessionState = 'active' | 'completed' | 'blocked';
 
-export interface AuditPipelineItem {
-  stepKey: string;
+export interface ChiefCardViewModel {
   title: string;
-  description: string;
-  state: AuditPipelineState;
-  issueCount: number | null;
-}
-
-export interface AuditPhaseCardViewModel {
-  title: string;
-  description: string;
-  state: AuditPhaseState;
-}
-
-export interface AuditWorkerTaskCardViewModel {
-  key: string;
-  title: string;
-  agentName: string;
-  skillLabel: string;
-  status: AuditWorkerTaskState;
-  statusLabel: string;
+  currentAction: string;
   summary: string;
+  assignedTaskCount: number;
+  activeWorkerCount: number;
+  completedWorkerCount: number;
+  blockedWorkerCount: number;
+  queuedTaskCount: number;
+  issueCount: number;
   updatedAt?: string | null;
 }
 
-export interface AuditChiefSummaryViewModel {
+export interface WorkerSessionCardViewModel {
+  key: string;
+  workerName: string;
+  skillId?: string | null;
+  skillLabel: string;
+  taskTitle: string;
   currentAction: string;
-  summary: string;
-  bottleneck: string;
-  hypothesisCount: number;
-  plannedTaskCount: number;
-  runningTaskCount: number;
-  completedTaskCount: number;
-  queuedTaskCount: number;
-  blockedTaskCount: number;
-}
-
-export interface AuditResultLedgerViewModel {
-  issueCount: number;
-  runningTaskCount: number;
-  completedTaskCount: number;
-  queuedTaskCount: number;
-  blockedTaskCount: number;
+  status: AuditWorkerSessionState;
+  statusLabel: string;
+  updatedAt?: string | null;
+  context: AuditUiRuntimeContext;
+  recentActions: AuditUiRuntimeAction[];
 }
 
 export interface AuditProgressViewModel {
   headline: string;
   supportingText: string;
-  activeAgentName: string;
-  activeAgentMessage: string;
   providerLabel?: string;
   progress: number;
   startedAt?: string | null;
-  totalIssues: number;
-  pipeline: AuditPipelineItem[];
-  phases: AuditPhaseCardViewModel[];
-  chief: AuditChiefSummaryViewModel;
-  workerBoard: {
-    running: AuditWorkerTaskCardViewModel[];
-    completed: AuditWorkerTaskCardViewModel[];
-    blocked: AuditWorkerTaskCardViewModel[];
-    queuedCount: number;
+  chief: ChiefCardViewModel;
+  workerWall: {
+    active: WorkerSessionCardViewModel[];
+    recentCompleted: WorkerSessionCardViewModel[];
   };
-  resultLedger: AuditResultLedgerViewModel;
+  debugTimeline: {
+    enabled: boolean;
+    events: AuditEvent[];
+  };
   pill: {
     label: string;
     issueCount: number;
@@ -83,53 +65,23 @@ interface BuildAuditProgressViewModelInput {
   providerLabel?: string;
 }
 
-interface WorkerSessionSnapshot {
-  key: string;
-  title: string;
-  agentName: string;
-  skillLabel: string;
-  status: AuditWorkerTaskState;
-  statusLabel: string;
-  summary: string;
-  updatedAt?: string | null;
-  eventId: number;
+interface WorkerFallbackSnapshot {
+  session_key: string;
+  worker_name: string;
+  skill_id?: string | null;
+  skill_label: string;
+  task_title: string;
+  current_action: string;
+  status: AuditWorkerSessionState;
+  updated_at?: string | null;
+  context: AuditUiRuntimeContext;
+  recent_actions: AuditUiRuntimeAction[];
+  event_id: number;
 }
 
 const RAW_PROCESS_EVENT_KINDS = new Set(['model_stream_delta', 'provider_stream_delta']);
-const WORKER_SESSION_EVENT_KINDS = new Set([
-  'runner_turn_started',
-  'raw_output_saved',
-  'output_validation_failed',
-  'output_repair_started',
-  'output_repair_succeeded',
-  'runner_turn_deferred',
-  'runner_session_failed',
-  'runner_turn_cancelled',
-]);
-
-const PIPELINE_STEPS = [
-  {
-    stepKey: 'chief_prepare',
-    title: '主审准备',
-    description: '主审整理上下文、关系和怀疑卡，准备派工。',
-    match: ['校验三线匹配', '构建图纸上下文', 'AI 分析图纸关系', '规划审核任务图', '从任务账本恢复总控现场', '主审规划副审任务'],
-    eventSteps: ['prepare', 'context', 'relationship_discovery', 'task_planning'],
-  },
-  {
-    stepKey: 'worker_execution',
-    title: '副审执行',
-    description: '副审 Skill 并发执行索引、尺寸、材料和归属核对。',
-    match: ['主审派发副审任务', '索引核对', '尺寸核对', '材料核对'],
-    eventSteps: ['index', 'dimension', 'material'],
-  },
-  {
-    stepKey: 'chief_finalize',
-    title: '主审收束',
-    description: '主审吸收副审结果，处理冲突并生成最终结论。',
-    match: ['主审汇总完成', '主审完成结果收束', '生成报告', '审核完成'],
-    eventSteps: ['chief_review', 'done'],
-  },
-];
+const BLOCKED_EVENT_KINDS = new Set(['runner_turn_deferred', 'runner_session_failed', 'runner_turn_cancelled']);
+const COMPLETED_EVENT_KINDS = new Set(['raw_output_saved', 'output_repair_succeeded']);
 
 const HEADLINE_FLOW = [
   { match: ['校验三线匹配', '构建图纸上下文', 'AI 分析图纸关系'], title: '主审准备' },
@@ -146,20 +98,28 @@ const WORKER_SKILL_LABELS: Record<string, string> = {
   elevation_consistency: '标高一致性 Skill',
 };
 
+const WORKER_NAME_LABELS: Record<string, string> = {
+  index_reference: '索引副审',
+  material_semantic_consistency: '材料副审',
+  node_host_binding: '节点归属副审',
+  spatial_consistency: '空间副审',
+  elevation_consistency: '标高副审',
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  runner_turn_started: '调用 Skill',
+  runner_broadcast: '现场播报',
+  raw_output_saved: '保存输出',
+  output_validation_failed: '输出校验',
+  output_repair_started: '整理输出',
+  output_repair_succeeded: '整理完成',
+  runner_turn_deferred: '等待重试',
+  runner_session_failed: '执行失败',
+  runner_turn_cancelled: '已中断',
+};
+
 function clampProgress(progress?: number | null) {
   return Math.max(0, Math.min(100, progress || 0));
-}
-
-function parseIssueCount(event?: AuditEvent | null) {
-  const meta = asMeta(event?.meta);
-  const value = meta.issues;
-  return typeof value === 'number' ? value : null;
-}
-
-function resolveHeadline(currentStep?: string | null) {
-  if (!currentStep) return '主审组织审图';
-  const matched = HEADLINE_FLOW.find((item) => item.match.some((text) => currentStep.includes(text)));
-  return matched ? matched.title : currentStep;
 }
 
 function asMeta(meta: unknown): Record<string, unknown> {
@@ -171,14 +131,10 @@ function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function getLatestSummaryEvent(events: AuditEvent[]) {
-  const filtered = events.filter((event) => !RAW_PROCESS_EVENT_KINDS.has(event.event_kind || ''));
-  return filtered[filtered.length - 1] ?? null;
-}
-
-function getActiveEvent(events: AuditEvent[]) {
-  return [...events].reverse().find((event) => event.event_kind === 'runner_broadcast')
-    ?? getLatestSummaryEvent(events);
+function resolveHeadline(currentStep?: string | null) {
+  if (!currentStep) return '主审调度现场';
+  const matched = HEADLINE_FLOW.find((item) => item.match.some((text) => currentStep.includes(text)));
+  return matched ? matched.title : currentStep;
 }
 
 function isChiefEvent(event: AuditEvent) {
@@ -194,20 +150,6 @@ function isChiefEvent(event: AuditEvent) {
     || agentId === 'chief_review'
     || agentName.includes('主审')
     || message.startsWith('主审 Agent');
-}
-
-function isWorkerSessionEvent(event: AuditEvent) {
-  if (!WORKER_SESSION_EVENT_KINDS.has(asText(event.event_kind))) return false;
-  if (isChiefEvent(event)) return false;
-  return true;
-}
-
-function parseCountFromMessage(events: AuditEvent[], pattern: RegExp) {
-  for (const event of [...events].reverse()) {
-    const match = pattern.exec(asText(event.message));
-    if (match) return Number(match[1] || 0);
-  }
-  return 0;
 }
 
 function resolveSkillId(event: AuditEvent) {
@@ -233,15 +175,10 @@ function resolveSkillId(event: AuditEvent) {
   return '';
 }
 
-function extractSessionFragment(event: AuditEvent) {
+function extractSessionKey(event: AuditEvent) {
   const meta = asMeta(event.meta);
   const sessionKey = asText(meta.session_key);
-  if (sessionKey) {
-    if (sessionKey.startsWith('worker_skill:')) return sessionKey;
-    const parts = sessionKey.split(':');
-    if (parts.length > 3) return parts.slice(3).join(':');
-    return sessionKey;
-  }
+  if (sessionKey) return sessionKey;
 
   const artifactPath = asText(meta.artifact_path);
   const fileName = artifactPath.split('/').pop() || '';
@@ -254,7 +191,16 @@ function extractSessionFragment(event: AuditEvent) {
   return '';
 }
 
-function extractWorkTitle(event: AuditEvent, sessionFragment: string) {
+function extractSessionTail(sessionKey: string) {
+  const normalized = asText(sessionKey);
+  if (!normalized) return [] as string[];
+  const parts = normalized.split(':');
+  if (normalized.startsWith('worker_skill:')) return parts;
+  if (parts.length >= 5) return parts.slice(3);
+  return parts;
+}
+
+function extractTaskTitle(event: AuditEvent, sessionKey: string) {
   const meta = asMeta(event.meta);
   const sourceSheet = asText(meta.source_sheet_no) || asText(meta.candidate_source_sheet_no);
   const targetSheet = asText(meta.target_sheet_no) || asText(meta.candidate_target_sheet_no);
@@ -262,22 +208,33 @@ function extractWorkTitle(event: AuditEvent, sessionFragment: string) {
   if (sourceSheet && targetSheet) return `${sourceSheet} ↔ ${targetSheet}`;
   if (sheetNo) return `图纸 ${sheetNo}`;
 
-  if (sessionFragment.startsWith('worker_skill:')) {
-    const [, , source, targets] = sessionFragment.split(':');
-    if (source && targets && targets !== 'SELF') return `${source} ↔ ${targets.replaceAll('__', ' / ')}`;
+  const tail = extractSessionTail(sessionKey);
+
+  if (sessionKey.startsWith('worker_skill:')) {
+    const [, , source, targets] = sessionKey.split(':');
+    if (source && targets && targets !== 'SELF') return `${source} ↔ ${targets.split('__').join(' / ')}`;
     if (source) return `图纸 ${source}`;
   }
+  if ((tail[0] === 'sheet_semantic' || tail[0] === 'dimension_sheet_semantic') && tail[1]) {
+    return `图纸 ${tail[1]}`;
+  }
+  if ((tail[0] === 'pair_compare' || tail[0] === 'dimension_pair_compare') && tail[1] && tail[2]) {
+    return `${tail[1]} ↔ ${tail[2]}`;
+  }
+  if ((tail[0] === 'candidate_review' || tail[0] === 'relationship_candidate_review') && tail[1]) {
+    return `候选关系 ${tail[1].slice(0, 8)}`;
+  }
 
-  if (sessionFragment.startsWith('sheet_semantic:')) {
-    const value = sessionFragment.split(':')[1];
+  if (sessionKey.startsWith('sheet_semantic:')) {
+    const value = sessionKey.split(':')[1];
     return value ? `图纸 ${value}` : '单图语义';
   }
-  if (sessionFragment.startsWith('pair_compare:')) {
-    const [, a, b] = sessionFragment.split(':');
+  if (sessionKey.startsWith('pair_compare:')) {
+    const [, a, b] = sessionKey.split(':');
     return a && b ? `${a} ↔ ${b}` : '跨图尺寸';
   }
-  if (sessionFragment.startsWith('candidate_review:')) {
-    const value = sessionFragment.split(':')[1];
+  if (sessionKey.startsWith('candidate_review:')) {
+    const value = sessionKey.split(':')[1];
     return value ? `候选关系 ${value.slice(0, 8)}` : '候选关系复核';
   }
 
@@ -287,210 +244,214 @@ function extractWorkTitle(event: AuditEvent, sessionFragment: string) {
   return '副审任务';
 }
 
-function resolveSkillLabel(event: AuditEvent) {
-  const skillId = resolveSkillId(event);
-  if (skillId && WORKER_SKILL_LABELS[skillId]) return WORKER_SKILL_LABELS[skillId];
-  return '通用复核 Skill';
+function resolveWorkerName(event: AuditEvent, skillId: string) {
+  if (skillId && WORKER_NAME_LABELS[skillId]) return WORKER_NAME_LABELS[skillId];
+  const agentName = asText(event.agent_name);
+  if (!agentName) return '副审';
+  return agentName.endsWith('Agent') ? agentName.slice(0, -5) : agentName;
 }
 
-function buildWorkerSummary(event: AuditEvent, title: string) {
-  const meta = asMeta(event.meta);
+function resolveSkillLabel(skillId: string) {
+  return WORKER_SKILL_LABELS[skillId] || '通用复核 Skill';
+}
+
+function resolveCurrentAction(event: AuditEvent, taskTitle: string, skillId: string) {
   const eventKind = asText(event.event_kind);
   const rawMessage = asText(event.message);
-  const skillId = resolveSkillId(event);
+  const meta = asMeta(event.meta);
+  const turnKind = asText(meta.turn_kind);
 
-  if (eventKind === 'raw_output_saved') return `${title} 已收束本轮输出，等待主审消化结果。`;
-  if (eventKind === 'output_validation_failed') return `${title} 的输出结构还在整理。`;
-  if (eventKind === 'output_repair_started') return `${title} 正在整理输出格式。`;
-  if (eventKind === 'output_repair_succeeded') return `${title} 已整理成标准结果。`;
-  if (eventKind === 'runner_turn_deferred') return `${title} 暂时挂起，等待重试。`;
-  if (eventKind === 'runner_session_failed') return `${title} 本轮执行失败，等待重试。`;
-  if (eventKind === 'runner_turn_cancelled') return `${title} 已被用户中断。`;
-
-  if (skillId === 'elevation_consistency') return `${title} 正在抽取单图标高语义。`;
-  if (skillId === 'spatial_consistency') return `${title} 正在比对跨图空间关系。`;
-  if (skillId === 'node_host_binding') return `${title} 正在复核节点归属。`;
-  if (skillId === 'index_reference') return `${title} 正在核对索引引用。`;
-  if (skillId === 'material_semantic_consistency') return `${title} 正在核对材料语义。`;
-
-  if (rawMessage && !rawMessage.includes('已通过 Runner 发起一次') && !rawMessage.includes('原始输出已保存')) {
-    return rawMessage;
+  if (eventKind === 'raw_output_saved') return '已收束并保存输出';
+  if (eventKind === 'output_validation_failed') return '输出格式待整理';
+  if (eventKind === 'output_repair_started') return '正在整理输出格式';
+  if (eventKind === 'output_repair_succeeded') return '已整理成标准结果';
+  if (eventKind === 'runner_turn_deferred') return '等待重试或主审介入';
+  if (eventKind === 'runner_session_failed') return '执行失败，等待重试';
+  if (eventKind === 'runner_turn_cancelled') return '已被人工中断';
+  if (eventKind === 'runner_broadcast') {
+    if (skillId === 'elevation_consistency') {
+      if (taskTitle.startsWith('图纸 ')) return '正在抽取单图标高语义';
+      if (taskTitle.includes('↔')) return '正在比对跨图尺寸关系';
+      return '正在推进标高复核';
+    }
+    if (skillId === 'spatial_consistency') return '正在比对跨图空间关系';
+    if (skillId === 'node_host_binding') return '正在复核节点归属';
+    if (skillId === 'index_reference') return '正在核对索引引用';
+    if (skillId === 'material_semantic_consistency') return '正在核对材料语义';
   }
-  return `${title} 正在执行副审任务。`;
+
+  if (eventKind === 'runner_turn_started') {
+    if (turnKind === 'dimension_sheet_semantic' || turnKind === 'sheet_semantic') return '准备提取单图标高语义';
+    if (turnKind === 'dimension_pair_compare' || turnKind === 'pair_compare') return '准备执行跨图尺寸对比';
+    if (turnKind === 'relationship_candidate_review' || turnKind === 'candidate_review') return '准备复核候选关系';
+    return '已启动本轮技能执行';
+  }
+
+  if (rawMessage && !rawMessage.includes('已通过 Runner 发起一次')) return rawMessage;
+  return '正在执行副审任务';
 }
 
-function buildWorkerBoard(events: AuditEvent[], plannedTaskCount: number) {
-  const sessions = new Map<string, WorkerSessionSnapshot>();
+function buildRecentAction(event: AuditEvent, taskTitle: string, skillId: string): AuditUiRuntimeAction {
+  return {
+    at: event.created_at,
+    label: ACTION_LABELS[asText(event.event_kind)] || '现场更新',
+    text: resolveCurrentAction(event, taskTitle, skillId),
+  };
+}
+
+function buildContext(event: AuditEvent): AuditUiRuntimeContext {
+  const meta = asMeta(event.meta);
+  const sessionKey = extractSessionKey(event);
+  const tail = extractSessionTail(sessionKey);
+  let sourceSheetNo = asText(meta.source_sheet_no || meta.candidate_source_sheet_no) || null;
+  let targetSheetNo = asText(meta.target_sheet_no || meta.candidate_target_sheet_no) || null;
+  let sheetNo = asText(meta.sheet_no) || null;
+
+  if (!sheetNo && (tail[0] === 'sheet_semantic' || tail[0] === 'dimension_sheet_semantic') && tail[1]) {
+    sheetNo = tail[1];
+  }
+  if (!sourceSheetNo && !targetSheetNo && (tail[0] === 'pair_compare' || tail[0] === 'dimension_pair_compare') && tail[1] && tail[2]) {
+    sourceSheetNo = tail[1];
+    targetSheetNo = tail[2];
+  }
+
+  return {
+    source_sheet_no: sourceSheetNo,
+    target_sheet_no: targetSheetNo,
+    sheet_no: sheetNo,
+  };
+}
+
+function normalizeWorkerCard(session: AuditUiRuntimeWorkerSession): WorkerSessionCardViewModel {
+  const statusLabel = session.status === 'active'
+    ? '进行中'
+    : session.status === 'completed'
+      ? '已完成'
+      : '阻塞中';
+
+  return {
+    key: session.session_key,
+    workerName: session.worker_name,
+    skillId: session.skill_id || null,
+    skillLabel: session.skill_label,
+    taskTitle: session.task_title,
+    currentAction: session.current_action,
+    status: session.status,
+    statusLabel,
+    updatedAt: session.updated_at,
+    context: session.context || {
+      source_sheet_no: null,
+      target_sheet_no: null,
+      sheet_no: null,
+    },
+    recentActions: session.recent_actions || [],
+  };
+}
+
+function parseCountFromMessage(events: AuditEvent[], pattern: RegExp) {
+  for (const event of [...events].reverse()) {
+    const match = pattern.exec(asText(event.message));
+    if (match) return Number(match[1] || 0);
+  }
+  return 0;
+}
+
+function buildFallbackRuntime(currentStep: string, events: AuditEvent[], totalIssues: number): AuditUiRuntime {
+  const sessions = new Map<string, WorkerFallbackSnapshot>();
 
   events.forEach((event) => {
-    if (!isWorkerSessionEvent(event)) return;
-    const key = extractSessionFragment(event);
-    if (!key) return;
-    const existing = sessions.get(key);
-    const title = existing?.title || extractWorkTitle(event, key);
-    const agentName = asText(event.agent_name) || existing?.agentName || '副审 Agent';
-    const skillLabel = resolveSkillLabel(event) || existing?.skillLabel;
-    const summary = buildWorkerSummary(event, title);
-    const eventKind = asText(event.event_kind);
+    if (RAW_PROCESS_EVENT_KINDS.has(asText(event.event_kind))) return;
+    if (isChiefEvent(event)) return;
 
-    let status: AuditWorkerTaskState = existing?.status || 'running';
-    let statusLabel = existing?.statusLabel || '处理中';
-    if (eventKind === 'raw_output_saved' || eventKind === 'output_repair_succeeded') {
+    const key = extractSessionKey(event);
+    if (!key) return;
+
+    const skillId = resolveSkillId(event);
+    const taskTitle = extractTaskTitle(event, key);
+    const currentAction = resolveCurrentAction(event, taskTitle, skillId);
+    const recentAction = buildRecentAction(event, taskTitle, skillId);
+    const existing = sessions.get(key);
+
+    let status: AuditWorkerSessionState = existing?.status || 'active';
+    const eventKind = asText(event.event_kind);
+    if (COMPLETED_EVENT_KINDS.has(eventKind)) {
       status = 'completed';
-      statusLabel = '已收束';
-    } else if (eventKind === 'runner_turn_deferred' || eventKind === 'runner_session_failed' || eventKind === 'runner_turn_cancelled') {
+    } else if (BLOCKED_EVENT_KINDS.has(eventKind)) {
       status = 'blocked';
-      statusLabel = '待处理';
     } else {
-      status = 'running';
-      statusLabel = '处理中';
+      status = 'active';
     }
 
-    sessions.set(key, {
-      key,
-      title,
-      agentName,
-      skillLabel,
+    const nextSnapshot: WorkerFallbackSnapshot = {
+      session_key: key,
+      worker_name: resolveWorkerName(event, skillId),
+      skill_id: skillId || null,
+      skill_label: resolveSkillLabel(skillId),
+      task_title: taskTitle,
+      current_action: currentAction,
       status,
-      statusLabel,
-      summary,
-      updatedAt: event.created_at,
-      eventId: event.id,
-    });
+      updated_at: event.created_at,
+      context: buildContext(event),
+      recent_actions: [...(existing?.recent_actions || []), recentAction].slice(-3),
+      event_id: event.id,
+    };
+    sessions.set(key, nextSnapshot);
   });
 
-  const items = [...sessions.values()].sort((left, right) => right.eventId - left.eventId);
-  const running = items.filter((item) => item.status === 'running');
-  const completed = items.filter((item) => item.status === 'completed');
-  const blocked = items.filter((item) => item.status === 'blocked');
-  const observedCount = items.length;
-  const queuedCount = Math.max(0, plannedTaskCount - observedCount);
-
-  return {
-    running,
-    completed,
-    blocked,
-    queuedCount,
-  };
-}
-
-function buildChiefSummary(
-  currentStep: string,
-  events: AuditEvent[],
-  workerBoard: ReturnType<typeof buildWorkerBoard>,
-) {
-  const chiefEvents = events.filter((event) => !RAW_PROCESS_EVENT_KINDS.has(event.event_kind || '') && isChiefEvent(event));
-  const latestChiefEvent = chiefEvents[chiefEvents.length - 1] ?? null;
+  const items = [...sessions.values()].sort((left, right) => right.event_id - left.event_id);
+  const active = items.filter((item) => item.status !== 'completed');
+  const completed = items.filter((item) => item.status === 'completed').slice(0, 6);
+  const chiefEvents = events.filter((event) => !RAW_PROCESS_EVENT_KINDS.has(asText(event.event_kind)) && isChiefEvent(event));
   const hypothesisCount = parseCountFromMessage(chiefEvents, /生成\s*(\d+)\s*条待核对怀疑卡/);
-  const plannedTaskCount = Math.max(
+  const assignedTaskCount = Math.max(
     parseCountFromMessage(chiefEvents, /生成\s*(\d+)\s*张副审任务卡/),
-    workerBoard.running.length + workerBoard.completed.length + workerBoard.blocked.length,
+    items.length,
   );
-
-  const currentAction = latestChiefEvent?.message
-    || (currentStep ? `主审正在推进：${currentStep}` : '主审正在整理图纸上下文并准备拆分副审任务。');
+  const activeWorkerCount = items.filter((item) => item.status === 'active').length;
+  const completedWorkerCount = items.filter((item) => item.status === 'completed').length;
+  const blockedWorkerCount = items.filter((item) => item.status === 'blocked').length;
+  const queuedTaskCount = Math.max(0, assignedTaskCount - activeWorkerCount - completedWorkerCount - blockedWorkerCount);
+  const latestChief = chiefEvents[chiefEvents.length - 1];
 
   const summaryParts: string[] = [];
-  if (hypothesisCount > 0) summaryParts.push(`已形成 ${hypothesisCount} 条怀疑卡`);
-  if (plannedTaskCount > 0) summaryParts.push(`已派出 ${plannedTaskCount} 张副审任务卡`);
-  if (workerBoard.running.length > 0) summaryParts.push(`当前 ${workerBoard.running.length} 张处理中`);
-  if (workerBoard.completed.length > 0) summaryParts.push(`已收束 ${workerBoard.completed.length} 张`);
-  if (workerBoard.queuedCount > 0) summaryParts.push(`还有 ${workerBoard.queuedCount} 张待调度`);
-  if (workerBoard.blocked.length > 0) summaryParts.push(`${workerBoard.blocked.length} 张待处理`);
-
-  let bottleneck = '主审正在等待更多副审结果回流。';
-  if (workerBoard.running[0]) {
-    const current = workerBoard.running[0];
-    bottleneck = `${current.agentName} 正在处理 ${current.title}，调用 ${current.skillLabel}。`;
-  } else if (workerBoard.queuedCount > 0) {
-    bottleneck = `还有 ${workerBoard.queuedCount} 张副审任务排队中，主审还在持续调度。`;
-  } else if (plannedTaskCount > 0 && workerBoard.completed.length >= plannedTaskCount) {
-    bottleneck = '副审已基本收束，等待主审汇总最终报告。';
-  }
+  if (hypothesisCount > 0) summaryParts.push(`已形成 ${hypothesisCount} 条待核对怀疑卡`);
+  if (assignedTaskCount > 0) summaryParts.push(`已派发 ${assignedTaskCount} 张副审任务卡`);
+  if (activeWorkerCount > 0) summaryParts.push(`${activeWorkerCount} 个副审进行中`);
+  if (completedWorkerCount > 0) summaryParts.push(`${completedWorkerCount} 个副审已完成`);
+  if (blockedWorkerCount > 0) summaryParts.push(`${blockedWorkerCount} 个副审待处理`);
+  if (queuedTaskCount > 0) summaryParts.push(`${queuedTaskCount} 张任务待启动`);
 
   return {
-    currentAction,
-    summary: summaryParts.length ? summaryParts.join('，') : '主审正在组织这轮审图，副审会按实际需要持续被调起。',
-    bottleneck,
-    hypothesisCount,
-    plannedTaskCount,
-    runningTaskCount: workerBoard.running.length,
-    completedTaskCount: workerBoard.completed.length,
-    queuedTaskCount: workerBoard.queuedCount,
-    blockedTaskCount: workerBoard.blocked.length,
+    chief: {
+      title: '主审',
+      current_action: latestChief?.message || (currentStep ? `主审正在推进：${currentStep}` : '主审正在准备审图任务'),
+      summary: summaryParts.join('，') || '主审正在组织本轮副审调度。',
+      assigned_task_count: assignedTaskCount,
+      active_worker_count: activeWorkerCount,
+      completed_worker_count: completedWorkerCount,
+      blocked_worker_count: blockedWorkerCount,
+      queued_task_count: queuedTaskCount,
+      issue_count: totalIssues,
+      updated_at: latestChief?.created_at || null,
+    },
+    worker_sessions: active,
+    recent_completed: completed,
   };
 }
 
-function findCurrentPipelineIndex(currentStep: string, events: AuditEvent[]) {
-  const statusIndex = PIPELINE_STEPS.findIndex((item) => item.match.some((text) => currentStep.includes(text)));
-  if (statusIndex >= 0) return statusIndex;
-
-  const latestStepKey = [...events]
-    .reverse()
-    .find((event) => event.step_key && !RAW_PROCESS_EVENT_KINDS.has(event.event_kind || ''))
-    ?.step_key;
-
-  if (latestStepKey) {
-    const index = PIPELINE_STEPS.findIndex((item) => item.eventSteps.includes(latestStepKey));
-    if (index >= 0) return index;
-  }
-
-  return -1;
-}
-
-function buildPipeline(currentStep: string, events: AuditEvent[]) {
-  const completedCounts = new Map<string, number | null>();
-  const currentIndex = findCurrentPipelineIndex(currentStep, events);
-
-  events.forEach((event) => {
-    if (event.event_kind !== 'phase_completed' || !event.step_key) return;
-    PIPELINE_STEPS.forEach((item) => {
-      if (item.eventSteps.includes(event.step_key || '')) {
-        completedCounts.set(item.stepKey, parseIssueCount(event));
-      }
-    });
-  });
-
-  return PIPELINE_STEPS.map((item, index) => {
-    const isCurrent = index === currentIndex;
-    const completed = !isCurrent && (completedCounts.has(item.stepKey) || (currentIndex >= 0 && index < currentIndex));
-    return {
-      stepKey: item.stepKey,
-      title: item.title,
-      description: item.description,
-      state: completed ? 'complete' : (isCurrent ? 'current' : 'pending'),
-      issueCount: completedCounts.get(item.stepKey) ?? null,
-    } satisfies AuditPipelineItem;
-  });
-}
-
-function buildChiefWorkerPhases(currentStep: string, progress: number): AuditPhaseCardViewModel[] {
-  const normalizedProgress = clampProgress(progress);
-  const isFinalize = normalizedProgress >= 95 || currentStep.includes('主审完成结果收束') || currentStep.includes('主审汇总完成');
-  const isWorkerExecution =
-    !isFinalize &&
-    (normalizedProgress >= 18 ||
-      currentStep.includes('索引核对') ||
-      currentStep.includes('尺寸核对') ||
-      currentStep.includes('材料核对'));
-
-  return [
-    {
-      title: '主审准备',
-      description: '主审整理上下文并决定要派出的副审任务。',
-      state: isWorkerExecution || isFinalize ? 'complete' : 'current',
-    },
-    {
-      title: '副审执行',
-      description: '副审 Skill 并发运行，结果持续回流主审。',
-      state: isFinalize ? 'complete' : (isWorkerExecution ? 'current' : 'pending'),
-    },
-    {
-      title: '主审汇总',
-      description: '主审消化副审结果并生成最终审图结论。',
-      state: isFinalize ? 'current' : 'pending',
-    },
-  ];
+function normalizeChief(uiRuntime: AuditUiRuntime, totalIssues: number): ChiefCardViewModel {
+  return {
+    title: uiRuntime.chief.title || '主审',
+    currentAction: uiRuntime.chief.current_action || '主审正在组织本轮调度',
+    summary: uiRuntime.chief.summary || '主审正在组织本轮副审调度。',
+    assignedTaskCount: uiRuntime.chief.assigned_task_count || 0,
+    activeWorkerCount: uiRuntime.chief.active_worker_count || 0,
+    completedWorkerCount: uiRuntime.chief.completed_worker_count || 0,
+    blockedWorkerCount: uiRuntime.chief.blocked_worker_count || 0,
+    queuedTaskCount: uiRuntime.chief.queued_task_count || 0,
+    issueCount: uiRuntime.chief.issue_count || totalIssues,
+    updatedAt: uiRuntime.chief.updated_at || null,
+  };
 }
 
 export function buildAuditProgressViewModel({
@@ -500,47 +461,32 @@ export function buildAuditProgressViewModel({
 }: BuildAuditProgressViewModelInput): AuditProgressViewModel {
   const currentStep = auditStatus?.current_step || '';
   const progress = clampProgress(auditStatus?.progress);
-  const activeEvent = getActiveEvent(events);
-  const activeAgentName = activeEvent?.agent_name || resolveHeadline(currentStep);
-  const activeAgentMessage = activeEvent?.message || (
-    currentStep ? `当前阶段：${currentStep}` : '系统正在后台持续扫描和核对图纸数据。'
-  );
   const totalIssues = auditStatus?.total_issues || 0;
-  const workerBoard = buildWorkerBoard(events, 0);
-  const chief = buildChiefSummary(currentStep, events, workerBoard);
-  const normalizedWorkerBoard = {
-    ...workerBoard,
-    queuedCount: Math.max(0, chief.plannedTaskCount - (
-      workerBoard.running.length + workerBoard.completed.length + workerBoard.blocked.length
-    )),
-  };
+  const uiRuntime = auditStatus?.ui_runtime || buildFallbackRuntime(currentStep, events, totalIssues);
+  const chief = normalizeChief(uiRuntime, totalIssues);
+  const activeCards = (uiRuntime.worker_sessions || []).map(normalizeWorkerCard);
+  const recentCompletedCards = (uiRuntime.recent_completed || []).map(normalizeWorkerCard);
 
   return {
-    headline: resolveHeadline(currentStep),
-    supportingText: currentStep ? `当前阶段：${currentStep}` : '主审会持续分派副审任务，你看到的是这轮真实调度现场。',
-    activeAgentName,
-    activeAgentMessage,
+    headline: resolveHeadline(currentStep || chief.currentAction),
+    supportingText: currentStep
+      ? `当前阶段：${currentStep}`
+      : '主审持续派发任务，副审实时回流状态与技能动作。',
     providerLabel,
     progress,
     startedAt: auditStatus?.started_at,
-    totalIssues,
-    pipeline: buildPipeline(currentStep, events),
-    phases: buildChiefWorkerPhases(currentStep, progress),
-    chief: {
-      ...chief,
-      queuedTaskCount: normalizedWorkerBoard.queuedCount,
+    chief,
+    workerWall: {
+      active: activeCards,
+      recentCompleted: recentCompletedCards,
     },
-    workerBoard: normalizedWorkerBoard,
-    resultLedger: {
-      issueCount: totalIssues,
-      runningTaskCount: normalizedWorkerBoard.running.length,
-      completedTaskCount: normalizedWorkerBoard.completed.length,
-      queuedTaskCount: normalizedWorkerBoard.queuedCount,
-      blockedTaskCount: normalizedWorkerBoard.blocked.length,
+    debugTimeline: {
+      enabled: events.length > 0,
+      events,
     },
     pill: {
-      label: `${activeAgentName} ${Math.round(progress)}%`,
-      issueCount: totalIssues,
+      label: `${chief.title}调度中 ${Math.round(progress)}%`,
+      issueCount: chief.issueCount,
       progress,
     },
   };

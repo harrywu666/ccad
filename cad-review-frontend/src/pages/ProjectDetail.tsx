@@ -1135,14 +1135,9 @@ export default function ProjectDetail() {
           headline={auditProgressViewModel.headline}
           supportingText={auditProgressViewModel.supportingText}
           startedAt={auditProgressViewModel.startedAt}
-          pipeline={auditProgressViewModel.pipeline}
           chief={auditProgressViewModel.chief}
-          workerBoard={auditProgressViewModel.workerBoard}
-          resultLedger={auditProgressViewModel.resultLedger}
-          activeAgentName={auditProgressViewModel.activeAgentName}
-          activeAgentMessage={auditProgressViewModel.activeAgentMessage}
-          totalIssues={auditProgressViewModel.totalIssues}
-          events={auditEvents}
+          workerWall={auditProgressViewModel.workerWall}
+          debugTimeline={auditProgressViewModel.debugTimeline}
           eventError={auditEventsError}
           eventLoading={auditEventsLoading}
           providerLabel={currentAuditProviderLabel}

@@ -11,7 +11,8 @@ import logging
 import threading
 import time
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+import re
+from typing import Any, Dict, List, Optional
 
 from database import SessionLocal
 from sqlalchemy import func
@@ -76,6 +77,275 @@ _RUN_STEP_TO_TASK_STAGE = {
     "主审流程已中断": "runtime_interrupted",
     "主审流程失败": "runtime_failed",
 }
+
+_RAW_PROCESS_EVENT_KINDS = {"model_stream_delta", "provider_stream_delta"}
+_WORKER_SKILL_LABELS = {
+    "index_reference": "索引引用 Skill",
+    "material_semantic_consistency": "材料语义一致性 Skill",
+    "node_host_binding": "节点归属 Skill",
+    "spatial_consistency": "空间一致性 Skill",
+    "elevation_consistency": "标高一致性 Skill",
+}
+_WORKER_NAME_LABELS = {
+    "index_reference": "索引副审",
+    "material_semantic_consistency": "材料副审",
+    "node_host_binding": "节点归属副审",
+    "spatial_consistency": "空间副审",
+    "elevation_consistency": "标高副审",
+}
+_WORKER_BLOCKED_EVENT_KINDS = {"runner_turn_deferred", "runner_session_failed", "runner_turn_cancelled"}
+_WORKER_COMPLETED_EVENT_KINDS = {"raw_output_saved", "output_repair_succeeded"}
+_MEANINGFUL_ACTION_LABELS = {
+    "runner_turn_started": "调用 Skill",
+    "runner_broadcast": "现场播报",
+    "raw_output_saved": "保存输出",
+    "output_validation_failed": "输出校验",
+    "output_repair_started": "整理输出",
+    "output_repair_succeeded": "整理完成",
+    "runner_turn_deferred": "等待重试",
+    "runner_session_failed": "执行失败",
+    "runner_turn_cancelled": "已中断",
+}
+
+
+def _as_text(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _parse_event_meta(row: AuditRunEvent) -> Dict[str, Any]:
+    if not row.meta_json:
+        return {}
+    try:
+        payload = json.loads(row.meta_json)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _is_chief_event(row: AuditRunEvent, meta: Dict[str, Any]) -> bool:
+    actor_role = _as_text(meta.get("actor_role"))
+    if actor_role == "chief":
+        return True
+    if actor_role == "worker":
+        return False
+    agent_key = _as_text(getattr(row, "agent_key", None))
+    agent_name = _as_text(getattr(row, "agent_name", None))
+    agent_id = _as_text(meta.get("agent_id"))
+    message = _as_text(getattr(row, "message", None))
+    return (
+        "chief" in agent_key
+        or agent_id == "chief_review"
+        or "主审" in agent_name
+        or message.startswith("主审 Agent")
+    )
+
+
+def _parse_count_from_event_messages(rows: List[AuditRunEvent], pattern: str) -> int:
+    compiled = re.compile(pattern)
+    for row in reversed(rows):
+        match = compiled.search(_as_text(getattr(row, "message", None)))
+        if match:
+            try:
+                return int(match.group(1))
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def _resolve_skill_id(row: AuditRunEvent, meta: Dict[str, Any]) -> str:
+    direct = _as_text(meta.get("skill_id") or meta.get("worker_kind") or meta.get("suggested_worker_kind"))
+    if direct:
+        return direct
+    session_key = _as_text(meta.get("session_key"))
+    if session_key.startswith("worker_skill:"):
+        parts = session_key.split(":")
+        if len(parts) >= 2:
+            return _as_text(parts[1])
+    turn_kind = _as_text(meta.get("turn_kind"))
+    agent_name = _as_text(getattr(row, "agent_name", None))
+    if turn_kind == "dimension_sheet_semantic":
+        return "elevation_consistency"
+    if turn_kind == "dimension_pair_compare":
+        return "spatial_consistency"
+    if turn_kind == "relationship_candidate_review":
+        return "node_host_binding"
+    if "index" in turn_kind or "索引" in agent_name:
+        return "index_reference"
+    if "material" in turn_kind or "材料" in agent_name:
+        return "material_semantic_consistency"
+    if "关系" in agent_name:
+        return "node_host_binding"
+    if "尺寸" in agent_name:
+        return "spatial_consistency"
+    return ""
+
+
+def _extract_session_key(row: AuditRunEvent, meta: Dict[str, Any]) -> str:
+    session_key = _as_text(meta.get("session_key"))
+    if session_key:
+        return session_key
+
+    artifact_path = _as_text(meta.get("artifact_path"))
+    file_name = artifact_path.rsplit("/", 1)[-1]
+    if not file_name:
+        return ""
+
+    sheet_match = re.search(r"sheet_semantic_([^_]+)__\d{8}", file_name)
+    if sheet_match:
+        return f"sheet_semantic:{sheet_match.group(1)}"
+
+    pair_match = re.search(r"pair_compare_([^_]+)_([^_]+)__\d{8}", file_name)
+    if pair_match:
+        return f"pair_compare:{pair_match.group(1)}:{pair_match.group(2)}"
+
+    candidate_match = re.search(r"candidate_review_([^_]+)__\d{8}", file_name)
+    if candidate_match:
+        return f"candidate_review:{candidate_match.group(1)}"
+    return ""
+
+
+def _extract_session_tail(session_key: str) -> List[str]:
+    normalized = _as_text(session_key)
+    if not normalized:
+        return []
+    parts = normalized.split(":")
+    if normalized.startswith("worker_skill:"):
+        return parts
+    if len(parts) >= 5:
+        return parts[3:]
+    return parts
+
+
+def _extract_task_title(row: AuditRunEvent, meta: Dict[str, Any], session_key: str) -> str:
+    source_sheet = _as_text(meta.get("source_sheet_no") or meta.get("candidate_source_sheet_no"))
+    target_sheet = _as_text(meta.get("target_sheet_no") or meta.get("candidate_target_sheet_no"))
+    sheet_no = _as_text(meta.get("sheet_no"))
+    if source_sheet and target_sheet:
+        return f"{source_sheet} ↔ {target_sheet}"
+    if sheet_no:
+        return f"图纸 {sheet_no}"
+
+    tail = _extract_session_tail(session_key)
+
+    if session_key.startswith("worker_skill:"):
+        _, _, source, targets = (session_key.split(":") + ["", "", "", ""])[:4]
+        if source and targets and targets != "SELF":
+            return f"{source} ↔ {targets.replace('__', ' / ')}"
+        if source:
+            return f"图纸 {source}"
+    if tail[:1] in (["sheet_semantic"], ["dimension_sheet_semantic"]) and len(tail) >= 2:
+        return f"图纸 {tail[1]}"
+    if tail[:1] in (["pair_compare"], ["dimension_pair_compare"]) and len(tail) >= 3:
+        return f"{tail[1]} ↔ {tail[2]}"
+    if tail[:1] in (["candidate_review"], ["relationship_candidate_review"]) and len(tail) >= 2:
+        return f"候选关系 {tail[1][:8]}"
+    if session_key.startswith("sheet_semantic:"):
+        value = _as_text(session_key.split(":", 1)[1] if ":" in session_key else "")
+        return f"图纸 {value}" if value else "单图语义"
+    if session_key.startswith("pair_compare:"):
+        parts = session_key.split(":")
+        if len(parts) >= 3 and parts[1] and parts[2]:
+            return f"{parts[1]} ↔ {parts[2]}"
+        return "跨图尺寸"
+    if session_key.startswith("candidate_review:"):
+        value = _as_text(session_key.split(":", 1)[1] if ":" in session_key else "")
+        return f"候选关系 {value[:8]}" if value else "候选关系复核"
+
+    sheets = re.findall(r"[A-Z]{1,2}\d{3,4}[A-Z]?", _as_text(getattr(row, "message", None)))
+    if len(sheets) >= 2:
+        return f"{sheets[0]} ↔ {sheets[1]}"
+    if len(sheets) == 1:
+        return f"图纸 {sheets[0]}"
+    return "副审任务"
+
+
+def _resolve_worker_name(row: AuditRunEvent, skill_id: str) -> str:
+    if skill_id in _WORKER_NAME_LABELS:
+        return _WORKER_NAME_LABELS[skill_id]
+    agent_name = _as_text(getattr(row, "agent_name", None))
+    if not agent_name:
+        return "副审"
+    return agent_name[:-5] if agent_name.endswith("Agent") else agent_name
+
+
+def _resolve_skill_label(skill_id: str) -> str:
+    return _WORKER_SKILL_LABELS.get(skill_id, "通用复核 Skill")
+
+
+def _resolve_worker_current_action(row: AuditRunEvent, meta: Dict[str, Any], skill_id: str, task_title: str) -> str:
+    event_kind = _as_text(getattr(row, "event_kind", None))
+    raw_message = _as_text(getattr(row, "message", None))
+    turn_kind = _as_text(meta.get("turn_kind"))
+
+    if event_kind == "raw_output_saved":
+        return "已收束并保存输出"
+    if event_kind == "output_validation_failed":
+        return "输出格式待整理"
+    if event_kind == "output_repair_started":
+        return "正在整理输出格式"
+    if event_kind == "output_repair_succeeded":
+        return "已整理成标准结果"
+    if event_kind == "runner_turn_deferred":
+        return "等待重试或主审介入"
+    if event_kind == "runner_session_failed":
+        return "执行失败，等待重试"
+    if event_kind == "runner_turn_cancelled":
+        return "已被人工中断"
+
+    if event_kind == "runner_broadcast":
+        if skill_id == "elevation_consistency":
+            if "图纸" in task_title:
+                return "正在抽取单图标高语义"
+            if "↔" in task_title:
+                return "正在比对跨图尺寸关系"
+            return "正在推进标高复核"
+        if skill_id == "spatial_consistency":
+            return "正在比对跨图空间关系"
+        if skill_id == "node_host_binding":
+            return "正在复核节点归属"
+        if skill_id == "index_reference":
+            return "正在核对索引引用"
+        if skill_id == "material_semantic_consistency":
+            return "正在核对材料语义"
+    if event_kind == "runner_turn_started":
+        if turn_kind in {"dimension_sheet_semantic", "sheet_semantic"}:
+            return "准备提取单图标高语义"
+        if turn_kind in {"dimension_pair_compare", "pair_compare"}:
+            return "准备执行跨图尺寸对比"
+        if turn_kind in {"relationship_candidate_review", "candidate_review"}:
+            return "准备复核候选关系"
+        return "已启动本轮技能执行"
+    if raw_message and "已通过 Runner 发起一次" not in raw_message:
+        return raw_message
+    return "正在执行副审任务"
+
+
+def _build_action_entry(row: AuditRunEvent, meta: Dict[str, Any], skill_id: str, task_title: str) -> Dict[str, object]:
+    event_kind = _as_text(getattr(row, "event_kind", None))
+    return {
+        "at": row.created_at.isoformat() if row.created_at else None,
+        "label": _MEANINGFUL_ACTION_LABELS.get(event_kind, "现场更新"),
+        "text": _resolve_worker_current_action(row, meta, skill_id, task_title),
+    }
+
+
+def _build_worker_context(meta: Dict[str, Any], session_key: str) -> Dict[str, Optional[str]]:
+    source_sheet_no = _as_text(meta.get("source_sheet_no") or meta.get("candidate_source_sheet_no")) or None
+    target_sheet_no = _as_text(meta.get("target_sheet_no") or meta.get("candidate_target_sheet_no")) or None
+    sheet_no = _as_text(meta.get("sheet_no")) or None
+
+    tail = _extract_session_tail(session_key)
+    if not sheet_no and tail[:1] in (["sheet_semantic"], ["dimension_sheet_semantic"]) and len(tail) >= 2:
+        sheet_no = tail[1]
+    if not source_sheet_no and not target_sheet_no and tail[:1] in (["pair_compare"], ["dimension_pair_compare"]) and len(tail) >= 3:
+        source_sheet_no = tail[1] or None
+        target_sheet_no = tail[2] or None
+
+    return {
+        "source_sheet_no": source_sheet_no,
+        "target_sheet_no": target_sheet_no,
+        "sheet_no": sheet_no,
+    }
 
 
 def _set_running(project_id: str) -> bool:
@@ -517,6 +787,187 @@ def enrich_snapshot_from_latest_event(
     if stage_title:
         merged["current_step"] = stage_title
     return merged
+
+
+def build_ui_runtime_snapshot(
+    project_id: str,
+    audit_version: Optional[int],
+    snapshot: Dict[str, object],
+    *,
+    total_issues: int,
+    db,
+) -> Dict[str, object]:
+    if audit_version is None:
+        chief_action = _as_text(snapshot.get("current_step")) or "主审等待启动"
+        return {
+            "chief": {
+                "title": "主审",
+                "current_action": chief_action,
+                "summary": "主审尚未派发副审任务。",
+                "assigned_task_count": 0,
+                "active_worker_count": 0,
+                "completed_worker_count": 0,
+                "blocked_worker_count": 0,
+                "queued_task_count": 0,
+                "issue_count": int(total_issues or 0),
+                "updated_at": None,
+            },
+            "worker_sessions": [],
+            "recent_completed": [],
+        }
+
+    rows = (
+        db.query(AuditRunEvent)
+        .filter(
+            AuditRunEvent.project_id == project_id,
+            AuditRunEvent.audit_version == audit_version,
+        )
+        .order_by(AuditRunEvent.created_at.asc(), AuditRunEvent.id.asc())
+        .all()
+    )
+
+    chief_rows: List[AuditRunEvent] = []
+    worker_sessions: Dict[str, Dict[str, object]] = {}
+
+    for row in rows:
+        meta = _parse_event_meta(row)
+        if _is_chief_event(row, meta):
+            chief_rows.append(row)
+            continue
+
+        event_kind = _as_text(getattr(row, "event_kind", None))
+        if event_kind in _RAW_PROCESS_EVENT_KINDS:
+            continue
+
+        session_key = _extract_session_key(row, meta)
+        if not session_key:
+            continue
+
+        skill_id = _resolve_skill_id(row, meta)
+        task_title = _extract_task_title(row, meta, session_key)
+        state = worker_sessions.get(session_key)
+        if state is None:
+            state = {
+                "session_key": session_key,
+                "worker_name": _resolve_worker_name(row, skill_id),
+                "skill_id": skill_id or None,
+                "skill_label": _resolve_skill_label(skill_id),
+                "task_title": task_title,
+                "current_action": _resolve_worker_current_action(row, meta, skill_id, task_title),
+                "status": "active",
+                "updated_at": row.created_at.isoformat() if row.created_at else None,
+                "context": _build_worker_context(meta, session_key),
+                "recent_actions": [],
+                "_last_event_id": row.id,
+            }
+            worker_sessions[session_key] = state
+
+        if skill_id and not state.get("skill_id"):
+            state["skill_id"] = skill_id
+            state["skill_label"] = _resolve_skill_label(skill_id)
+            state["worker_name"] = _resolve_worker_name(row, skill_id)
+        if task_title and state.get("task_title") == "副审任务":
+            state["task_title"] = task_title
+
+        current_action = _resolve_worker_current_action(row, meta, skill_id, task_title)
+        state["current_action"] = current_action
+        state["updated_at"] = row.created_at.isoformat() if row.created_at else None
+        state["context"] = _build_worker_context(meta, session_key)
+        state["_last_event_id"] = row.id
+
+        if event_kind in _WORKER_COMPLETED_EVENT_KINDS:
+            state["status"] = "completed"
+        elif event_kind in _WORKER_BLOCKED_EVENT_KINDS:
+            state["status"] = "blocked"
+        else:
+            state["status"] = "active"
+
+        action = _build_action_entry(row, meta, skill_id, task_title)
+        recent_actions = state.setdefault("recent_actions", [])
+        assert isinstance(recent_actions, list)
+        recent_actions.append(action)
+        state["recent_actions"] = recent_actions[-3:]
+
+    worker_items = sorted(
+        worker_sessions.values(),
+        key=lambda item: (
+            _as_text(item.get("updated_at")),
+            int(item.get("_last_event_id") or 0),
+        ),
+        reverse=True,
+    )
+    active_items = [item for item in worker_items if item.get("status") in {"active", "blocked"}]
+    completed_items = [item for item in worker_items if item.get("status") == "completed"][:6]
+
+    assigned_task_count = (
+        db.query(AuditTask)
+        .filter(
+            AuditTask.project_id == project_id,
+            AuditTask.audit_version == audit_version,
+        )
+        .count()
+    )
+    if assigned_task_count == 0:
+        assigned_task_count = _parse_count_from_event_messages(chief_rows, r"生成\s*(\d+)\s*张副审任务卡")
+
+    hypothesis_count = _parse_count_from_event_messages(chief_rows, r"生成\s*(\d+)\s*条待核对怀疑卡")
+    active_count = sum(1 for item in worker_items if item.get("status") == "active")
+    completed_count = sum(1 for item in worker_items if item.get("status") == "completed")
+    blocked_count = sum(1 for item in worker_items if item.get("status") == "blocked")
+    queued_count = max(0, int(assigned_task_count or 0) - active_count - completed_count - blocked_count)
+
+    latest_chief = chief_rows[-1] if chief_rows else None
+    chief_current_action = _as_text(getattr(latest_chief, "message", None)) or _as_text(snapshot.get("current_step")) or "主审正在推进审图"
+    summary_parts: List[str] = []
+    if hypothesis_count > 0:
+        summary_parts.append(f"已形成 {hypothesis_count} 条待核对怀疑卡")
+    if assigned_task_count > 0:
+        summary_parts.append(f"已派发 {assigned_task_count} 张副审任务卡")
+    if active_count > 0:
+        summary_parts.append(f"{active_count} 个副审进行中")
+    if completed_count > 0:
+        summary_parts.append(f"{completed_count} 个副审已完成")
+    if blocked_count > 0:
+        summary_parts.append(f"{blocked_count} 个副审待处理")
+    if queued_count > 0:
+        summary_parts.append(f"{queued_count} 张任务待启动")
+
+    chief_updated_at = latest_chief.created_at.isoformat() if latest_chief and latest_chief.created_at else snapshot.get("started_at")
+
+    def _serialize_worker(item: Dict[str, object]) -> Dict[str, object]:
+        return {
+            "session_key": item.get("session_key"),
+            "worker_name": item.get("worker_name"),
+            "skill_id": item.get("skill_id"),
+            "skill_label": item.get("skill_label"),
+            "task_title": item.get("task_title"),
+            "current_action": item.get("current_action"),
+            "status": item.get("status"),
+            "updated_at": item.get("updated_at"),
+            "context": item.get("context") or {
+                "source_sheet_no": None,
+                "target_sheet_no": None,
+                "sheet_no": None,
+            },
+            "recent_actions": item.get("recent_actions") or [],
+        }
+
+    return {
+        "chief": {
+            "title": "主审",
+            "current_action": chief_current_action,
+            "summary": "，".join(summary_parts) if summary_parts else "主审正在组织本轮副审调度。",
+            "assigned_task_count": int(assigned_task_count or 0),
+            "active_worker_count": active_count,
+            "completed_worker_count": completed_count,
+            "blocked_worker_count": blocked_count,
+            "queued_task_count": queued_count,
+            "issue_count": int(total_issues or 0),
+            "updated_at": chief_updated_at,
+        },
+        "worker_sessions": [_serialize_worker(item) for item in active_items],
+        "recent_completed": [_serialize_worker(item) for item in completed_items],
+    }
 
 
 def get_audit_started_at_from_events(

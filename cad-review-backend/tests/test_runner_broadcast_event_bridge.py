@@ -132,3 +132,5 @@ def test_runner_broadcast_is_written_as_user_facing_event(monkeypatch, tmp_path)
     )
     assert "正在复核第 15 组候选关系" in broadcast_event["message"]
     assert broadcast_event["meta"]["stream_layer"] == "user_facing"
+    assert broadcast_event["meta"]["turn_kind"] == "relationship_candidate_review"
+    assert broadcast_event["meta"]["session_key"] == "proj-runner-broadcast-event:1:relationship_review_agent"

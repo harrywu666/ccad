@@ -22,7 +22,7 @@ const buildStatus = (overrides: Partial<AuditStatus> = {}): AuditStatus => ({
   project_id: 'proj-1',
   status: 'auditing',
   audit_version: 7,
-  current_step: '索引核对（5任务）',
+  current_step: '主审派发副审任务',
   progress: 35,
   total_issues: 3,
   run_status: 'running',
@@ -32,13 +32,107 @@ const buildStatus = (overrides: Partial<AuditStatus> = {}): AuditStatus => ({
   finished_at: null,
   scope_mode: null,
   scope_summary: null,
+  ui_runtime: {
+    chief: {
+      title: '主审',
+      current_action: '主审 Agent 已派发 10 张副审任务卡',
+      summary: '已派发 10 张副审任务卡，当前 2 个副审进行中，1 个已完成。',
+      assigned_task_count: 10,
+      active_worker_count: 2,
+      completed_worker_count: 1,
+      blocked_worker_count: 0,
+      queued_task_count: 7,
+      issue_count: 3,
+      updated_at: '2026-03-10T10:03:00',
+    },
+    worker_sessions: [
+      {
+        session_key: 'worker_skill:elevation_consistency:A200:SELF',
+        worker_name: '标高副审',
+        skill_id: 'elevation_consistency',
+        skill_label: '标高一致性 Skill',
+        task_title: '图纸 A200',
+        current_action: '正在抽取单图标高语义',
+        status: 'active',
+        updated_at: '2026-03-10T10:03:42',
+        context: { sheet_no: 'A200' },
+        recent_actions: [
+          { at: '2026-03-10T10:03:02', label: '调用 Skill', text: '已启动本轮技能执行' },
+          { at: '2026-03-10T10:03:42', label: '现场播报', text: '正在抽取单图标高语义' },
+        ],
+      },
+      {
+        session_key: 'worker_skill:node_host_binding:A101:A401',
+        worker_name: '节点归属副审',
+        skill_id: 'node_host_binding',
+        skill_label: '节点归属 Skill',
+        task_title: 'A101 ↔ A401',
+        current_action: '等待重试或主审介入',
+        status: 'blocked',
+        updated_at: '2026-03-10T10:04:12',
+        context: { source_sheet_no: 'A101', target_sheet_no: 'A401' },
+        recent_actions: [
+          { at: '2026-03-10T10:04:12', label: '等待重试', text: '等待重试或主审介入' },
+        ],
+      },
+    ],
+    recent_completed: [
+      {
+        session_key: 'worker_skill:index_reference:A101:A402',
+        worker_name: '索引副审',
+        skill_id: 'index_reference',
+        skill_label: '索引引用 Skill',
+        task_title: 'A101 ↔ A402',
+        current_action: '已收束并保存输出',
+        status: 'completed',
+        updated_at: '2026-03-10T10:02:10',
+        context: { source_sheet_no: 'A101', target_sheet_no: 'A402' },
+        recent_actions: [
+          { at: '2026-03-10T10:02:10', label: '保存输出', text: '已收束并保存输出' },
+        ],
+      },
+    ],
+  },
   ...overrides,
 });
 
 describe('buildAuditProgressViewModel', () => {
-  it('maps chief summary and worker board from runtime events', () => {
+  it('maps chief card and worker wall from ui runtime snapshot', () => {
     const viewModel = buildAuditProgressViewModel({
       auditStatus: buildStatus(),
+      providerLabel: 'Kimi SDK',
+      events: [],
+    });
+
+    expect(viewModel.chief.assignedTaskCount).toBe(10);
+    expect(viewModel.chief.activeWorkerCount).toBe(2);
+    expect(viewModel.workerWall.active).toHaveLength(2);
+    expect(viewModel.workerWall.active[0]?.workerName).toBe('标高副审');
+    expect(viewModel.workerWall.active[0]?.recentActions[1]?.text).toContain('抽取单图标高语义');
+    expect(viewModel.workerWall.recentCompleted).toHaveLength(1);
+    expect(viewModel.workerWall.recentCompleted[0]?.status).toBe('completed');
+  });
+
+  it('builds pill copy from chief card state', () => {
+    const viewModel = buildAuditProgressViewModel({
+      auditStatus: buildStatus({ progress: 45, total_issues: 6 }),
+      providerLabel: 'Kimi SDK',
+      events: [],
+    });
+
+    expect(viewModel.pill.label).toContain('主审');
+    expect(viewModel.pill.label).toContain('45%');
+    expect(viewModel.pill.issueCount).toBe(3);
+  });
+
+  it('falls back to event-derived runtime when ui runtime is missing', () => {
+    const viewModel = buildAuditProgressViewModel({
+      auditStatus: buildStatus({
+        current_step: '规划审核任务图',
+        progress: 18,
+        total_issues: 0,
+        ui_runtime: null,
+      }),
       providerLabel: 'Kimi SDK',
       events: [
         buildEvent({
@@ -46,7 +140,7 @@ describe('buildAuditProgressViewModel', () => {
           step_key: 'task_planning',
           agent_key: 'chief_review_agent',
           agent_name: '主审 Agent',
-          event_kind: 'phase_progress',
+          event_kind: 'phase_completed',
           message: '主审 Agent 已生成 12 张副审任务卡',
         }),
         buildEvent({
@@ -54,107 +148,22 @@ describe('buildAuditProgressViewModel', () => {
           step_key: 'dimension',
           agent_key: 'dimension_review_agent',
           agent_name: '尺寸审查Agent',
-          event_kind: 'runner_turn_started',
-          message: '尺寸审查Agent 已通过 Runner 发起一次流式调用',
-          meta: {
-            actor_role: 'worker',
-            session_key: 'worker_skill:elevation_consistency:A200:SELF',
-            skill_id: 'elevation_consistency',
-          },
-        }),
-        buildEvent({
-          id: 3,
-          step_key: 'dimension',
-          agent_key: 'dimension_review_agent',
-          agent_name: '尺寸审查Agent',
-          event_kind: 'raw_output_saved',
-          message: '尺寸审查Agent 的原始输出已保存，便于后续排查',
-          meta: {
-            actor_role: 'worker',
-            session_key: 'worker_skill:elevation_consistency:A200:SELF',
-            skill_id: 'elevation_consistency',
-            artifact_path: '/tmp/raw/proj_1__7__dimension_review_agent__dimension_sheet_semantic__proj_1_7_dimension_review_agent_sheet_semantic_A200__20260312_000000.json',
-          },
-        }),
-        buildEvent({ id: 6, step_key: 'prepare', event_kind: 'phase_completed', progress_hint: 8 }),
-        buildEvent({ id: 4, step_key: 'context', event_kind: 'phase_completed', progress_hint: 11 }),
-        buildEvent({
-          id: 5,
-          step_key: 'relationship_discovery',
           event_kind: 'runner_broadcast',
-          agent_name: '关系审查Agent',
-          message: '关系审查Agent 正在复核第 15 组候选关系',
+          message: '尺寸审查Agent 正在抽取 A200 的单图标高语义',
+          meta: {
+            actor_role: 'worker',
+            turn_kind: 'dimension_sheet_semantic',
+            session_key: 'proj-1:7:dimension_review_agent:sheet_semantic:A200',
+            skill_id: 'elevation_consistency',
+          },
         }),
       ],
     });
 
-    expect(viewModel.pipeline[0].title).toBe('主审准备');
-    expect(viewModel.pipeline[0].state).toBe('complete');
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'worker_execution')?.state).toBe('current');
-    expect(viewModel.chief.plannedTaskCount).toBe(12);
-    expect(viewModel.workerBoard.completed).toHaveLength(1);
-    expect(viewModel.workerBoard.completed[0]?.title).toBe('图纸 A200');
-    expect(viewModel.workerBoard.completed[0]?.skillLabel).toBe('标高一致性 Skill');
-    expect(viewModel.activeAgentName).toBe('关系审查Agent');
-    expect(viewModel.activeAgentMessage).toContain('第 15 组候选关系');
-    expect(viewModel.totalIssues).toBe(3);
-  });
-
-  it('builds pill copy from the same shared state', () => {
-    const viewModel = buildAuditProgressViewModel({
-      auditStatus: buildStatus({ progress: 45, total_issues: 6 }),
-      providerLabel: 'Kimi SDK',
-      events: [
-        buildEvent({
-          id: 9,
-          step_key: 'dimension',
-          event_kind: 'runner_broadcast',
-          agent_name: '尺寸审查Agent',
-          message: '尺寸审查Agent 正在比对第 4 组尺寸关系',
-        }),
-      ],
-    });
-
-    expect(viewModel.pill.label).toContain('尺寸审查Agent');
-    expect(viewModel.pill.label).toContain('45%');
-    expect(viewModel.pill.issueCount).toBe(6);
-  });
-
-  it('falls back to audit status copy when no runner broadcast exists', () => {
-    const viewModel = buildAuditProgressViewModel({
-      auditStatus: buildStatus({
-        current_step: '规划审核任务图',
-        progress: 18,
-        total_issues: 0,
-      }),
-      providerLabel: 'Kimi SDK',
-      events: [],
-    });
-
-    expect(viewModel.headline).toBe('主审派工');
+    expect(viewModel.chief.assignedTaskCount).toBe(12);
+    expect(viewModel.workerWall.active).toHaveLength(1);
+    expect(viewModel.workerWall.active[0]?.taskTitle).toBe('图纸 A200');
+    expect(viewModel.workerWall.active[0]?.currentAction).toBe('正在抽取单图标高语义');
     expect(viewModel.supportingText).toBe('当前阶段：规划审核任务图');
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'chief_prepare')?.state).toBe('current');
-  });
-
-  it('marks earlier stages complete when current stage has moved forward', () => {
-    const viewModel = buildAuditProgressViewModel({
-      auditStatus: buildStatus({
-        current_step: '尺寸核对（22项检查）',
-        progress: 49,
-      }),
-      providerLabel: 'Kimi SDK',
-      events: [
-        buildEvent({
-          id: 20,
-          step_key: 'index',
-          event_kind: 'phase_completed',
-          progress_hint: 45,
-          message: '索引审查Agent 已完成 AI 复核',
-        }),
-      ],
-    });
-
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'chief_prepare')?.state).toBe('complete');
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'worker_execution')?.state).toBe('current');
   });
 });

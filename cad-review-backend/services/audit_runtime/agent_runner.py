@@ -636,7 +636,10 @@ class ProjectAuditAgentRunner:
             event_kind="runner_broadcast",
             message=message,
             meta={
+                **(request.meta or {}),
                 "state": state,
+                "turn_kind": request.turn_kind,
+                "session_key": subsession.session_key,
                 "stream_layer": "user_facing",
                 "provider_name": self._provider_name(),
                 **(meta or {}),

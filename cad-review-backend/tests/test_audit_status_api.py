@@ -209,3 +209,195 @@ def test_audit_status_prefers_latest_worker_stage_title_over_old_run_step(monkey
     assert payload["current_step"] == "标高一致性 Skill 执行双图对比"
     assert payload["task_stage"] == "worker_pair_compare"
     assert payload["skill_id"] == "elevation_consistency"
+
+
+def test_audit_status_includes_ui_runtime_snapshot(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    now = datetime.now()
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-status-ui-runtime", name="UI Runtime Status", status="auditing"))
+        db.add(
+            models.AuditRun(
+                project_id="proj-status-ui-runtime",
+                audit_version=9,
+                status="running",
+                current_step="主审派发副审任务",
+                progress=41,
+                total_issues=4,
+                provider_mode="sdk",
+                started_at=now - timedelta(minutes=8),
+            )
+        )
+        db.add_all(
+            [
+                models.AuditRunEvent(
+                    project_id="proj-status-ui-runtime",
+                    audit_version=9,
+                    level="success",
+                    step_key="chief_prompt",
+                    agent_key="chief_review_agent",
+                    agent_name="主审 Agent",
+                    event_kind="phase_completed",
+                    progress_hint=12,
+                    message="主审 Agent 已装配本轮审图资源，生成 18 条待核对怀疑卡",
+                    created_at=now - timedelta(minutes=6),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-ui-runtime",
+                    audit_version=9,
+                    level="success",
+                    step_key="task_planning",
+                    agent_key="chief_review_agent",
+                    agent_name="主审 Agent",
+                    event_kind="phase_completed",
+                    progress_hint=18,
+                    message="主审 Agent 已生成 10 张副审任务卡",
+                    created_at=now - timedelta(minutes=5, seconds=30),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-ui-runtime",
+                    audit_version=9,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="runner_turn_started",
+                    progress_hint=35,
+                    message="尺寸审查Agent 已通过 Runner 发起一次流式调用",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "turn_kind": "dimension_sheet_semantic",
+                            "session_key": "proj-status-ui-runtime:9:dimension_review_agent:sheet_semantic:A101",
+                            "skill_id": "elevation_consistency",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=4),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-ui-runtime",
+                    audit_version=9,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="provider_stream_delta",
+                    progress_hint=36,
+                    message='{"raw":"ignored"}',
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "turn_kind": "dimension_sheet_semantic",
+                            "session_key": "proj-status-ui-runtime:9:dimension_review_agent:sheet_semantic:A101",
+                            "skill_id": "elevation_consistency",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=3, seconds=50),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-ui-runtime",
+                    audit_version=9,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="runner_broadcast",
+                    progress_hint=37,
+                    message="尺寸审查Agent 正在抽取 A101 的单图标高语义",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "turn_kind": "dimension_sheet_semantic",
+                            "session_key": "proj-status-ui-runtime:9:dimension_review_agent:sheet_semantic:A101",
+                            "skill_id": "elevation_consistency",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=3, seconds=45),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-ui-runtime",
+                    audit_version=9,
+                    level="success",
+                    step_key="index",
+                    agent_key="index_review_agent",
+                    agent_name="索引审查Agent",
+                    event_kind="raw_output_saved",
+                    progress_hint=39,
+                    message="索引审查Agent 的原始输出已保存，便于后续排查",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "turn_kind": "dimension_pair_compare",
+                            "session_key": "proj-status-ui-runtime:9:index_review_agent:pair_compare:A201:A401",
+                            "skill_id": "index_reference",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=2),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-ui-runtime",
+                    audit_version=9,
+                    level="warning",
+                    step_key="relationship_discovery",
+                    agent_key="relationship_review_agent",
+                    agent_name="关系审查Agent",
+                    event_kind="runner_turn_deferred",
+                    progress_hint=40,
+                    message="关系审查Agent 这一步暂时还没拿到稳定结果，Runner 先记下并继续处理后续步骤",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "turn_kind": "relationship_candidate_review",
+                            "session_key": "proj-status-ui-runtime:9:relationship_review_agent:candidate_review:7a2185fd3cdc",
+                            "skill_id": "node_host_binding",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=1),
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.get("/api/projects/proj-status-ui-runtime/audit/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    ui_runtime = payload["ui_runtime"]
+    assert ui_runtime["chief"]["title"] == "主审"
+    assert ui_runtime["chief"]["assigned_task_count"] == 10
+    assert ui_runtime["chief"]["active_worker_count"] == 1
+    assert ui_runtime["chief"]["completed_worker_count"] == 1
+    assert ui_runtime["chief"]["blocked_worker_count"] == 1
+    assert ui_runtime["chief"]["queued_task_count"] == 7
+    assert ui_runtime["chief"]["issue_count"] == 4
+
+    worker_sessions = ui_runtime["worker_sessions"]
+    assert len(worker_sessions) == 2
+    first_active = next(item for item in worker_sessions if item["status"] == "active")
+    assert first_active["session_key"] == "proj-status-ui-runtime:9:dimension_review_agent:sheet_semantic:A101"
+    assert first_active["worker_name"] == "标高副审"
+    assert first_active["skill_label"] == "标高一致性 Skill"
+    assert first_active["task_title"] == "图纸 A101"
+    assert first_active["current_action"] == "正在抽取单图标高语义"
+    assert len(first_active["recent_actions"]) == 2
+    assert all(action["text"] != '{"raw":"ignored"}' for action in first_active["recent_actions"])
+
+    blocked = next(item for item in worker_sessions if item["status"] == "blocked")
+    assert blocked["task_title"] == "候选关系 7a2185fd"
+    assert blocked["current_action"] == "等待重试或主审介入"
+
+    recent_completed = ui_runtime["recent_completed"]
+    assert len(recent_completed) == 1
+    assert recent_completed[0]["session_key"] == "proj-status-ui-runtime:9:index_review_agent:pair_compare:A201:A401"
+    assert recent_completed[0]["status"] == "completed"
+    assert recent_completed[0]["task_title"] == "A201 ↔ A401"

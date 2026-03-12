@@ -172,6 +172,53 @@ export interface AuditStatus {
   finished_at?: string | null;
   scope_mode?: 'full' | 'partial' | null;
   scope_summary?: string | null;
+  ui_runtime?: AuditUiRuntime | null;
+}
+
+export interface AuditUiRuntimeAction {
+  at?: string | null;
+  label: string;
+  text: string;
+}
+
+export interface AuditUiRuntimeContext {
+  source_sheet_no?: string | null;
+  target_sheet_no?: string | null;
+  sheet_no?: string | null;
+}
+
+export type AuditUiWorkerStatus = 'active' | 'completed' | 'blocked';
+
+export interface AuditUiRuntimeWorkerSession {
+  session_key: string;
+  worker_name: string;
+  skill_id?: string | null;
+  skill_label: string;
+  task_title: string;
+  current_action: string;
+  status: AuditUiWorkerStatus;
+  updated_at?: string | null;
+  context: AuditUiRuntimeContext;
+  recent_actions: AuditUiRuntimeAction[];
+}
+
+export interface AuditUiRuntimeChief {
+  title: string;
+  current_action: string;
+  summary: string;
+  assigned_task_count: number;
+  active_worker_count: number;
+  completed_worker_count: number;
+  blocked_worker_count: number;
+  queued_task_count: number;
+  issue_count: number;
+  updated_at?: string | null;
+}
+
+export interface AuditUiRuntime {
+  chief: AuditUiRuntimeChief;
+  worker_sessions: AuditUiRuntimeWorkerSession[];
+  recent_completed: AuditUiRuntimeWorkerSession[];
 }
 
 export interface ThreeLineAsset {
