@@ -1,6 +1,6 @@
 """
-Kimi API 服务模块
-提供统一的Kimi API调用接口，支持图片识别和文本处理
+AI 服务模块
+提供统一的多 provider AI 调用接口，支持图片识别和文本处理
 """
 
 import os
@@ -394,10 +394,10 @@ async def call_kimi(
                 )
             except httpx.TimeoutException as exc:
                 if attempt >= max_retries:
-                    raise RuntimeError(f"Kimi API 超时: {exc}") from exc
+                    raise RuntimeError(f"AI API 超时: {exc}") from exc
                 delay = _retry_sleep_seconds(attempt + 1)
                 logger.warning(
-                    "Kimi 请求超时，第 %d 次重试前等待 %.1f 秒",
+                    "AI 请求超时，第 %d 次重试前等待 %.1f 秒",
                     attempt + 1,
                     delay,
                 )
@@ -405,10 +405,10 @@ async def call_kimi(
                 continue
             except httpx.HTTPError as exc:
                 if attempt >= max_retries:
-                    raise RuntimeError(f"Kimi API 网络错误: {exc}") from exc
+                    raise RuntimeError(f"AI API 网络错误: {exc}") from exc
                 delay = _retry_sleep_seconds(attempt + 1)
                 logger.warning(
-                    "Kimi 网络异常，第 %d 次重试前等待 %.1f 秒",
+                    "AI 网络异常，第 %d 次重试前等待 %.1f 秒",
                     attempt + 1,
                     delay,
                 )
@@ -419,11 +419,11 @@ async def call_kimi(
                 break
 
             if not _retryable_status(resp.status_code) or attempt >= max_retries:
-                raise RuntimeError(f"Kimi API 失败 ({resp.status_code}): {resp.text[:300]}")
+                raise RuntimeError(f"AI API 失败 ({resp.status_code}): {resp.text[:300]}")
 
             delay = _retry_sleep_seconds(attempt + 1, resp)
             logger.warning(
-                "Kimi 服务暂时繁忙（%s），第 %d 次重试前等待 %.1f 秒",
+                "AI 服务暂时繁忙（%s），第 %d 次重试前等待 %.1f 秒",
                 resp.status_code,
                 attempt + 1,
                 delay,
@@ -432,7 +432,7 @@ async def call_kimi(
 
     data = resp.json()
     raw = _extract_response_text(provider, data)
-    logger.info("Kimi 响应长度: %d 字符", len(raw))
+    logger.info("AI 响应长度: %d 字符", len(raw))
     return _parse_json(raw)
 
 
@@ -459,6 +459,18 @@ async def call_kimi_stream(
         stream=True,
     )
 
+    async def _read_stream_error_text(resp) -> str:  # noqa: ANN001
+        try:
+            body = await resp.aread()
+        except Exception:
+            return ""
+        if not body:
+            return ""
+        try:
+            return body.decode("utf-8", errors="ignore")
+        except Exception:
+            return ""
+
     async with httpx.AsyncClient(timeout=_http_timeout_config(), trust_env=False) as client:
         for attempt in range(max_retries + 1):
             chunks: List[str] = []
@@ -471,12 +483,12 @@ async def call_kimi_stream(
                     json=payload,
                 ) as resp:
                     if resp.status_code != 200:
+                        text = await _read_stream_error_text(resp)
                         if not _retryable_status(resp.status_code) or attempt >= max_retries:
-                            text = getattr(resp, "text", "") or ""
-                            raise RuntimeError(f"Kimi API 失败 ({resp.status_code}): {text[:300]}")
+                            raise RuntimeError(f"AI API 失败 ({resp.status_code}): {text[:300]}")
                         delay = _retry_sleep_seconds(attempt + 1, resp)
                         logger.warning(
-                            "Kimi 流式服务暂时繁忙（%s），第 %d 次重试前等待 %.1f 秒",
+                            "AI 流式服务暂时繁忙（%s），第 %d 次重试前等待 %.1f 秒",
                             resp.status_code,
                             attempt + 1,
                             delay,
@@ -503,11 +515,11 @@ async def call_kimi_stream(
                         except asyncio.TimeoutError as exc:
                             if attempt >= max_retries:
                                 raise RuntimeError(
-                                    f"Kimi 流式长时间没有新内容（>{idle_timeout:.1f} 秒）"
+                                    f"AI 流式长时间没有新内容（>{idle_timeout:.1f} 秒）"
                                 ) from exc
                             delay = _retry_sleep_seconds(attempt + 1)
                             logger.warning(
-                                "Kimi 流式长时间没有新内容，第 %d 次重试前等待 %.1f 秒",
+                                "AI 流式长时间没有新内容，第 %d 次重试前等待 %.1f 秒",
                                 attempt + 1,
                                 delay,
                             )
@@ -543,16 +555,16 @@ async def call_kimi_stream(
                         continue
 
                 raw = "".join(chunks)
-                logger.info("Kimi 流式响应长度: %d 字符", len(raw))
+                logger.info("AI 流式响应长度: %d 字符", len(raw))
                 return _parse_json(raw)
             except AuditCancellationRequested:
                 raise
             except httpx.TimeoutException as exc:
                 if attempt >= max_retries:
-                    raise RuntimeError(f"Kimi API 超时: {exc}") from exc
+                    raise RuntimeError(f"AI API 超时: {exc}") from exc
                 delay = _retry_sleep_seconds(attempt + 1)
                 logger.warning(
-                    "Kimi 流式请求超时，第 %d 次重试前等待 %.1f 秒",
+                    "AI 流式请求超时，第 %d 次重试前等待 %.1f 秒",
                     attempt + 1,
                     delay,
                 )
@@ -568,10 +580,10 @@ async def call_kimi_stream(
                 await asyncio.sleep(delay)
             except httpx.HTTPError as exc:
                 if attempt >= max_retries:
-                    raise RuntimeError(f"Kimi API 网络错误: {exc}") from exc
+                    raise RuntimeError(f"AI API 网络错误: {exc}") from exc
                 delay = _retry_sleep_seconds(attempt + 1)
                 logger.warning(
-                    "Kimi 流式网络异常，第 %d 次重试前等待 %.1f 秒",
+                    "AI 流式网络异常，第 %d 次重试前等待 %.1f 秒",
                     attempt + 1,
                     delay,
                 )
@@ -586,7 +598,7 @@ async def call_kimi_stream(
                 )
                 await asyncio.sleep(delay)
 
-    raise RuntimeError("Kimi 流式调用失败：超过最大重试次数")
+    raise RuntimeError("AI 流式调用失败：超过最大重试次数")
 
 
 async def async_recognize_catalog(image_path: str) -> list:

@@ -5,8 +5,22 @@ from __future__ import annotations
 from services.audit import index_audit
 from services.audit_runtime.worker_skill_contract import build_worker_skill_result
 from services.audit_runtime.worker_skill_loader import WorkerSkillBundle, load_worker_skill
+from services.audit_runtime.runtime_prompt_assembler import assemble_worker_runtime_prompt
 from services.feedback_runtime_service import load_feedback_runtime_profile
 from services.skill_pack_service import load_runtime_skill_profile
+
+
+def _build_index_review_user_prompt(candidate: dict) -> str:
+    return (
+        "请复核这条索引疑点是否应当保留为审图问题。\n"
+        f"来源图：{candidate['source_sheet_no']}\n"
+        f"目标图：{candidate.get('target_sheet_no') or ''}\n"
+        f"索引编号：{candidate['index_no']}\n"
+        f"疑点类型：{candidate['review_kind']}\n"
+        f"规则判断：{candidate['issue'].description}\n\n"
+        "输出 JSON 对象，字段固定为：\n"
+        '{"decision":"confirm|reject|uncertain","confidence":0.0,"reason":"","severity_override":""}'
+    )
 
 
 async def run_index_reference_skill(
@@ -41,7 +55,6 @@ async def run_index_reference_skill(
     skill_profile = load_runtime_skill_profile(
         db,
         skill_type="index",
-        stage_key="index_visual_review",
     )
     feedback_profile = load_feedback_runtime_profile(db, issue_type="index")
     reviewable_candidates = [
@@ -63,6 +76,17 @@ async def run_index_reference_skill(
                 audit_version=audit_version or None,
                 skill_profile=skill_profile,
                 feedback_profile=feedback_profile,
+                prompt_builder=lambda candidate: assemble_worker_runtime_prompt(
+                    worker_kind="index_reference",
+                    task_context={
+                        "source_sheet_no": candidate["source_sheet_no"],
+                        "target_sheet_no": candidate.get("target_sheet_no") or "",
+                        "index_no": candidate["index_no"],
+                        "issue_kind": candidate["review_kind"],
+                        "issue_description": candidate["issue"].description,
+                    },
+                    user_prompt_override=_build_index_review_user_prompt(candidate),
+                ),
             )
         )
     else:
@@ -109,6 +133,7 @@ async def run_index_reference_skill(
         evidence=evidence,
         escalate_to_chief=(status == "needs_review"),
         meta={
+            "prompt_source": "agent_skill",
             "sheet_no": first["sheet_no"],
             "location": first["location"],
             "severity": first["severity"],

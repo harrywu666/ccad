@@ -102,15 +102,24 @@ def test_execute_pipeline_records_plain_language_events(monkeypatch, tmp_path):
         db.close()
 
     messages = [event.message for event in events]
-    assert "总控规划Agent 正在整理这次审图需要的基础数据" in messages
-    assert "总控规划Agent 已整理好基础数据，共 2 张图纸可进入审图" in messages
-    assert "总控规划Agent 已整理好图纸上下文，当前有 2 张图纸可继续分析" in messages
-    assert "关系审查Agent 开始分析跨图关系，正在找出值得继续核对的图纸关联" in messages
-    assert any("总控规划Agent 暂时没有规划出可执行任务" in message for message in messages)
+    assert "主审 Agent 正在整理这次审图需要的基础数据" in messages
+    assert "主审 Agent 已整理好基础数据，共 2 张图纸可进入审图" in messages
+    assert "主审 Agent 已整理好图纸上下文，当前有 2 张图纸可继续分析" in messages
+    assert "主审 Agent 已生成 0 张副审任务卡" in messages
+    assert any("主审 Agent 已整理完成审核报告" in message for message in messages)
     assert all(event.agent_key for event in events)
     assert all(event.agent_name for event in events)
     assert all(event.event_kind for event in events)
     assert all(event.progress_hint is not None for event in events)
-    assert events[0].agent_key == "master_planner_agent"
-    assert events[0].agent_name == "总控规划Agent"
+    assert events[0].agent_key == "chief_review_agent"
+    assert events[0].agent_name == "主审 Agent"
     assert events[0].event_kind == "phase_started"
+    metas = []
+    for event in events:
+        if event.meta_json:
+            import json
+
+            metas.append(json.loads(event.meta_json))
+    assert any(meta.get("pipeline_mode") == "chief_review" for meta in metas)
+    assert any(meta.get("planner_source") == "chief_agent" for meta in metas)
+    assert any(meta.get("task_stage") == "worker_task_planning" for meta in metas)

@@ -191,7 +191,35 @@ def test_update_chief_review_memory_learns_false_positive_and_keeps_escalation()
         escalations=[{"hypothesis_id": "hyp-escalated", "reasons": ["needs_review"]}],
     )
 
-    assert [item["id"] for item in updated["active_hypotheses"]] == ["hyp-escalated"]
-    assert updated["active_hypotheses"][0]["context"]["needs_chief_review"] is True
+    assert updated["active_hypotheses"] == []
+    assert [item["id"] for item in updated["chief_recheck_queue"]] == ["hyp-escalated"]
+    assert updated["chief_recheck_queue"][0]["context"]["needs_chief_review"] is True
     assert updated["false_positive_hints"][0]["worker_kind"] == "index_reference"
     assert updated["resolved_hypotheses"][0]["worker_kind"] == "elevation_consistency"
+
+
+def test_build_chief_sheet_graph_passes_semantic_runner(monkeypatch):
+    orchestrator = importlib.import_module("services.audit_runtime.orchestrator")
+    sheet_graph_builder = importlib.import_module("services.audit_runtime.sheet_graph_builder")
+
+    captured = {}
+
+    def fake_build_sheet_graph(*, sheet_contexts, sheet_edges, llm_runner=None):  # noqa: ANN001
+        captured["llm_runner"] = llm_runner
+        return SimpleNamespace(
+            sheet_types={"A1-01": "plan"},
+            linked_targets={},
+            node_hosts={},
+        )
+
+    monkeypatch.setattr(sheet_graph_builder, "build_sheet_graph", fake_build_sheet_graph)
+
+    graph = orchestrator._build_chief_sheet_graph(
+        project_id="proj-chief",
+        audit_version=21,
+        sheet_contexts=[],
+        sheet_edges=[],
+    )
+
+    assert graph.sheet_types["A1-01"] == "plan"
+    assert callable(captured["llm_runner"])

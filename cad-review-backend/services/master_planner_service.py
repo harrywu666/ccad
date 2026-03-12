@@ -19,7 +19,8 @@ from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
 from services.audit_runtime.providers.factory import build_runner_provider, normalize_provider_mode
 from services.audit_runtime.runner_types import RunnerTurnRequest
 from services.audit_runtime.cancel_registry import is_cancel_requested, AuditCancellationRequested
-from services.kimi_service import call_kimi, call_kimi_stream
+from services.audit_runtime.stream_policy import audit_stream_enabled
+from services.ai_service import call_kimi, call_kimi_stream
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +46,7 @@ def _env_float(name: str, default: float) -> float:
 
 
 def _stream_enabled() -> bool:
-    raw = os.getenv("AUDIT_KIMI_STREAM_ENABLED")
-    if raw is None:
-        return True
-    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+    return audit_stream_enabled(default=False)
 
 
 def _norm_sheet_no(value: Optional[str]) -> str:
@@ -122,13 +120,20 @@ def _run_async(coro):  # noqa: ANN001
 
 
 def _resolve_master_planner_prompts(payload: Dict[str, Any]) -> Dict[str, str]:
-    """通过 ai_prompt_service 解析 master_task_planner 提示词。"""
-    from services.ai_prompt_service import resolve_stage_prompts
+    """兼容层：旧总控规划只允许读取 legacy 模板，不再承担新主路主脑职责。"""
+    from services.audit_runtime.runtime_prompt_assembler import assemble_legacy_stage_prompt
 
-    return resolve_stage_prompts(
-        "master_task_planner",
-        {"payload_json": json.dumps(payload, ensure_ascii=False)},
+    bundle = assemble_legacy_stage_prompt(
+        stage_key="master_task_planner",
+        variables={"payload_json": json.dumps(payload, ensure_ascii=False)},
     )
+    return {
+        "system_prompt": bundle.system_prompt,
+        "user_prompt": bundle.user_prompt,
+        "prompt_source": str(bundle.meta.get("prompt_source") or "legacy_stage_template"),
+        "compat_mode": str(bundle.meta.get("compat_mode") or "legacy_template_compat"),
+        "planner_source": "legacy_stage_planner",
+    }
 
 
 def _append_planner_runtime_event(
@@ -401,7 +406,13 @@ def plan_with_master_llm(
                 user_prompt=prompts["user_prompt"],
                 temperature=0.0,
                 max_tokens=max_tokens,
-                meta={"source": "master_planner_stream"},
+                meta={
+                    "source": "master_planner_stream",
+                    "planner_source": prompts.get("planner_source") or "legacy_stage_planner",
+                    "prompt_source": prompts.get("prompt_source") or "legacy_stage_template",
+                    "compat_mode": prompts.get("compat_mode") or "legacy_template_compat",
+                    "task_stage": "legacy_task_planning",
+                },
             )
             turn_result = _run_async(
                 runner.run_stream(
@@ -422,7 +433,13 @@ def plan_with_master_llm(
                 user_prompt=prompts["user_prompt"],
                 temperature=0.0,
                 max_tokens=max_tokens,
-                meta={"source": "master_planner_once"},
+                meta={
+                    "source": "master_planner_once",
+                    "planner_source": prompts.get("planner_source") or "legacy_stage_planner",
+                    "prompt_source": prompts.get("prompt_source") or "legacy_stage_template",
+                    "compat_mode": prompts.get("compat_mode") or "legacy_template_compat",
+                    "task_stage": "legacy_task_planning",
+                },
             )
             turn_result = _run_async(runner.run_once(request))
             result = turn_result.output
@@ -506,6 +523,9 @@ def plan_with_master_llm(
             "ok": False,
             "reason": "coverage_incomplete",
             "warnings": (warnings + missing_required)[:30],
+            "planner_source": prompts.get("planner_source") or "legacy_stage_planner",
+            "prompt_source": prompts.get("prompt_source") or "legacy_stage_template",
+            "compat_mode": prompts.get("compat_mode") or "legacy_template_compat",
         }
 
     logger.info(
@@ -516,7 +536,10 @@ def plan_with_master_llm(
     )
     return {
         "ok": True,
-        "planner": "master_llm_v1",
+        "planner": "legacy_master_llm_compat",
+        "planner_source": prompts.get("planner_source") or "legacy_stage_planner",
+        "prompt_source": prompts.get("prompt_source") or "legacy_stage_template",
+        "compat_mode": prompts.get("compat_mode") or "legacy_template_compat",
         "tasks": normalized,
         "warnings": warnings[:30],
         "raw_type": type(result).__name__,

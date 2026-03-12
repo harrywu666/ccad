@@ -81,6 +81,101 @@ def test_index_reference_skill_uses_skill_bundle_and_returns_worker_result(monke
     assert result.meta["skill_mode"] == "worker_skill"
     assert result.meta["skill_id"] == "index_reference"
     assert result.meta["skill_path"].endswith("agents/review_worker/skills/index_reference/SKILL.md")
+    assert result.meta["skill_version"]
+
+
+def test_index_reference_skill_uses_agent_skill_prompt_builder_for_ai_review(monkeypatch):
+    index_skill = importlib.import_module("services.audit_runtime.worker_skills.index_reference_skill")
+    index_audit = importlib.import_module("services.audit.index_audit")
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+
+    class _Issue:
+        def __init__(self):
+            self.project_id = "proj-index-ai"
+            self.audit_version = 1
+            self.type = "index"
+            self.severity = "warning"
+            self.sheet_no_a = "A1.01"
+            self.sheet_no_b = "A4.01"
+            self.location = "索引D1"
+            self.description = "目标图里未找到同编号索引"
+            self.evidence_json = "{}"
+            self.confidence = 0.86
+            self.finding_status = "confirmed"
+            self.review_round = 2
+
+    monkeypatch.setattr(index_skill, "load_runtime_skill_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(index_skill, "load_feedback_runtime_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(index_audit, "load_active_skill_rules", lambda *args, **kwargs: [])
+    monkeypatch.setattr(index_audit, "build_index_alias_map", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        index_audit,
+        "_collect_index_issue_candidates",
+        lambda *args, **kwargs: [{"issue": _Issue(), "review_kind": "missing_target_index_no", "source_sheet_no": "A1.01", "target_sheet_no": "A4.01", "index_no": "D1"}],
+    )
+    monkeypatch.setattr(index_audit, "_index_ai_review_enabled", lambda: True)
+    monkeypatch.setattr(index_audit, "_reviewable_index_issue", lambda kind: True)
+    monkeypatch.setattr(index_audit, "_apply_index_finding", lambda issue, candidate: issue)
+    monkeypatch.setattr(
+        index_audit,
+        "_index_issue_evidence",
+        lambda issue: {
+            "sheet_no": issue.sheet_no_a,
+            "location": issue.location,
+            "rule_id": "index_visual_review",
+            "evidence_pack_id": "overview_pack",
+            "description": issue.description,
+            "severity": issue.severity,
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_review(*args, **kwargs):  # noqa: ANN001
+        prompt_bundle = kwargs["prompt_builder"](
+            {
+                "source_sheet_no": "A1.01",
+                "target_sheet_no": "A4.01",
+                "index_no": "D1",
+                "review_kind": "missing_target_index_no",
+                "issue": _Issue(),
+            }
+        )
+        captured["prompt_source"] = prompt_bundle.meta["prompt_source"]
+        captured["system_prompt"] = prompt_bundle.system_prompt
+        captured["user_prompt"] = prompt_bundle.user_prompt
+        return [
+            {
+                "issue": _Issue(),
+                "review_kind": "missing_target_index_no",
+                "source_sheet_no": "A1.01",
+                "target_sheet_no": "A4.01",
+                "index_no": "D1",
+            }
+        ]
+
+    monkeypatch.setattr(index_audit, "_review_index_issue_candidates_async", fake_review)
+
+    result = asyncio.run(
+        index_skill.run_index_reference_skill(
+            task=review_task_schema.WorkerTaskCard(
+                id="task-index-ai",
+                hypothesis_id="hyp-index-ai",
+                worker_kind="index_reference",
+                objective="确认索引引用",
+                source_sheet_no="A1.01",
+                target_sheet_nos=["A4.01"],
+                context={"project_id": "proj-index-ai", "audit_version": 1},
+            ),
+            db="db-session",
+        )
+    )
+
+    assert captured["prompt_source"] == "agent_skill"
+    assert "Review Worker Agent" in str(captured["system_prompt"])
+    assert "Index Reference Worker Skill" in str(captured["system_prompt"])
+    assert "来源图：A1.01" in str(captured["user_prompt"])
+    assert result.meta["prompt_source"] == "agent_skill"
 
 
 def test_index_reference_skill_returns_rejected_when_no_candidates(monkeypatch):

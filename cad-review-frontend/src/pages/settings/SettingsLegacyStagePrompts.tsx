@@ -30,6 +30,11 @@ const statusTone: Record<string, 'outline' | 'warning' | 'success'> = {
   saved: 'success',
 };
 
+function getLifecycleLabel(lifecycle: string) {
+  if (lifecycle === 'legacy_template_compat') return '兼容模板';
+  return lifecycle;
+}
+
 const PROMPT_AGENT_GROUPS: PromptAgentGroup[] = [
   {
     key: 'drawing-recognition-agent',
@@ -293,6 +298,9 @@ export default function SettingsLegacyStagePrompts() {
             <div className="flex flex-wrap items-center gap-3">
               <div className="text-[18px] font-semibold text-foreground">{stage.title}</div>
               <Badge variant="outline" className="rounded-none">
+                {getLifecycleLabel(stage.lifecycle)}
+              </Badge>
+              <Badge variant="outline" className="rounded-none">
                 stage: {stage.stage_key}
               </Badge>
               {stateLabel ? (
@@ -310,6 +318,11 @@ export default function SettingsLegacyStagePrompts() {
             <div className="border-l-2 border-primary pl-3 text-[13px] leading-6 text-foreground">
               当前调用位置：{stage.call_site}
             </div>
+            {stage.replacement ? (
+              <div className="border-l-2 border-foreground/30 pl-3 text-[13px] leading-6 text-foreground">
+                计划收编到：{stage.replacement}
+              </div>
+            ) : null}
             {stage.placeholders.length > 0 ? (
               <div className="rounded-none border border-primary/20 bg-primary/5 px-4 py-3 text-[13px] leading-6 text-foreground">
                 可用变量：{stage.placeholders.map(item => `{{${item}}}`).join('、')}
@@ -342,8 +355,8 @@ export default function SettingsLegacyStagePrompts() {
     <section className="flex flex-col gap-6">
       <section className="flex items-start justify-between gap-6 border border-primary/20 bg-primary/5 px-5 py-4 text-[14px] leading-7 text-foreground">
         <p className="max-w-[980px]">
-          这部分还是旧的运行时阶段模板，不是新的 Agent md 文件。
-          它现在仍然真实生效，所以先放在兼容层里，等后面逐步收编进新架构再下线。
+          这部分已经明确降级成旧运行时模板兼容层，不是新的 Agent md 文件。
+          默认主路已经切到 chief_review；这里只负责还没迁完的旧模板兼容，后面会按卡片里的“计划收编到”逐步迁走再下线。
         </p>
         <Button
           type="button"

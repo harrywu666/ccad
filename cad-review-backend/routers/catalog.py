@@ -80,7 +80,7 @@ async def upload_catalog(project_id: str, file: UploadFile = File(...), db: Sess
     with open(file_path, "wb") as f:
         f.write(content)
     
-    from services.kimi_service import async_recognize_catalog
+    from services.ai_service import async_recognize_catalog
     try:
         items = await async_recognize_catalog(str(file_path))
     except Exception as e:

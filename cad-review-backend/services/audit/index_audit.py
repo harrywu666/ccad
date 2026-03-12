@@ -12,10 +12,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 from domain.sheet_normalization import normalize_index_no, normalize_sheet_no
 from models import AuditResult, Catalog, Drawing, JsonData
-from services.ai_prompt_service import (
-    resolve_stage_prompts,
-    resolve_stage_system_prompt_with_skills,
-)
 from services.audit.common import build_anchor, to_evidence_json
 from services.audit.issue_preview import ensure_issue_drawing_matches
 from services.audit_runtime.agent_reports import IndexAgentReport
@@ -27,6 +23,11 @@ from services.audit_runtime.finding_schema import Finding, GroundingRequiredErro
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider, normalize_provider_mode
 from services.audit_runtime.review_task_schema import WorkerResultCard, WorkerTaskCard
+from services.audit_runtime.runtime_prompt_assembler import (
+    RuntimePromptBundle,
+    assemble_legacy_stage_prompt,
+    render_legacy_stage_user_prompt,
+)
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
 from services.audit_runtime.state_transitions import (
@@ -34,8 +35,9 @@ from services.audit_runtime.state_transitions import (
     append_result_upsert_events,
     append_run_event,
 )
+from services.audit_runtime.stream_policy import audit_stream_enabled
 from services.feedback_runtime_service import load_feedback_runtime_profile
-from services.kimi_service import call_kimi, call_kimi_stream
+from services.ai_service import call_kimi, call_kimi_stream
 from services.layout_json_service import load_enriched_layout_json
 from services.skill_pack_service import (
     build_index_alias_map,
@@ -74,6 +76,9 @@ def _index_worker_result_from_issues(task: WorkerTaskCard, issues: List[AuditRes
             summary=f"旧索引审查入口已作为 worker 包装层执行，{task.source_sheet_no} 未发现索引问题",
             meta={
                 "compat_mode": "worker_wrapper",
+                "execution_mode": "worker_wrapper",
+                "legacy_fallback": True,
+                "fallback_origin": "legacy_index_wrapper",
                 "sheet_no": task.source_sheet_no,
                 "location": task.objective,
                 "rule_id": "index_visual_review",
@@ -104,6 +109,9 @@ def _index_worker_result_from_issues(task: WorkerTaskCard, issues: List[AuditRes
         escalate_to_chief=(status == "needs_review"),
         meta={
             "compat_mode": "worker_wrapper",
+            "execution_mode": "worker_wrapper",
+            "legacy_fallback": True,
+            "fallback_origin": "legacy_index_wrapper",
             "sheet_no": first["sheet_no"],
             "location": first["location"],
             "rule_id": first["rule_id"],
@@ -196,10 +204,7 @@ def _index_ai_review_enabled() -> bool:
 
 
 def _index_stream_enabled() -> bool:
-    raw = os.getenv("AUDIT_KIMI_STREAM_ENABLED")
-    if raw is None:
-        return True
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    return audit_stream_enabled(default=False)
 
 
 def _find_pdf_in_png_dir(png_path: str) -> Optional[str]:
@@ -409,6 +414,7 @@ async def _run_index_ai_review(
     audit_version: int | None = None,
     asset_map: Dict[str, Dict[str, Any]],
     skill_profile: Dict[str, Any],
+    prompt_bundle: RuntimePromptBundle | None = None,
 ) -> Dict[str, Any] | None:
     source_asset = asset_map.get(candidate["source_key"]) or {}
     source_pdf_path = source_asset.get("pdf_path")
@@ -443,15 +449,25 @@ async def _run_index_ai_review(
             target_page_index=int(target_page_index) if target_page_index is not None else None,
         )
     )
-    prompts = resolve_stage_prompts(
-        "index_visual_review",
-        {
+    prompts = prompt_bundle or assemble_legacy_stage_prompt(
+        stage_key="index_visual_review",
+        variables={
             "source_sheet_no": candidate["source_sheet_no"],
             "target_sheet_no": candidate.get("target_sheet_no") or "",
             "index_no": candidate["index_no"],
             "issue_kind": candidate["review_kind"],
             "issue_description": candidate["issue"].description,
         },
+        user_prompt_override=render_legacy_stage_user_prompt(
+            stage_key="index_visual_review",
+            variables={
+                "source_sheet_no": candidate["source_sheet_no"],
+                "target_sheet_no": candidate.get("target_sheet_no") or "",
+                "index_no": candidate["index_no"],
+                "issue_kind": candidate["review_kind"],
+                "issue_description": candidate["issue"].description,
+            },
+        ),
     )
     if project_id is not None and audit_version is not None and _index_stream_enabled():
         runner = _get_index_runner(project_id, audit_version)
@@ -462,8 +478,8 @@ async def _run_index_ai_review(
                 step_key="index",
                 progress_hint=24,
                 turn_kind="index_visual_review",
-                system_prompt=resolve_stage_system_prompt_with_skills("index_visual_review", "index"),
-                user_prompt=prompts["user_prompt"],
+                system_prompt=prompts.system_prompt,
+                user_prompt=prompts.user_prompt,
                 images=list(pack.images.values()),
                 temperature=0.0,
                 max_tokens=1200,
@@ -471,6 +487,7 @@ async def _run_index_ai_review(
                     "source_sheet_no": candidate["source_sheet_no"],
                     "target_sheet_no": candidate.get("target_sheet_no"),
                     "index_no": candidate["index_no"],
+                    "prompt_source": prompts.meta.get("prompt_source"),
                 },
             ),
             should_cancel=lambda: is_cancel_requested(project_id),
@@ -485,8 +502,8 @@ async def _run_index_ai_review(
                 step_key="index",
                 progress_hint=24,
                 turn_kind="index_visual_review",
-                system_prompt=resolve_stage_system_prompt_with_skills("index_visual_review", "index"),
-                user_prompt=prompts["user_prompt"],
+                system_prompt=prompts.system_prompt,
+                user_prompt=prompts.user_prompt,
                 images=list(pack.images.values()),
                 temperature=0.0,
                 max_tokens=1200,
@@ -494,6 +511,7 @@ async def _run_index_ai_review(
                     "source_sheet_no": candidate["source_sheet_no"],
                     "target_sheet_no": candidate.get("target_sheet_no"),
                     "index_no": candidate["index_no"],
+                    "prompt_source": prompts.meta.get("prompt_source"),
                 },
             )
         )
@@ -525,6 +543,7 @@ async def _review_index_issue_candidates_async(
     audit_version: int | None = None,
     skill_profile: Dict[str, Any],
     feedback_profile: Dict[str, Any],
+    prompt_builder: Callable[[Dict[str, Any]], RuntimePromptBundle] | None = None,
 ) -> List[Dict[str, Any]]:
     if not candidates:
         return []
@@ -580,6 +599,7 @@ async def _review_index_issue_candidates_async(
                 audit_version=audit_version,
                 asset_map=asset_map,
                 skill_profile=skill_profile,
+                prompt_bundle=prompt_builder(candidate) if callable(prompt_builder) else None,
             )
         except AuditCancellationRequested:
             raise

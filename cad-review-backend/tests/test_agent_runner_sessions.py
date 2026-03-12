@@ -173,3 +173,58 @@ def test_runner_serializes_llm_turns_with_project_gate(monkeypatch):
         assert provider.max_active == 1
 
     asyncio.run(_run())
+
+
+def test_runner_serializes_openrouter_visual_turns_with_vision_gate(monkeypatch):
+    clear_project_llm_gates()
+    monkeypatch.setenv("KIMI_PROVIDER", "openrouter")
+    monkeypatch.setenv("AUDIT_PROJECT_OPENROUTER_MAX_CONCURRENCY", "4")
+
+    class _AsyncProvider:
+        provider_name = "api"
+
+        def __init__(self) -> None:
+            self.active = 0
+            self.max_active = 0
+
+        async def run_once(self, request, subsession):  # noqa: ANN001
+            del request, subsession
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0.02)
+            self.active -= 1
+            return type("Result", (), {"provider_name": "api", "output": [], "status": "ok"})()
+
+    async def _run():
+        provider = _AsyncProvider()
+        runner = ProjectAuditAgentRunner(
+            project_id="proj-openrouter-vision",
+            audit_version=1,
+            provider=provider,
+            shared_context={"provider_mode": "api"},
+        )
+        request_a = RunnerTurnRequest(
+            agent_key="dimension_review_agent",
+            agent_name="尺寸审查Agent",
+            turn_kind="dimension_sheet_semantic",
+            system_prompt="s",
+            user_prompt="u",
+            images=[b"img-a"],
+            meta={"subsession_key": "sheet:A"},
+        )
+        request_b = RunnerTurnRequest(
+            agent_key="dimension_review_agent",
+            agent_name="尺寸审查Agent",
+            turn_kind="dimension_sheet_semantic",
+            system_prompt="s",
+            user_prompt="u",
+            images=[b"img-b"],
+            meta={"subsession_key": "sheet:B"},
+        )
+        await asyncio.gather(
+            runner.run_once(request_a),
+            runner.run_once(request_b),
+        )
+        assert provider.max_active == 1
+
+    asyncio.run(_run())

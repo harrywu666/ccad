@@ -18,6 +18,55 @@ const buildEvent = (overrides: Partial<AuditEvent> = {}): AuditEvent => ({
   ...overrides,
 });
 
+const baseChief = {
+  currentAction: '主审 Agent 已派出 15 张副审任务卡',
+  summary: '已形成 18 条怀疑卡，已派出 15 张副审任务卡，当前 2 张处理中。',
+  bottleneck: '尺寸审查Agent 正在处理 图纸 A200，调用 标高一致性 Skill。',
+  hypothesisCount: 18,
+  plannedTaskCount: 15,
+  runningTaskCount: 2,
+  completedTaskCount: 6,
+  queuedTaskCount: 7,
+  blockedTaskCount: 0,
+} as const;
+
+const baseWorkerBoard = {
+  running: [
+    {
+      key: 'sheet_semantic:A200',
+      title: '图纸 A200',
+      agentName: '尺寸审查Agent',
+      skillLabel: '标高一致性 Skill',
+      status: 'running' as const,
+      statusLabel: '处理中',
+      summary: '图纸 A200 正在抽取单图尺寸语义。',
+      updatedAt: '2026-03-10T10:03:42',
+    },
+  ],
+  completed: [
+    {
+      key: 'sheet_semantic:A101',
+      title: '图纸 A101',
+      agentName: '尺寸审查Agent',
+      skillLabel: '标高一致性 Skill',
+      status: 'completed' as const,
+      statusLabel: '已收束',
+      summary: '图纸 A101 已收束本轮输出，等待主审消化结果。',
+      updatedAt: '2026-03-10T10:02:12',
+    },
+  ],
+  blocked: [],
+  queuedCount: 7,
+};
+
+const baseLedger = {
+  issueCount: 2,
+  runningTaskCount: 2,
+  completedTaskCount: 6,
+  queuedTaskCount: 7,
+  blockedTaskCount: 0,
+} as const;
+
 describe('AuditProgressDialog', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -37,16 +86,14 @@ describe('AuditProgressDialog', () => {
         headline="尺寸比对核查"
         supportingText="系统正在持续审图"
         startedAt="2026-03-10T10:00:00"
-        phases={[
-          { title: '准备数据', description: '准备', state: 'complete' },
-          { title: '深度审核', description: '审核', state: 'current' },
-          { title: '生成报告', description: '报告', state: 'pending' },
-        ]}
         pipeline={[
-          { stepKey: 'prepare', title: '数据准备', description: '准备', state: 'complete', issueCount: 0 },
-          { stepKey: 'context', title: '上下文构建', description: '上下文', state: 'complete', issueCount: 0 },
-          { stepKey: 'dimension', title: '尺寸核对', description: '尺寸', state: 'current', issueCount: null },
+          { stepKey: 'chief_prepare', title: '主审准备', description: '准备', state: 'complete', issueCount: 0 },
+          { stepKey: 'worker_execution', title: '副审执行', description: '执行', state: 'current', issueCount: null },
+          { stepKey: 'chief_finalize', title: '主审收束', description: '收束', state: 'pending', issueCount: null },
         ]}
+        chief={baseChief}
+        workerBoard={baseWorkerBoard}
+        resultLedger={baseLedger}
         activeAgentName="尺寸审查Agent"
         activeAgentMessage="尺寸审查Agent 正在比对第 4 组尺寸关系"
         totalIssues={2}
@@ -68,16 +115,14 @@ describe('AuditProgressDialog', () => {
         headline="索引断链核对"
         supportingText="系统正在持续审图"
         startedAt="2026-03-10T10:00:00"
-        phases={[
-          { title: '准备数据', description: '准备', state: 'complete' },
-          { title: '深度审核', description: '审核', state: 'current' },
-          { title: '生成报告', description: '报告', state: 'pending' },
-        ]}
         pipeline={[
-          { stepKey: 'prepare', title: '数据准备', description: '准备', state: 'complete', issueCount: 0 },
-          { stepKey: 'context', title: '上下文构建', description: '上下文', state: 'complete', issueCount: 0 },
-          { stepKey: 'relationship_discovery', title: '关系分析', description: '关系', state: 'current', issueCount: null },
+          { stepKey: 'chief_prepare', title: '主审准备', description: '准备', state: 'complete', issueCount: 0 },
+          { stepKey: 'worker_execution', title: '副审执行', description: '执行', state: 'current', issueCount: null },
+          { stepKey: 'chief_finalize', title: '主审收束', description: '收束', state: 'pending', issueCount: null },
         ]}
+        chief={baseChief}
+        workerBoard={baseWorkerBoard}
+        resultLedger={baseLedger}
         events={[
           buildEvent({
             id: 2,
@@ -97,12 +142,12 @@ describe('AuditProgressDialog', () => {
       />,
     );
 
-    expect(screen.getByText('当前执行：关系审查Agent')).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes('当前焦点：') && content.includes('关系审查Agent'))).toBeInTheDocument();
     expect(screen.getAllByText(/正在复核第 15 组候选关系/).length).toBeGreaterThan(0);
     expect(screen.queryByText('{"raw":"provider fragment"}')).not.toBeInTheDocument();
   });
 
-  it('renders the new pipeline and summary copy', () => {
+  it('renders the new command center layout', () => {
     render(
       <AuditProgressDialog
         open
@@ -110,20 +155,14 @@ describe('AuditProgressDialog', () => {
         headline="尺寸比对核查"
         supportingText="当前阶段：尺寸核对（4任务）"
         startedAt="2026-03-10T10:00:00"
-        phases={[
-          { title: '准备数据', description: '准备', state: 'complete' },
-          { title: '深度审核', description: '审核', state: 'current' },
-          { title: '生成报告', description: '报告', state: 'pending' },
-        ]}
         pipeline={[
-          { stepKey: 'prepare', title: '数据准备', description: '准备', state: 'complete', issueCount: 0 },
-          { stepKey: 'context', title: '上下文构建', description: '上下文', state: 'complete', issueCount: 0 },
-          { stepKey: 'relationship_discovery', title: '关系分析', description: '关系', state: 'complete', issueCount: 0 },
-          { stepKey: 'task_planning', title: '任务规划', description: '任务', state: 'complete', issueCount: 0 },
-          { stepKey: 'index', title: '索引核对', description: '索引', state: 'complete', issueCount: 1 },
-          { stepKey: 'dimension', title: '尺寸核对', description: '尺寸', state: 'current', issueCount: null },
-          { stepKey: 'material', title: '材料核对', description: '材料', state: 'pending', issueCount: null },
+          { stepKey: 'chief_prepare', title: '主审准备', description: '准备', state: 'complete', issueCount: 0 },
+          { stepKey: 'worker_execution', title: '副审执行', description: '执行', state: 'current', issueCount: 1 },
+          { stepKey: 'chief_finalize', title: '主审收束', description: '收束', state: 'pending', issueCount: null },
         ]}
+        chief={baseChief}
+        workerBoard={baseWorkerBoard}
+        resultLedger={baseLedger}
         activeAgentName="尺寸审查Agent"
         activeAgentMessage="尺寸审查Agent 正在比对第 4 组尺寸关系"
         totalIssues={6}
@@ -133,13 +172,14 @@ describe('AuditProgressDialog', () => {
       />,
     );
 
-    expect(screen.getByText('审图流水线')).toBeInTheDocument();
-    expect(screen.getByText('数据准备')).toBeInTheDocument();
-    expect(screen.getByText('上下文构建')).toBeInTheDocument();
-    expect(screen.getByText('尺寸核对')).toBeInTheDocument();
-    expect(screen.getByText(/已发现问题 6/)).toBeInTheDocument();
-    expect(screen.getAllByText(/当前 Agent：尺寸审查Agent/).length).toBeGreaterThan(0);
-    expect(screen.queryByText('状态摘要')).not.toBeInTheDocument();
+    expect(screen.getByText('主审正在组织副审审图')).toBeInTheDocument();
+    expect(screen.getByText('主审指挥台')).toBeInTheDocument();
+    expect(screen.getByText('副审任务墙')).toBeInTheDocument();
+    expect(screen.queryByText('尺寸核对')).not.toBeInTheDocument();
+    expect(screen.getByText('图纸 A200')).toBeInTheDocument();
+    expect(screen.getAllByText('标高一致性 Skill').length).toBeGreaterThan(0);
+    expect(screen.getByText('结果台账')).toBeInTheDocument();
+    expect(screen.getByText('全局阶段带')).toBeInTheDocument();
   });
 
   it('renders richer minimized pill copy', () => {
@@ -150,7 +190,7 @@ describe('AuditProgressDialog', () => {
       />,
     );
 
-    expect(screen.getByText('审图中')).toBeInTheDocument();
+    expect(screen.getByText('主审调度中')).toBeInTheDocument();
     expect(screen.getByText('45%')).toBeInTheDocument();
   });
 

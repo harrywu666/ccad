@@ -36,6 +36,19 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
 
+def _resolve_agent_role(event: AuditRunEvent, meta: Dict[str, Any]) -> str:
+    explicit = str(meta.get("actor_role") or "").strip().lower()
+    if explicit in {"chief", "worker", "observer"}:
+        return explicit
+    agent_key = str(getattr(event, "agent_key", "") or "").strip().lower()
+    agent_name = str(getattr(event, "agent_name", "") or "").strip()
+    if "chief" in agent_key or "主审" in agent_name:
+        return "chief"
+    if "observer" in agent_key or "观察" in agent_name:
+        return "observer"
+    return "worker"
+
+
 def _duration_seconds(run: AuditRun) -> int | None:
     started_at = getattr(run, "started_at", None)
     finished_at = getattr(run, "finished_at", None)
@@ -83,11 +96,14 @@ def list_audit_runtime_summaries(db: Session, *, limit: int = 10) -> Dict[str, A
         counts = defaultdict(int)
         agent_map: Dict[str, Dict[str, Any]] = {}
         recent_notes: List[Dict[str, Any]] = []
+        role_counts = defaultdict(int)
 
         for event in events:
             event_kind = str(event.event_kind or "").strip()
             counts[event_kind] += 1
             meta = _safe_meta(event.meta_json)
+            agent_role = _resolve_agent_role(event, meta)
+            role_counts[agent_role] += 1
 
             if event_kind == "agent_status_reported":
                 agent_key = str(event.agent_key or "").strip() or "unknown_agent"
@@ -96,12 +112,14 @@ def list_audit_runtime_summaries(db: Session, *, limit: int = 10) -> Dict[str, A
                     {
                         "agent_key": agent_key,
                         "agent_name": str(event.agent_name or agent_key).strip(),
+                        "agent_role": agent_role,
                         "report_count": 0,
                         "help_requested_count": 0,
                         "help_resolved_count": 0,
                         "output_unstable_count": 0,
                     },
                 )
+                entry["agent_role"] = agent_role
                 entry["report_count"] += 1
 
             if event_kind in {"runner_help_requested", "runner_help_resolved"}:
@@ -111,6 +129,7 @@ def list_audit_runtime_summaries(db: Session, *, limit: int = 10) -> Dict[str, A
                     {
                         "agent_key": source_agent_key,
                         "agent_name": source_agent_key,
+                        "agent_role": "worker",
                         "report_count": 0,
                         "help_requested_count": 0,
                         "help_resolved_count": 0,
@@ -129,12 +148,14 @@ def list_audit_runtime_summaries(db: Session, *, limit: int = 10) -> Dict[str, A
                     {
                         "agent_key": agent_key,
                         "agent_name": str(event.agent_name or agent_key).strip(),
+                        "agent_role": agent_role,
                         "report_count": 0,
                         "help_requested_count": 0,
                         "help_resolved_count": 0,
                         "output_unstable_count": 0,
                     },
                 )
+                entry["agent_role"] = agent_role
                 entry["output_unstable_count"] += 1
 
             if event_kind in _NOTE_EVENT_KINDS:
@@ -143,6 +164,7 @@ def list_audit_runtime_summaries(db: Session, *, limit: int = 10) -> Dict[str, A
                         "event_kind": event_kind,
                         "message": str(event.message or "").strip(),
                         "agent_name": str(event.agent_name or "").strip() or None,
+                        "agent_role": agent_role,
                         "created_at": _iso(event.created_at),
                     }
                 )
@@ -173,6 +195,8 @@ def list_audit_runtime_summaries(db: Session, *, limit: int = 10) -> Dict[str, A
                     "runner_help_resolved": counts["runner_help_resolved"],
                     "output_validation_failed": counts["output_validation_failed"],
                     "runner_observer_action": counts["runner_observer_action"],
+                    "chief_events": role_counts["chief"],
+                    "worker_events": role_counts["worker"],
                 },
                 "agent_summaries": agent_summaries,
                 "recent_notes": recent_notes[-5:],

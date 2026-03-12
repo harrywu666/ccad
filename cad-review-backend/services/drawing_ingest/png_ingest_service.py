@@ -82,7 +82,7 @@ async def ingest_png_upload(
 
     set_progress(project_id, "processing", 20, "文件保存完成，开始图号识别")
 
-    from services.kimi_service import async_recognize_sheet_info
+    from services.ai_service import async_recognize_sheet_info
 
     try:
         recognize_concurrency = int(os.getenv("KIMI_PAGE_CONCURRENCY", "20"))

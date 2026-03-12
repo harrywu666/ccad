@@ -64,6 +64,7 @@ def resolve_llm_gate_provider_key(
     *,
     provider_mode: str | None,
     provider_name: str | None = None,
+    request_has_images: bool = False,
 ) -> str:
     normalized_mode = str(provider_mode or "").strip().lower()
     normalized_name = str(provider_name or "").strip().lower()
@@ -73,9 +74,12 @@ def resolve_llm_gate_provider_key(
     if normalized_mode in {"cli"} or normalized_name == "cli":
         return "cli"
     if normalized_mode in {"openrouter", "openrouter_api"}:
-        return "openrouter"
+        return "openrouter_vision" if request_has_images else "openrouter"
     if normalized_mode in {"api", "kimi_api"} or normalized_name == "api":
-        return _api_backend_key()
+        backend = _api_backend_key()
+        if backend == "openrouter" and request_has_images:
+            return "openrouter_vision"
+        return backend
     if normalized_mode:
         return normalized_mode
     if normalized_name:
@@ -85,6 +89,8 @@ def resolve_llm_gate_provider_key(
 
 def _default_parallel_limit(provider_key: str) -> int:
     normalized = str(provider_key or "").strip().lower()
+    if normalized == "openrouter_vision":
+        return 1
     if normalized == "openrouter":
         return 2
     if normalized in {"kimi_sdk", "official_api", "api", "cli"}:
@@ -102,7 +108,9 @@ def _default_min_interval_seconds(provider_key: str) -> float:
 def _gate_parallel_limit(provider_key: str) -> int:
     normalized = str(provider_key or "").strip().lower()
     env_names = ["AUDIT_PROJECT_LLM_MAX_CONCURRENCY"]
-    if normalized == "openrouter":
+    if normalized == "openrouter_vision":
+        env_names.insert(0, "AUDIT_PROJECT_OPENROUTER_VISION_MAX_CONCURRENCY")
+    elif normalized == "openrouter":
         env_names.insert(0, "AUDIT_PROJECT_OPENROUTER_MAX_CONCURRENCY")
     elif normalized == "kimi_sdk":
         env_names.insert(0, "AUDIT_PROJECT_KIMI_SDK_MAX_CONCURRENCY")
@@ -206,10 +214,12 @@ def get_project_llm_gate(
     audit_version: int,
     provider_mode: str,
     provider_name: str | None = None,
+    request_has_images: bool = False,
 ) -> ProjectLlmRequestGate:
     provider_key = resolve_llm_gate_provider_key(
         provider_mode=provider_mode,
         provider_name=provider_name,
+        request_has_images=request_has_images,
     )
     key = GateKey(
         project_id=str(project_id or "").strip(),

@@ -76,17 +76,26 @@ def _append_master_event(
     message: str,
     meta: dict | None = None,
 ) -> None:
+    payload = {
+        "pipeline_mode": "chief_review",
+        "orchestration_model": "chief_worker",
+        "actor_role": "chief",
+        "planner_source": "chief_agent",
+        "prompt_source": "chief_agent",
+        "compat_mode": "native_agent_runtime",
+        **(meta or {}),
+    }
     append_run_event(
         project_id,
         audit_version,
         level=level,
         step_key=step_key,
-        agent_key="master_planner_agent",
-        agent_name="总控规划Agent",
+        agent_key="chief_review_agent",
+        agent_name="主审 Agent",
         event_kind=event_kind,
         progress_hint=progress_hint,
         message=message,
-        meta=meta,
+        meta=payload,
     )
 
 
@@ -113,7 +122,21 @@ def _append_worker_event(
         event_kind=event_kind,
         progress_hint=progress_hint,
         message=message,
-        meta=meta,
+        meta={
+            "pipeline_mode": "chief_worker",
+            "orchestration_model": "chief_worker",
+            "actor_role": "worker",
+            "skill_id": (
+                str((meta or {}).get("skill_id") or "").strip()
+                or {
+                    "relationship_discovery": "node_host_binding",
+                    "index": "index_reference",
+                    "dimension": "spatial_consistency",
+                    "material": "material_semantic_consistency",
+                }.get(step_key, "")
+            ),
+            **(meta or {}),
+        },
     )
 
 
@@ -310,6 +333,31 @@ def _chief_review_enabled() -> bool:
     }
 
 
+def _legacy_pipeline_allowed() -> bool:
+    return str(os.getenv("AUDIT_LEGACY_PIPELINE_ALLOWED", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _forced_legacy_pipeline_mode() -> str | None:
+    raw = str(os.getenv("AUDIT_FORCE_PIPELINE_MODE", "")).strip().lower()
+    if raw in {"legacy", "v2"}:
+        return raw
+    return None
+
+
+def resolve_pipeline_mode() -> str:
+    forced_mode = _forced_legacy_pipeline_mode()
+    if not _legacy_pipeline_allowed() or not forced_mode:
+        return "chief_review"
+    if forced_mode == "v2" and _orchestrator_v2_enabled():
+        return "v2"
+    return "legacy"
+
+
 def _read_budget_env(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None:
@@ -464,6 +512,7 @@ def _update_chief_review_memory(
     escalations: list[dict],
 ) -> dict:
     active_hypotheses = [dict(item or {}) for item in list(memory.get("active_hypotheses") or [])]
+    existing_recheck_queue = [dict(item or {}) for item in list(memory.get("chief_recheck_queue") or [])]
     grouped_results: dict[str, list] = defaultdict(list)
     for item in worker_results:
         grouped_results[str(item.hypothesis_id or "").strip()].append(item)
@@ -485,6 +534,7 @@ def _update_chief_review_memory(
     next_active: list[dict] = []
     resolved_additions: list[dict] = []
     false_positive_additions: list[dict] = []
+    chief_recheck_additions: list[dict] = []
 
     for hypothesis in active_hypotheses:
         hypothesis_id = str(hypothesis.get("id") or "").strip()
@@ -496,10 +546,15 @@ def _update_chief_review_memory(
             context = dict(hypothesis.get("context") or {})
             context["needs_chief_review"] = True
             context["chief_recheck_reasons"] = sorted(set(escalation_map[hypothesis_id]))
-            next_active.append(
+            chief_recheck_additions.append(
                 {
                     **hypothesis,
                     "priority": max(float(hypothesis.get("priority") or 0.5), 0.98),
+                    "worker_kind": str(
+                        hypothesis.get("worker_kind")
+                        or context.get("suggested_worker_kind")
+                        or ""
+                    ).strip(),
                     "context": context,
                 }
             )
@@ -531,10 +586,15 @@ def _update_chief_review_memory(
             context["chief_recheck_reasons"] = sorted(
                 statuses & {"needs_review", "conflict"} or {"needs_review"}
             )
-            next_active.append(
+            chief_recheck_additions.append(
                 {
                     **hypothesis,
                     "priority": max(float(hypothesis.get("priority") or 0.5), 0.96),
+                    "worker_kind": str(
+                        hypothesis.get("worker_kind")
+                        or context.get("suggested_worker_kind")
+                        or ""
+                    ).strip(),
                     "context": context,
                 }
             )
@@ -544,6 +604,10 @@ def _update_chief_review_memory(
     return {
         **memory,
         "active_hypotheses": next_active,
+        "chief_recheck_queue": _merge_unique_memory_records(
+            existing_recheck_queue,
+            chief_recheck_additions,
+        ),
         "resolved_hypotheses": _merge_unique_memory_records(
             list(memory.get("resolved_hypotheses") or []),
             resolved_additions,
@@ -556,134 +620,129 @@ def _update_chief_review_memory(
 
 
 def _build_default_hypotheses(sheet_graph, *, memory: dict | None = None) -> list[dict]:  # noqa: ANN001
-    memory = dict(memory or {})
-    existing_active = {
-        _memory_scope_key(dict(item or {})): dict(item or {})
-        for item in list(memory.get("active_hypotheses") or [])
-        if _memory_scope_key(dict(item or {}))[0]
-    }
-    skip_keys = {
-        _memory_scope_key(dict(item or {}))
-        for item in [
-            *list(memory.get("false_positive_hints") or []),
-            *list(memory.get("resolved_hypotheses") or []),
-        ]
-        if _memory_scope_key(dict(item or {}))[0]
-    }
-    hypotheses: list[dict] = []
-    used_existing_keys: set[tuple[str, tuple[str, ...], str]] = set()
-    hypothesis_index = 1
-    worker_order = {
-        "node_host_binding": 0,
-        "index_reference": 1,
-        "elevation_consistency": 2,
-        "spatial_consistency": 3,
-    }
+    from services.audit_runtime.chief_review_planner import build_default_chief_hypotheses
 
-    for source_sheet_no, target_sheet_nos in sorted(sheet_graph.linked_targets.items()):
-        grouped_targets: dict[str, list[str]] = defaultdict(list)
-        for target_sheet_no in list(target_sheet_nos or []):
-            target = str(target_sheet_no or "").strip()
-            if not target:
-                continue
-            target_type = str(sheet_graph.sheet_types.get(target, "unknown") or "unknown").strip()
-            worker_kind = "spatial_consistency"
-            if target_type == "detail":
-                worker_kind = "node_host_binding"
-            elif target_type == "reference":
-                worker_kind = "index_reference"
-            elif target_type in {"elevation", "ceiling"}:
-                worker_kind = "elevation_consistency"
-            if target not in grouped_targets[worker_kind]:
-                grouped_targets[worker_kind].append(target)
-
-        for worker_kind, targets in sorted(grouped_targets.items(), key=lambda item: worker_order.get(item[0], 99)):
-            if not targets:
-                continue
-            scope_key = _normalized_scope_key(source_sheet_no, targets, worker_kind)
-            if not scope_key[0] or not scope_key[1] or scope_key in skip_keys:
-                continue
-            target_types = [
-                str(sheet_graph.sheet_types.get(item, "unknown") or "unknown").strip()
-                for item in targets
-            ]
-            topic, objective, priority, context = _build_hypothesis_blueprint(
-                worker_kind,
-                source_sheet_no=source_sheet_no,
-                target_sheet_nos=targets,
-                target_types=target_types,
-            )
-            existing = existing_active.get(scope_key)
-            if existing:
-                used_existing_keys.add(scope_key)
-                existing_context = dict(existing.get("context") or {})
-                context = {
-                    **context,
-                    **existing_context,
-                    "suggested_worker_kind": worker_kind,
-                }
-                if existing_context.get("needs_chief_review"):
-                    priority = max(priority, float(existing.get("priority") or 0.5), 0.98)
-            hypotheses.append(
-                {
-                    "id": str((existing or {}).get("id") or f"hyp-{hypothesis_index}").strip() or f"hyp-{hypothesis_index}",
-                    "topic": topic,
-                    "objective": objective,
-                    "source_sheet_no": source_sheet_no,
-                    "target_sheet_nos": targets,
-                    "priority": priority,
-                    "context": context,
-                }
-            )
-            hypothesis_index += 1
-
-    for scope_key, existing in existing_active.items():
-        if scope_key in used_existing_keys or not dict(existing.get("context") or {}).get("needs_chief_review"):
-            continue
-        hypotheses.append(
-            {
-                **existing,
-                "priority": max(float(existing.get("priority") or 0.5), 0.98),
-            }
-        )
+    hypotheses, _ = build_default_chief_hypotheses(
+        sheet_graph=sheet_graph,
+        memory=memory,
+    )
     return hypotheses
 
 
+def _build_chief_sheet_graph_semantic_runner(*, project_id: str, audit_version: int):
+    from services.ai_service import call_kimi
+    from services.audit_runtime.sheet_graph_semantic_builder import _fallback_semantic_result
+    from services.audit_runtime.runtime_prompt_assembler import assemble_agent_runtime_prompt
+
+    def _runner(candidates: dict) -> dict:
+        payload_json = json.dumps(candidates, ensure_ascii=False, indent=2)
+        prompt_bundle = assemble_agent_runtime_prompt(
+            agent_id="chief_review",
+            task_context={
+                "project_id": project_id,
+                "audit_version": audit_version,
+                "sheet_graph_candidates": candidates,
+            },
+            prompt_source="chief_agent",
+            user_prompt_override=(
+                "你现在只负责图纸语义建图，不负责输出审图问题。\n"
+                "请根据输入候选信息判断每张图的最终类型，以及跨图链接关系。\n"
+                "只返回 JSON 对象，字段固定为：\n"
+                '{"sheet_types":{"图号":"plan|ceiling|elevation|detail|reference|unknown"},'
+                '"linked_targets":{"图号":["目标图号"]},"node_hosts":{"图号":["母图图号"]}}\n\n'
+                f"输入数据：\n{payload_json}\n"
+            ),
+        )
+        try:
+            result = asyncio.run(
+                call_kimi(
+                    prompt_bundle.system_prompt,
+                    prompt_bundle.user_prompt,
+                    temperature=0.1,
+                    max_tokens=4096,
+                )
+            )
+        except Exception:
+            return _fallback_semantic_result(candidates)
+        if not isinstance(result, dict):
+            return _fallback_semantic_result(candidates)
+        return {
+            "sheet_types": dict(result.get("sheet_types") or {}),
+            "linked_targets": dict(result.get("linked_targets") or {}),
+            "node_hosts": dict(result.get("node_hosts") or {}),
+        }
+
+    return _runner
+
+
+def _build_chief_sheet_graph(
+    *,
+    project_id: str,
+    audit_version: int,
+    sheet_contexts: list,
+    sheet_edges: list,
+):
+    from services.audit_runtime.sheet_graph_builder import build_sheet_graph
+
+    return build_sheet_graph(
+        sheet_contexts=sheet_contexts,
+        sheet_edges=sheet_edges,
+        llm_runner=_build_chief_sheet_graph_semantic_runner(
+            project_id=project_id,
+            audit_version=audit_version,
+        ),
+    )
+
+
 async def _default_chief_worker_runner(task):  # noqa: ANN001
-    from services.audit.dimension_audit import run_dimension_worker_wrapper
-    from services.audit.index_audit import run_index_worker_wrapper
-    from services.audit.material_audit import run_material_worker_wrapper
-    from services.audit.relationship_discovery import run_relationship_worker_wrapper
     from services.audit_runtime.review_worker_runtime import run_native_review_worker
     from services.audit_runtime.review_task_schema import WorkerResultCard
 
-    db = SessionLocal()
-    try:
+    def _run_compatibility_wrapper(db):  # noqa: ANN001
         project_id = str(task.context.get("project_id") or "").strip()
         audit_version = int(task.context.get("audit_version") or 0)
+        worker_kind = str(task.worker_kind or "").strip()
+
+        if worker_kind in {"elevation_consistency", "spatial_consistency"}:
+            from services.audit.dimension_audit import run_dimension_worker_wrapper
+
+            return run_dimension_worker_wrapper(project_id, audit_version, db, task)
+        if worker_kind == "material_semantic_consistency":
+            from services.audit.material_audit import run_material_worker_wrapper
+
+            return run_material_worker_wrapper(project_id, audit_version, db, task)
+        if worker_kind == "index_reference":
+            from services.audit.index_audit import run_index_worker_wrapper
+
+            return run_index_worker_wrapper(project_id, audit_version, db, task)
+        if worker_kind == "node_host_binding":
+            from services.audit.relationship_discovery import run_relationship_worker_wrapper
+
+            return run_relationship_worker_wrapper(project_id, audit_version, db, task)
+        return None
+
+    db = SessionLocal()
+    try:
         native_result = await run_native_review_worker(task=task, db=db)
         if native_result is not None:
             return native_result
-        if task.worker_kind in {"elevation_consistency", "spatial_consistency"}:
-            return run_dimension_worker_wrapper(project_id, audit_version, db, task)
-        if task.worker_kind == "material_semantic_consistency":
-            return run_material_worker_wrapper(project_id, audit_version, db, task)
-        if task.worker_kind == "index_reference":
-            return run_index_worker_wrapper(project_id, audit_version, db, task)
-        if task.worker_kind == "node_host_binding":
-            return run_relationship_worker_wrapper(project_id, audit_version, db, task)
+        compatibility_result = _run_compatibility_wrapper(db)
+        if compatibility_result is not None:
+            return compatibility_result
         return WorkerResultCard(
             task_id=task.id,
             hypothesis_id=task.hypothesis_id,
             worker_kind=task.worker_kind,
-            status="rejected",
+            status="needs_review",
             confidence=0.35,
-            summary=f"{task.worker_kind} worker 暂无兼容包装层",
+            summary=f"{task.worker_kind} 未注册到 worker skill 执行器，已回主审处理",
+            escalate_to_chief=True,
             meta={
-                "compat_mode": "worker_wrapper",
+                "compat_mode": "worker_skill_required",
+                "execution_mode": "worker_skill",
                 "sheet_no": task.source_sheet_no,
                 "location": task.objective,
-                "rule_id": "CHIEF-BOOTSTRAP",
+                "rule_id": "CHIEF-SKILL-MISSING",
                 "evidence_pack_id": "chief_review_pack",
             },
         )
@@ -694,10 +753,11 @@ async def _default_chief_worker_runner(task):  # noqa: ANN001
             worker_kind=task.worker_kind,
             status="needs_review",
             confidence=0.2,
-            summary=f"{task.worker_kind} worker 包装层执行异常：{exc}",
+            summary=f"{task.worker_kind} worker skill 执行异常：{exc}",
             escalate_to_chief=True,
             meta={
-                "compat_mode": "worker_wrapper",
+                "compat_mode": "worker_skill_error",
+                "execution_mode": "worker_skill",
                 "sheet_no": task.source_sheet_no,
                 "location": task.objective,
                 "rule_id": "CHIEF-WORKER-ERROR",
@@ -786,7 +846,8 @@ def execute_pipeline(
     worker_generation: int | None = None,
     is_current_worker=None,  # noqa: ANN001
 ) -> None:
-    if _chief_review_enabled():
+    pipeline_mode = resolve_pipeline_mode()
+    if pipeline_mode == "chief_review":
         _invoke_pipeline_impl(
             execute_pipeline_chief_review,
             project_id,
@@ -799,7 +860,7 @@ def execute_pipeline(
         )
         return
 
-    if _orchestrator_v2_enabled():
+    if pipeline_mode == "v2":
         _invoke_pipeline_impl(
             execute_pipeline_v2,
             project_id,
@@ -835,9 +896,9 @@ def execute_pipeline_chief_review(
     is_current_worker=None,  # noqa: ANN001
 ) -> None:
     from services.audit_runtime.chief_review_session import ChiefReviewSession
+    from services.audit_runtime.chief_review_planner import plan_chief_review_hypotheses
     from services.audit_runtime.finding_synthesizer import synthesize_findings
     from services.audit_runtime.review_worker_pool import ReviewWorkerPool
-    from services.audit_runtime.sheet_graph_builder import build_sheet_graph
     from services.chief_review_memory_service import load_project_memory, save_project_memory
 
     chief_budget = VisualBudget(
@@ -863,7 +924,7 @@ def execute_pipeline_chief_review(
             project_id,
             audit_version,
             status="running",
-            current_step="主审校验三线匹配",
+            current_step="主审准备基础数据",
             progress=5,
         )
 
@@ -901,7 +962,7 @@ def execute_pipeline_chief_review(
         update_run_progress(
             project_id,
             audit_version,
-            current_step="主审构建图纸上下文",
+            current_step="主审整理图纸上下文",
             progress=10,
         )
         db = SessionLocal()
@@ -921,7 +982,12 @@ def execute_pipeline_chief_review(
 
             contexts = db.query(SheetContext).filter(SheetContext.project_id == project_id).all()
             edges = db.query(SheetEdge).filter(SheetEdge.project_id == project_id).all()
-            sheet_graph = build_sheet_graph(sheet_contexts=contexts, sheet_edges=edges)
+            sheet_graph = _build_chief_sheet_graph(
+                project_id=project_id,
+                audit_version=audit_version,
+                sheet_contexts=contexts,
+                sheet_edges=edges,
+            )
             memory = load_project_memory(
                 db,
                 project_id=project_id,
@@ -934,6 +1000,7 @@ def execute_pipeline_chief_review(
                 payload={
                     **memory,
                     "sheet_graph_version": f"chief-review-{audit_version}",
+                    "sheet_graph_semantics_source": "chief_llm_runner",
                     "sheet_summaries": [
                         {
                             "sheet_no": ctx.sheet_no,
@@ -946,7 +1013,36 @@ def execute_pipeline_chief_review(
                         {"source_sheet_no": source, "target_sheet_nos": list(targets)}
                         for source, targets in sheet_graph.linked_targets.items()
                     ],
-                    "active_hypotheses": _build_default_hypotheses(sheet_graph, memory=memory),
+                },
+            )
+            planner_result = plan_chief_review_hypotheses(
+                project_id=project_id,
+                audit_version=audit_version,
+                memory=memory,
+                sheet_graph=sheet_graph,
+            )
+            memory = save_project_memory(
+                db,
+                project_id=project_id,
+                audit_version=audit_version,
+                payload={
+                    **memory,
+                    "active_hypotheses": planner_result.items,
+                    "chief_recheck_queue": planner_result.chief_recheck_queue,
+                    "chief_planner_meta": planner_result.meta,
+                },
+            )
+            _append_master_event(
+                project_id,
+                audit_version,
+                level="info",
+                step_key="chief_prompt",
+                event_kind="phase_completed",
+                progress_hint=16,
+                message=f"主审 Agent 已装配本轮审图资源，生成 {len(planner_result.items)} 条待核对怀疑卡",
+                meta={
+                    **planner_result.meta,
+                    "chief_recheck_count": len(planner_result.chief_recheck_queue),
                 },
             )
         finally:
@@ -955,7 +1051,7 @@ def execute_pipeline_chief_review(
         update_run_progress(
             project_id,
             audit_version,
-            current_step="主审规划副审任务",
+            current_step="主审派发副审任务",
             progress=18,
         )
         chief_session = ChiefReviewSession(project_id=project_id, audit_version=audit_version)
@@ -968,7 +1064,13 @@ def execute_pipeline_chief_review(
             event_kind="phase_completed",
             progress_hint=20,
             message=f"主审 Agent 已生成 {len(worker_tasks)} 张副审任务卡",
-            meta={"planner": "chief_review_agent", "worker_tasks": len(worker_tasks)},
+            meta={
+                "planner": "chief_review_agent",
+                "planner_source": planner_result.meta.get("planner_source"),
+                "worker_tasks": len(worker_tasks),
+                "chief_recheck_count": len(planner_result.chief_recheck_queue),
+                "task_stage": "worker_task_planning",
+            },
         )
 
         worker_results = []
@@ -1003,14 +1105,17 @@ def execute_pipeline_chief_review(
                 event_kind="warning",
                 progress_hint=92,
                 message=f"主审 Agent 发现 {len(escalations)} 组副审结果冲突，已升级回主审待复核",
-                meta={"escalations": escalations[:10]},
+                meta={
+                    "escalations": escalations[:10],
+                    "task_stage": "chief_recheck",
+                },
             )
 
         update_run_progress(
             project_id,
             audit_version,
             status="done",
-            current_step="主审汇总完成",
+            current_step="主审完成结果收束",
             progress=100,
             total_issues=len(findings),
             finished=True,
@@ -1023,7 +1128,12 @@ def execute_pipeline_chief_review(
             event_kind="phase_completed",
             progress_hint=100,
             message=f"主审 Agent 已整理完成审核报告，共汇总 {len(findings)} 处问题",
-            meta={"planner": "chief_review_agent", "total_issues": len(findings), "escalations": len(escalations)},
+            meta={
+                "planner": "chief_review_agent",
+                "total_issues": len(findings),
+                "escalations": len(escalations),
+                "task_stage": "finding_synthesized",
+            },
         )
         append_result_summary_event(project_id, audit_version)
         set_project_status(project_id, "done")
@@ -1085,7 +1195,7 @@ def execute_pipeline_chief_review(
             project_id,
             audit_version,
             status="failed",
-            current_step="主审执行失败",
+            current_step="主审流程失败",
             error=str(exc),
             finished=True,
         )

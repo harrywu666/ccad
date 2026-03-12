@@ -10,7 +10,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 
-import services.kimi_service as kimi_service
+import services.ai_service as ai_service
 from services.audit_runtime.cancel_registry import AuditCancellationRequested
 
 
@@ -20,7 +20,7 @@ def test_http_timeout_config_uses_long_read_timeout(monkeypatch):
     monkeypatch.setenv("KIMI_WRITE_TIMEOUT_SECONDS", "45")
     monkeypatch.setenv("KIMI_POOL_TIMEOUT_SECONDS", "15")
 
-    timeout = kimi_service._http_timeout_config()
+    timeout = ai_service._http_timeout_config()
 
     assert timeout.connect == 25.0
     assert timeout.read == 600.0
@@ -31,7 +31,7 @@ def test_http_timeout_config_uses_long_read_timeout(monkeypatch):
 def test_provider_defaults_to_official(monkeypatch):
     monkeypatch.delenv("KIMI_PROVIDER", raising=False)
 
-    assert kimi_service._provider() == "official"
+    assert ai_service._provider() == "official"
 
 
 def test_resolve_api_key_for_official_supports_moonshot_fallback(monkeypatch):
@@ -39,14 +39,14 @@ def test_resolve_api_key_for_official_supports_moonshot_fallback(monkeypatch):
     monkeypatch.delenv("KIMI_OFFICIAL_API_KEY", raising=False)
     monkeypatch.setenv("MOONSHOT_API_KEY", "moonshot-secret")
 
-    assert kimi_service._resolve_api_key() == "moonshot-secret"
+    assert ai_service._resolve_api_key() == "moonshot-secret"
 
 
 def test_resolve_api_key_for_openrouter(monkeypatch):
     monkeypatch.setenv("KIMI_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-secret")
 
-    assert kimi_service._resolve_api_key() == "openrouter-secret"
+    assert ai_service._resolve_api_key() == "openrouter-secret"
 
 
 def test_call_kimi_uses_official_openai_compatible_payload(monkeypatch):
@@ -87,7 +87,7 @@ def test_call_kimi_uses_official_openai_compatible_payload(monkeypatch):
     monkeypatch.setattr("httpx.AsyncClient", DummyClient)
 
     result = asyncio.run(
-        kimi_service.call_kimi(
+        ai_service.call_kimi(
             system_prompt="你是 Kimi。",
             user_prompt="请返回 JSON",
             images=[b"\x89PNGrest"],
@@ -142,7 +142,7 @@ def test_call_kimi_uses_code_provider_payload(monkeypatch):
     monkeypatch.setattr("httpx.AsyncClient", DummyClient)
 
     result = asyncio.run(
-        kimi_service.call_kimi(
+        ai_service.call_kimi(
             system_prompt="system",
             user_prompt="user",
             images=[b"\xff\xd8\xff\xe0rest"],
@@ -201,7 +201,7 @@ def test_call_kimi_uses_openrouter_openai_compatible_payload(monkeypatch):
     monkeypatch.setattr("httpx.AsyncClient", DummyClient)
 
     result = asyncio.run(
-        kimi_service.call_kimi(
+        ai_service.call_kimi(
             system_prompt="你是审图助手。",
             user_prompt="请返回 JSON",
             images=[b"\x89PNGrest"],
@@ -270,7 +270,7 @@ def test_call_kimi_retries_on_retryable_status(monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
 
     result = asyncio.run(
-        kimi_service.call_kimi(
+        ai_service.call_kimi(
             system_prompt="你是 Kimi。",
             user_prompt="请返回 JSON",
         )
@@ -324,7 +324,7 @@ def test_call_kimi_stream_emits_deltas_and_returns_parsed_json(monkeypatch):
     monkeypatch.setattr("httpx.AsyncClient", DummyClient)
 
     result = asyncio.run(
-        kimi_service.call_kimi_stream(
+        ai_service.call_kimi_stream(
             system_prompt="你是 Kimi。",
             user_prompt="请返回 JSON",
             on_delta=on_delta,
@@ -390,7 +390,7 @@ def test_call_kimi_stream_retries_on_429_then_succeeds(monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
 
     result = asyncio.run(
-        kimi_service.call_kimi_stream(
+        ai_service.call_kimi_stream(
             system_prompt="你是 Kimi。",
             user_prompt="请返回 JSON",
         )
@@ -399,6 +399,68 @@ def test_call_kimi_stream_retries_on_429_then_succeeds(monkeypatch):
     assert result == {"status": "ok"}
     assert captured["attempts"] == 2
     assert captured["sleeps"] == [2.0]
+
+
+def test_call_kimi_stream_reads_error_body_in_stream_mode(monkeypatch):
+    captured = {"attempts": 0}
+
+    class DummyStreamResponse:
+        def __init__(self, status_code, body: bytes):
+            self.status_code = status_code
+            self.headers = {}
+            self._body = body
+            self.text_accessed = False
+
+        @property
+        def text(self):
+            self.text_accessed = True
+            raise AssertionError("stream response text should not be accessed directly")
+
+        async def aread(self):
+            return self._body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def aiter_lines(self):
+            if False:
+                yield None
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method, url, headers=None, json=None):
+            captured["attempts"] += 1
+            return DummyStreamResponse(502, b'{"error":"upstream bad gateway"}')
+
+    monkeypatch.setenv("KIMI_PROVIDER", "official")
+    monkeypatch.setenv("KIMI_OFFICIAL_API_KEY", "official-secret")
+    monkeypatch.setenv("KIMI_MAX_RETRIES", "0")
+    monkeypatch.setattr("httpx.AsyncClient", DummyClient)
+
+    try:
+        asyncio.run(
+            ai_service.call_kimi_stream(
+                system_prompt="你是 Kimi。",
+                user_prompt="请返回 JSON",
+            )
+        )
+    except RuntimeError as exc:
+        assert 'AI API 失败 (502): {"error":"upstream bad gateway"}' == str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert captured["attempts"] == 1
 
 
 def test_call_kimi_stream_retries_when_no_new_content_for_too_long(monkeypatch):
@@ -455,7 +517,7 @@ def test_call_kimi_stream_retries_when_no_new_content_for_too_long(monkeypatch):
     monkeypatch.setattr("httpx.AsyncClient", DummyClient)
 
     result = asyncio.run(
-        kimi_service.call_kimi_stream(
+        ai_service.call_kimi_stream(
             system_prompt="你是 Kimi。",
             user_prompt="请返回 JSON",
             on_retry=on_retry,
@@ -501,7 +563,7 @@ def test_call_kimi_stream_stops_immediately_when_cancel_requested(monkeypatch):
     monkeypatch.setattr("httpx.AsyncClient", DummyClient)
 
     async def run():
-        return await kimi_service.call_kimi_stream(
+        return await ai_service.call_kimi_stream(
             system_prompt="你是 Kimi。",
             user_prompt="请返回 JSON",
             should_cancel=lambda: True,

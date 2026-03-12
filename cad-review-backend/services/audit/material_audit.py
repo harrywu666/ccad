@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional
 from domain.sheet_normalization import normalize_sheet_no
 from domain.text_cleaning import strip_mtext_formatting
 from models import AuditResult, Drawing, JsonData
-from services.ai_prompt_service import resolve_stage_system_prompt_with_skills
 from services.audit.common import build_anchor, to_evidence_json
 from services.audit.prompt_builder import build_material_review_prompt, compact_material_rows
 from services.audit_runtime.agent_reports import MaterialAgentReport
@@ -25,6 +24,7 @@ from services.audit_runtime.finding_schema import Finding, GroundingRequiredErro
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider, normalize_provider_mode
 from services.audit_runtime.review_task_schema import WorkerResultCard, WorkerTaskCard
+from services.audit_runtime.runtime_prompt_assembler import RuntimePromptBundle, assemble_legacy_stage_prompt
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
 from services.audit_runtime.state_transitions import (
@@ -32,9 +32,10 @@ from services.audit_runtime.state_transitions import (
     append_result_upsert_events,
     append_run_event,
 )
+from services.audit_runtime.stream_policy import audit_stream_enabled
 from services.coordinate_service import enrich_json_with_coordinates
 from services.feedback_runtime_service import load_feedback_runtime_profile
-from services.kimi_service import call_kimi, call_kimi_stream
+from services.ai_service import call_kimi, call_kimi_stream
 from services.skill_pack_service import load_runtime_skill_profile
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,9 @@ def _material_worker_result_from_issues(task: WorkerTaskCard, issues: List[Audit
             summary=f"旧材料审查入口已作为 worker 包装层执行，{task.source_sheet_no} 未发现材料问题",
             meta={
                 "compat_mode": "worker_wrapper",
+                "execution_mode": "worker_wrapper",
+                "legacy_fallback": True,
+                "fallback_origin": "legacy_material_wrapper",
                 "sheet_no": task.source_sheet_no,
                 "location": task.objective,
                 "rule_id": "material_consistency_review",
@@ -94,6 +98,9 @@ def _material_worker_result_from_issues(task: WorkerTaskCard, issues: List[Audit
         evidence=evidence,
         meta={
             "compat_mode": "worker_wrapper",
+            "execution_mode": "worker_wrapper",
+            "legacy_fallback": True,
+            "fallback_origin": "legacy_material_wrapper",
             "sheet_no": first["sheet_no"],
             "location": first["location"],
             "rule_id": first["rule_id"],
@@ -275,10 +282,7 @@ def _material_v2_enabled() -> bool:
 
 
 def _material_stream_enabled() -> bool:
-    raw = os.getenv("AUDIT_KIMI_STREAM_ENABLED")
-    if raw is None:
-        return True
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    return audit_stream_enabled(default=False)
 
 
 def _append_material_stream_event(
@@ -376,6 +380,7 @@ async def _run_material_ai_review(
     pdf_path: Optional[str] = None,
     page_index: Optional[int] = None,
     images_override: Optional[List[bytes]] = None,
+    prompt_bundle: RuntimePromptBundle | None = None,
 ) -> List[Dict[str, Any]]:
     images: Optional[list] = images_override
     if images is None and pdf_path and page_index is not None:
@@ -402,6 +407,20 @@ async def _run_material_ai_review(
         except Exception:
             pass
 
+    prompt_bundle = prompt_bundle or assemble_legacy_stage_prompt(
+        stage_key="material_consistency_review",
+        variables={
+            "sheet_no": sheet_no,
+            "material_table_json": compact_material_rows(material_table),
+            "material_used_json": compact_material_rows(material_used),
+        },
+        user_prompt_override=build_material_review_prompt(
+            sheet_no,
+            compact_material_rows(material_table),
+            compact_material_rows(material_used),
+        ),
+    )
+
     if project_id is not None and audit_version is not None and _material_stream_enabled():
         runner = _get_material_runner(project_id, audit_version)
         turn_result: RunnerTurnResult = await runner.run_stream(
@@ -411,18 +430,16 @@ async def _run_material_ai_review(
                 step_key="material",
                 progress_hint=36,
                 turn_kind="material_consistency_review",
-                system_prompt=resolve_stage_system_prompt_with_skills(
-                    "material_consistency_review",
-                    "material",
-                ),
-                user_prompt=build_material_review_prompt(
-                    sheet_no,
-                    compact_material_rows(material_table),
-                    compact_material_rows(material_used),
-                ),
+                system_prompt=prompt_bundle.system_prompt,
+                user_prompt=prompt_bundle.user_prompt,
                 images=images or [],
                 temperature=0.0,
-                meta={"sheet_no": sheet_no, "material_rows": len(material_table), "used_rows": len(material_used)},
+                meta={
+                    "sheet_no": sheet_no,
+                    "material_rows": len(material_table),
+                    "used_rows": len(material_used),
+                    "prompt_source": prompt_bundle.meta.get("prompt_source"),
+                },
             ),
             should_cancel=lambda: is_cancel_requested(project_id),
         )
@@ -436,18 +453,16 @@ async def _run_material_ai_review(
                 step_key="material",
                 progress_hint=36,
                 turn_kind="material_consistency_review",
-                system_prompt=resolve_stage_system_prompt_with_skills(
-                    "material_consistency_review",
-                    "material",
-                ),
-                user_prompt=build_material_review_prompt(
-                    sheet_no,
-                    compact_material_rows(material_table),
-                    compact_material_rows(material_used),
-                ),
+                system_prompt=prompt_bundle.system_prompt,
+                user_prompt=prompt_bundle.user_prompt,
                 images=images or [],
                 temperature=0.0,
-                meta={"sheet_no": sheet_no, "material_rows": len(material_table), "used_rows": len(material_used)},
+                meta={
+                    "sheet_no": sheet_no,
+                    "material_rows": len(material_table),
+                    "used_rows": len(material_used),
+                    "prompt_source": prompt_bundle.meta.get("prompt_source"),
+                },
             )
         )
         result = turn_result.output if turn_result.status == "ok" else []

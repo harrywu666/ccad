@@ -95,6 +95,10 @@ export interface AIPromptStage {
   title: string;
   description: string;
   call_site: string;
+  prompt_source: 'legacy_stage_template';
+  lifecycle: string;
+  replacement?: string | null;
+  is_primary_runtime_source: boolean;
   system_prompt: string;
   user_prompt: string;
   default_system_prompt: string;

@@ -219,6 +219,173 @@ def test_dimension_worker_v2_uses_unique_subsession_key_per_sheet_job(monkeypatc
     ]
 
 
+def test_dimension_worker_v2_deduplicates_duplicate_sheet_jobs(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUDIT_KIMI_STREAM_ENABLED", "1")
+    dimension_audit = _load_module(monkeypatch)
+
+    call_count = {"value": 0}
+
+    class _FakeEvidenceService:
+        async def get_evidence_pack(self, request):
+            return dimension_audit.EvidencePack(
+                pack_type=request.pack_type,
+                images={
+                    "source_full": b"source",
+                    "source_top_left": b"source",
+                    "source_top_right": b"source",
+                    "source_bottom_left": b"source",
+                    "source_bottom_right": b"source",
+                },
+                source_pdf_path=request.source_pdf_path,
+                source_page_index=request.source_page_index,
+            )
+
+    class _FakeRunner:
+        async def run_stream(self, request, should_cancel=None):  # noqa: ANN001
+            del request, should_cancel
+            call_count["value"] += 1
+            await asyncio.sleep(0.05)
+            return dimension_audit.RunnerTurnResult(
+                provider_name="api",
+                output=[],
+                status="ok",
+                raw_output="[]",
+            )
+
+    monkeypatch.setattr(dimension_audit, "get_evidence_service", lambda: _FakeEvidenceService())
+    monkeypatch.setattr(
+        dimension_audit,
+        "_get_dimension_runner",
+        lambda *args, **kwargs: _FakeRunner(),
+    )
+
+    jobs = [
+        {
+            "sheet_key": "A101",
+            "sheet_no": "A1.01",
+            "pdf_path": "/tmp/a101.pdf",
+            "page_index": 0,
+            "prompt": "test",
+            "cache_key": "dup-sheet-cache",
+            "visual_only": False,
+        },
+        {
+            "sheet_key": "A101",
+            "sheet_no": "A1.01",
+            "pdf_path": "/tmp/a101.pdf",
+            "page_index": 0,
+            "prompt": "test",
+            "cache_key": "dup-sheet-cache",
+            "visual_only": False,
+        },
+    ]
+
+    result = asyncio.run(
+        dimension_audit._execute_sheet_jobs(
+            jobs,
+            2,
+            tmp_path,
+            lambda **kwargs: [],
+            project_id="proj-dim-stream",
+            audit_version=7,
+        )
+    )
+
+    assert result == [
+        ("A101", [], "dup-sheet-cache"),
+        ("A101", [], "dup-sheet-cache"),
+    ]
+    assert call_count["value"] == 1
+
+
+def test_dimension_worker_v2_deduplicates_duplicate_pair_jobs(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUDIT_KIMI_STREAM_ENABLED", "1")
+    dimension_audit = _load_module(monkeypatch)
+
+    call_count = {"value": 0}
+
+    class _FakeEvidenceService:
+        async def get_evidence_pack(self, request):
+            return dimension_audit.EvidencePack(
+                pack_type=request.pack_type,
+                images={
+                    "paired_full": b"pair",
+                    "source_focus": b"pair",
+                    "target_focus": b"pair",
+                },
+                source_pdf_path=request.source_pdf_path,
+                source_page_index=request.source_page_index,
+                target_pdf_path=request.target_pdf_path,
+                target_page_index=request.target_page_index,
+            )
+
+    class _FakeRunner:
+        async def run_stream(self, request, should_cancel=None):  # noqa: ANN001
+            del request, should_cancel
+            call_count["value"] += 1
+            await asyncio.sleep(0.05)
+            return dimension_audit.RunnerTurnResult(
+                provider_name="api",
+                output=[],
+                status="ok",
+                raw_output="[]",
+            )
+
+    monkeypatch.setattr(dimension_audit, "get_evidence_service", lambda: _FakeEvidenceService())
+    monkeypatch.setattr(
+        dimension_audit,
+        "_get_dimension_runner",
+        lambda *args, **kwargs: _FakeRunner(),
+    )
+
+    jobs = [
+        {
+            "a_key": "A101",
+            "b_key": "A401",
+            "a_sheet_no": "A1.01",
+            "a_sheet_name": "A1.01",
+            "b_sheet_no": "A4.01",
+            "b_sheet_name": "A4.01",
+            "semantic_a": [{"id": "1"}],
+            "semantic_b": [{"id": "2"}],
+            "a_pdf_path": "/tmp/a101.pdf",
+            "a_page_index": 0,
+            "b_pdf_path": "/tmp/a401.pdf",
+            "b_page_index": 1,
+            "cache_key": "dup-pair-cache",
+        },
+        {
+            "a_key": "A101",
+            "b_key": "A401",
+            "a_sheet_no": "A1.01",
+            "a_sheet_name": "A1.01",
+            "b_sheet_no": "A4.01",
+            "b_sheet_name": "A4.01",
+            "semantic_a": [{"id": "1"}],
+            "semantic_b": [{"id": "2"}],
+            "a_pdf_path": "/tmp/a101.pdf",
+            "a_page_index": 0,
+            "b_pdf_path": "/tmp/a401.pdf",
+            "b_page_index": 1,
+            "cache_key": "dup-pair-cache",
+        },
+    ]
+
+    result = asyncio.run(
+        dimension_audit._execute_pair_jobs(
+            jobs,
+            2,
+            tmp_path,
+            lambda **kwargs: [],
+            project_id="proj-dim-stream",
+            audit_version=7,
+        )
+    )
+
+    assert result == {("A101", "A401"): []}
+    assert call_count["value"] == 1
+
+
 def test_dimension_worker_wrapper_passes_pair_filters(monkeypatch):
     dimension_audit = _load_module(monkeypatch)
     review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")

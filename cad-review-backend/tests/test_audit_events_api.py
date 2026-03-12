@@ -115,13 +115,101 @@ def test_get_audit_events_filters_by_version_and_returns_plain_fields(monkeypatc
         "第 1 组图纸关系分析完成，发现 2 处关联",
     ]
     assert payload["items"][0]["audit_version"] == 3
-    assert payload["items"][0]["meta"] == {"group_index": 1}
+    assert payload["items"][0]["meta"]["group_index"] == 1
+    assert payload["items"][0]["meta"]["task_stage"] == "worker_relationship_review"
+    assert payload["items"][0]["meta"]["skill_id"] == "node_host_binding"
     assert payload["items"][0]["level"] == "info"
-    assert payload["items"][0]["agent_key"] == "relationship_review_agent"
-    assert payload["items"][0]["agent_name"] == "关系审查Agent"
+    assert payload["items"][0]["agent_key"] == "worker_skill_agent"
+    assert payload["items"][0]["agent_name"] == "节点归属 Skill"
     assert payload["items"][0]["event_kind"] == "phase_progress"
     assert payload["items"][0]["progress_hint"] == 12
     assert payload["items"][1]["level"] == "success"
+
+
+def test_get_audit_events_hides_stream_chunks_by_default_but_keeps_cursor(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-events-stream-hide", name="Events Stream Hide"))
+        db.add(models.AuditRun(project_id="proj-events-stream-hide", audit_version=1, status="running"))
+        db.add_all(
+            [
+                models.AuditRunEvent(
+                    project_id="proj-events-stream-hide",
+                    audit_version=1,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="provider_stream_delta",
+                    progress_hint=29,
+                    message='{"partial":"json"}',
+                    created_at=datetime.now() - timedelta(seconds=5),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-events-stream-hide",
+                    audit_version=1,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="phase_completed",
+                    progress_hint=31,
+                    message="尺寸核对完成",
+                    created_at=datetime.now(),
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.get("/api/projects/proj-events-stream-hide/audit/events", params={"version": 1})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["event_kind"] == "phase_completed"
+    assert payload["next_since_id"] >= payload["items"][0]["id"]
+
+
+def test_get_audit_events_can_include_stream_chunks_for_debug(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-events-stream-show", name="Events Stream Show"))
+        db.add(models.AuditRun(project_id="proj-events-stream-show", audit_version=1, status="running"))
+        db.add(
+            models.AuditRunEvent(
+                project_id="proj-events-stream-show",
+                audit_version=1,
+                level="info",
+                step_key="dimension",
+                agent_key="dimension_review_agent",
+                agent_name="尺寸审查Agent",
+                event_kind="provider_stream_delta",
+                progress_hint=29,
+                message='{"partial":"json"}',
+                created_at=datetime.now(),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/projects/proj-events-stream-show/audit/events",
+            params={"version": 1, "include_stream_events": True},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["event_kind"] == "provider_stream_delta"
 
 
 def test_get_audit_events_supports_since_id_incremental_polling(monkeypatch, tmp_path):
@@ -190,7 +278,7 @@ def test_get_audit_events_supports_since_id_incremental_polling(monkeypatch, tmp
     assert response.status_code == 200
     payload = response.json()
     assert [item["message"] for item in payload["items"]] == [
-        "第 2 组图纸分析时间较长，系统仍在继续",
+        "节点归属 Skill 复核候选关系，后台仍在继续推进",
     ]
     assert payload["next_since_id"] == payload["items"][-1]["id"]
 
@@ -241,3 +329,5 @@ def test_get_audit_events_supports_event_kind_filter(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert [item["event_kind"] for item in payload["items"]] == ["result_upsert"]
+    assert payload["items"][0]["agent_key"] == "finding_synthesizer"
+    assert payload["items"][0]["agent_name"] == "结果汇总器"

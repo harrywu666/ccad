@@ -11,7 +11,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 import services.audit.relationship_discovery as relationship_discovery
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
-from services.kimi_service import call_kimi
+from services.ai_service import call_kimi
 
 
 def test_relationship_runner_uses_sdk_provider_when_enabled(monkeypatch):

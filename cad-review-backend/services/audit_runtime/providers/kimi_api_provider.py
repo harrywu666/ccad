@@ -12,7 +12,7 @@ from services.audit_runtime.runner_types import (
     RunnerTurnRequest,
     RunnerTurnResult,
 )
-from services.kimi_service import call_kimi, call_kimi_stream
+from services.ai_service import call_kimi, call_kimi_stream
 
 
 async def _emit_stream_event(

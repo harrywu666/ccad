@@ -7,13 +7,13 @@ import hashlib
 import json
 import logging
 import os
+import threading
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from domain.sheet_normalization import normalize_index_no, normalize_sheet_no
 from models import AuditResult, Drawing, JsonData, Project, SheetEdge
-from services.ai_prompt_service import resolve_stage_system_prompt_with_skills
 from services.audit.common import build_anchor, to_evidence_json
 from services.audit.persistence import add_and_commit
 from services.audit.prompt_builder import (
@@ -32,6 +32,7 @@ from services.audit_runtime.finding_schema import Finding, GroundingRequiredErro
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider, normalize_provider_mode
 from services.audit_runtime.review_task_schema import WorkerResultCard, WorkerTaskCard
+from services.audit_runtime.runtime_prompt_assembler import RuntimePromptBundle, assemble_legacy_stage_prompt
 from services.audit_runtime.runner_types import (
     ProviderStreamEvent,
     RunnerTurnRequest,
@@ -43,13 +44,47 @@ from services.audit_runtime.state_transitions import (
     append_result_upsert_events,
     append_run_event,
 )
+from services.audit_runtime.stream_policy import audit_stream_enabled
 from services.coordinate_service import cad_to_global_pct, enrich_json_with_coordinates
 from services.feedback_runtime_service import load_feedback_runtime_profile
-from services.kimi_service import call_kimi_stream
+from services.ai_service import call_kimi_stream
 from services.skill_pack_service import load_runtime_skill_profile
 from services.storage_path_service import resolve_project_dir
 
 logger = logging.getLogger(__name__)
+
+_SHEET_JOB_SINGLEFLIGHT: Dict[str, asyncio.Task] = {}
+_PAIR_JOB_SINGLEFLIGHT: Dict[str, asyncio.Task] = {}
+_SINGLEFLIGHT_LOCK = threading.Lock()
+
+
+async def _run_singleflight_job(
+    *,
+    registry: Dict[str, asyncio.Task],
+    key: str,
+    factory,
+):  # noqa: ANN001
+    loop = asyncio.get_running_loop()
+    owner = False
+    task = None
+    with _SINGLEFLIGHT_LOCK:
+        current = registry.get(key)
+        if current is not None and current.done():
+            registry.pop(key, None)
+            current = None
+        if current is not None and current.get_loop() is loop:
+            task = current
+        else:
+            task = loop.create_task(factory())
+            registry[key] = task
+            owner = True
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if owner:
+            with _SINGLEFLIGHT_LOCK:
+                if registry.get(key) is task:
+                    registry.pop(key, None)
 
 
 def _dimension_issue_evidence(issue: AuditResult) -> Dict[str, Any]:
@@ -80,6 +115,9 @@ def _dimension_worker_result_from_issues(task: WorkerTaskCard, issues: List[Audi
             summary=f"旧尺寸审查入口已作为 worker 包装层执行，{task.source_sheet_no} 未发现尺寸类问题",
             meta={
                 "compat_mode": "worker_wrapper",
+                "execution_mode": "worker_wrapper",
+                "legacy_fallback": True,
+                "fallback_origin": "legacy_dimension_wrapper",
                 "sheet_no": task.source_sheet_no,
                 "location": task.objective,
                 "rule_id": "dimension_pair_compare",
@@ -110,6 +148,9 @@ def _dimension_worker_result_from_issues(task: WorkerTaskCard, issues: List[Audi
         escalate_to_chief=(status == "needs_review"),
         meta={
             "compat_mode": "worker_wrapper",
+            "execution_mode": "worker_wrapper",
+            "legacy_fallback": True,
+            "fallback_origin": "legacy_dimension_wrapper",
             "sheet_no": first["sheet_no"],
             "location": first["location"],
             "rule_id": first["rule_id"],
@@ -316,10 +357,7 @@ def _dimension_v2_enabled() -> bool:
 
 
 def _dimension_stream_enabled() -> bool:
-    raw = os.getenv("AUDIT_KIMI_STREAM_ENABLED")
-    if raw is None:
-        return True
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    return audit_stream_enabled(default=False)
 
 
 def _append_dimension_stream_event(
@@ -745,6 +783,7 @@ async def _execute_sheet_jobs(
     *,
     project_id: str | None = None,
     audit_version: int | None = None,
+    prompt_bundle_builder=None,  # noqa: ANN001
 ) -> List[Tuple[str, List[Dict[str, Any]], str]]:
     if not sheet_jobs:
         return []
@@ -753,7 +792,7 @@ async def _execute_sheet_jobs(
     skill_profile = {"judgement_policy": {}, "evidence_bias": {}, "task_bias": {}}
     feedback_profile = {"needs_secondary_review": False}
 
-    async def _run_sheet_job(
+    async def _run_sheet_job_once(
         job: Dict[str, Any],
     ) -> Tuple[str, List[Dict[str, Any]], str]:
         pack_type = EvidencePackType.DEEP_PACK
@@ -776,6 +815,17 @@ async def _execute_sheet_jobs(
             )
         )
         stage_key = "dimension_visual_only" if job.get("visual_only") else "dimension_single_sheet"
+        prompt_bundle = (
+            prompt_bundle_builder(job, stage_key) if callable(prompt_bundle_builder) else None
+        ) or assemble_legacy_stage_prompt(
+            stage_key=stage_key,
+            variables={
+                "sheet_no": job["sheet_no"],
+                "sheet_name": str(job.get("sheet_name") or job["sheet_no"]),
+                "dims_compact_json": [],
+            },
+            user_prompt_override=job["prompt"],
+        )
         if pack_type == EvidencePackType.DEEP_PACK:
             images = [
                 pack.images["source_full"],
@@ -799,11 +849,8 @@ async def _execute_sheet_jobs(
                     step_key="dimension",
                     progress_hint=29,
                     turn_kind="dimension_sheet_semantic",
-                    system_prompt=resolve_stage_system_prompt_with_skills(
-                        stage_key,
-                        "dimension",
-                    ),
-                    user_prompt=job["prompt"],
+                    system_prompt=prompt_bundle.system_prompt,
+                    user_prompt=prompt_bundle.user_prompt,
                     images=images,
                     temperature=0.0,
                     meta={
@@ -811,6 +858,7 @@ async def _execute_sheet_jobs(
                         "sheet_no": job["sheet_no"],
                         "visual_only": bool(job.get("visual_only")),
                         "pack_type": pack_type.value,
+                        "prompt_source": prompt_bundle.meta.get("prompt_source"),
                         "subsession_key": f"sheet_semantic:{job['sheet_key']}",
                     },
                 ),
@@ -830,14 +878,12 @@ async def _execute_sheet_jobs(
                     step_key="dimension",
                     progress_hint=29,
                     turn_kind="dimension_sheet_semantic",
-                    system_prompt=resolve_stage_system_prompt_with_skills(
-                        stage_key,
-                        "dimension",
-                    ),
-                    user_prompt=job["prompt"],
+                    system_prompt=prompt_bundle.system_prompt,
+                    user_prompt=prompt_bundle.user_prompt,
                     images=images,
                     temperature=0.0,
                     meta={
+                        "prompt_source": prompt_bundle.meta.get("prompt_source"),
                         "subsession_key": f"sheet_semantic:{job['sheet_key']}",
                     },
                 )
@@ -869,6 +915,15 @@ async def _execute_sheet_jobs(
             _save_cache_json, cache_dir, "sheet", job["cache_key"], cleaned
         )
         return job["sheet_key"], cleaned, job["cache_key"]
+
+    async def _run_sheet_job(
+        job: Dict[str, Any],
+    ) -> Tuple[str, List[Dict[str, Any]], str]:
+        return await _run_singleflight_job(
+            registry=_SHEET_JOB_SINGLEFLIGHT,
+            key=str(job.get("cache_key") or job.get("sheet_key") or ""),
+            factory=lambda: _run_sheet_job_once(job),
+        )
 
     semaphore = asyncio.Semaphore(sheet_concurrency)
 
@@ -984,6 +1039,7 @@ async def _execute_pair_jobs(
     *,
     project_id: str | None = None,
     audit_version: int | None = None,
+    prompt_bundle_builder=None,  # noqa: ANN001
 ) -> Dict[Tuple[str, str], List[Dict[str, Any]]]:
     if not pair_jobs:
         return {}
@@ -992,7 +1048,7 @@ async def _execute_pair_jobs(
     skill_profile = {"judgement_policy": {}, "evidence_bias": {}, "task_bias": {}}
     feedback_profile = {"needs_secondary_review": False}
 
-    async def _run_pair_job(
+    async def _run_pair_job_once(
         job: Dict[str, Any],
     ) -> Tuple[Tuple[str, str], List[Dict[str, Any]]]:
         pair_images: List[bytes] = []
@@ -1027,6 +1083,27 @@ async def _execute_pair_jobs(
             except Exception:
                 pair_images = []
 
+        prompt_bundle = (
+            prompt_bundle_builder(job) if callable(prompt_bundle_builder) else None
+        ) or assemble_legacy_stage_prompt(
+            stage_key="dimension_pair_compare",
+            variables={
+                "a_sheet_no": job["a_sheet_no"],
+                "a_sheet_name": job["a_sheet_name"],
+                "a_semantic_json": job["semantic_a"],
+                "b_sheet_no": job["b_sheet_no"],
+                "b_sheet_name": job["b_sheet_name"],
+                "b_semantic_json": job["semantic_b"],
+            },
+            user_prompt_override=build_pair_compare_prompt(
+                a_sheet_no=job["a_sheet_no"],
+                a_sheet_name=job["a_sheet_name"],
+                a_semantic=job["semantic_a"],
+                b_sheet_no=job["b_sheet_no"],
+                b_sheet_name=job["b_sheet_name"],
+                b_semantic=job["semantic_b"],
+            ),
+        )
         if project_id is not None and audit_version is not None and _dimension_stream_enabled():
             runner = _get_dimension_runner(
                 project_id,
@@ -1040,24 +1117,15 @@ async def _execute_pair_jobs(
                     step_key="dimension",
                     progress_hint=31,
                     turn_kind="dimension_pair_compare",
-                    system_prompt=resolve_stage_system_prompt_with_skills(
-                        "dimension_pair_compare",
-                        "dimension",
-                    ),
-                    user_prompt=build_pair_compare_prompt(
-                        a_sheet_no=job["a_sheet_no"],
-                        a_sheet_name=job["a_sheet_name"],
-                        a_semantic=job["semantic_a"],
-                        b_sheet_no=job["b_sheet_no"],
-                        b_sheet_name=job["b_sheet_name"],
-                        b_semantic=job["semantic_b"],
-                    ),
+                    system_prompt=prompt_bundle.system_prompt,
+                    user_prompt=prompt_bundle.user_prompt,
                     images=pair_images if pair_images else [],
                     temperature=0.0,
                     meta={
                         "mode": "pair_compare",
                         "source_sheet_no": job["a_sheet_no"],
                         "target_sheet_no": job["b_sheet_no"],
+                        "prompt_source": prompt_bundle.meta.get("prompt_source"),
                         "subsession_key": f"pair_compare:{job['a_key']}:{job['b_key']}",
                     },
                 ),
@@ -1077,21 +1145,12 @@ async def _execute_pair_jobs(
                     step_key="dimension",
                     progress_hint=31,
                     turn_kind="dimension_pair_compare",
-                    system_prompt=resolve_stage_system_prompt_with_skills(
-                        "dimension_pair_compare",
-                        "dimension",
-                    ),
-                    user_prompt=build_pair_compare_prompt(
-                        a_sheet_no=job["a_sheet_no"],
-                        a_sheet_name=job["a_sheet_name"],
-                        a_semantic=job["semantic_a"],
-                        b_sheet_no=job["b_sheet_no"],
-                        b_sheet_name=job["b_sheet_name"],
-                        b_semantic=job["semantic_b"],
-                    ),
+                    system_prompt=prompt_bundle.system_prompt,
+                    user_prompt=prompt_bundle.user_prompt,
                     images=pair_images if pair_images else [],
                     temperature=0.0,
                     meta={
+                        "prompt_source": prompt_bundle.meta.get("prompt_source"),
                         "subsession_key": f"pair_compare:{job['a_key']}:{job['b_key']}",
                     },
                 )
@@ -1124,6 +1183,15 @@ async def _execute_pair_jobs(
             _save_cache_json, cache_dir, "pair", job["cache_key"], cleaned
         )
         return (job["a_key"], job["b_key"]), cleaned
+
+    async def _run_pair_job(
+        job: Dict[str, Any],
+    ) -> Tuple[Tuple[str, str], List[Dict[str, Any]]]:
+        return await _run_singleflight_job(
+            registry=_PAIR_JOB_SINGLEFLIGHT,
+            key=str(job.get("cache_key") or f"{job.get('a_key')}:{job.get('b_key')}"),
+            factory=lambda: _run_pair_job_once(job),
+        )
 
     semaphore = asyncio.Semaphore(pair_concurrency)
 
@@ -1349,9 +1417,11 @@ async def _collect_dimension_pair_issues_async(
     db,
     pair_filters: Optional[List[Tuple[str, str]]] = None,
     hot_sheet_registry: HotSheetRegistry | None = None,
+    sheet_prompt_bundle_builder=None,  # noqa: ANN001
+    pair_prompt_bundle_builder=None,  # noqa: ANN001
 ) -> List[AuditResult]:
     """执行尺寸核查并返回 issues，但不负责落库。"""
-    from services.kimi_service import call_kimi
+    from services.ai_service import call_kimi
 
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -1450,6 +1520,7 @@ async def _collect_dimension_pair_issues_async(
             call_kimi,
             project_id=project_id,
             audit_version=audit_version,
+            prompt_bundle_builder=sheet_prompt_bundle_builder,
         )
         for s_key, cleaned, c_key in sheet_results:
             semantic_cache[s_key] = cleaned
@@ -1473,6 +1544,7 @@ async def _collect_dimension_pair_issues_async(
                 call_kimi,
                 project_id=project_id,
                 audit_version=audit_version,
+                prompt_bundle_builder=pair_prompt_bundle_builder,
             )
         )
         return pc_results, pc_hit, pc_miss

@@ -9,8 +9,8 @@ from typing import Optional
 from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
 from services.audit_runtime.providers.kimi_cli_provider import KimiCliProvider
 from services.audit_runtime.providers.kimi_sdk_provider import KimiSdkProvider
-from services.kimi_service import call_kimi as default_call_kimi
-from services.kimi_service import call_kimi_stream as default_call_kimi_stream
+from services.ai_service import call_kimi as default_call_kimi
+from services.ai_service import call_kimi_stream as default_call_kimi_stream
 
 
 def normalize_provider_mode(raw: Optional[str]) -> str:

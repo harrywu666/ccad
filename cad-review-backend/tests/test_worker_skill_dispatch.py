@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 from pathlib import Path
@@ -10,71 +11,108 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 
-def test_chief_session_marks_skillized_worker_tasks():
-    chief_review_session = importlib.import_module("services.audit_runtime.chief_review_session")
-
-    session = chief_review_session.ChiefReviewSession(project_id="proj-chief", audit_version=1)
-    tasks = session.plan_worker_tasks(
-        memory={
-            "active_hypotheses": [
-                {
-                    "id": "hyp-index",
-                    "topic": "索引引用",
-                    "objective": "核对平面图索引",
-                    "source_sheet_no": "A1.01",
-                    "target_sheet_nos": ["A4.01"],
-                },
-                {
-                    "id": "hyp-node",
-                    "topic": "节点归属",
-                    "objective": "核对节点母图",
-                    "source_sheet_no": "A1.01",
-                    "target_sheet_nos": ["A4.01"],
-                },
-            ]
-        }
-    )
-
-    index_task = next(task for task in tasks if task.worker_kind == "index_reference")
-    node_task = next(task for task in tasks if task.worker_kind == "node_host_binding")
-
-    assert index_task.context["execution_mode"] == "worker_skill"
-    assert index_task.context["skill_id"] == "index_reference"
-    assert node_task.context["execution_mode"] == "worker_skill"
-    assert node_task.context["skill_id"] == "node_host_binding"
-
-
-def test_finding_synthesizer_preserves_skill_metadata():
-    finding_synthesizer = importlib.import_module("services.audit_runtime.finding_synthesizer")
+def test_native_review_worker_returns_native_card_before_wrapper(monkeypatch):
+    review_worker_runtime = importlib.import_module("services.audit_runtime.review_worker_runtime")
+    worker_skill_contract = importlib.import_module("services.audit_runtime.worker_skill_contract")
+    worker_skill_loader = importlib.import_module("services.audit_runtime.worker_skill_loader")
     review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
 
-    findings, escalations = finding_synthesizer.synthesize_findings(
-        worker_results=[
-            review_task_schema.WorkerResultCard(
-                task_id="task-1",
-                hypothesis_id="hyp-1",
-                worker_kind="index_reference",
-                status="confirmed",
-                confidence=0.91,
-                summary="索引引用成立",
-                evidence=[
-                    {
-                        "sheet_no": "A1.01",
-                        "location": "索引D1",
-                        "rule_id": "IDX-001",
-                        "evidence_pack_id": "overview_pack",
-                    }
-                ],
-                meta={
-                    "severity": "warning",
-                    "skill_mode": "worker_skill",
-                    "skill_id": "index_reference",
-                    "skill_path": "/tmp/index_reference/SKILL.md",
-                },
-            )
-        ]
+    async def fake_execute(*, task, db, skill_bundle):  # noqa: ANN001
+        return review_task_schema.WorkerResultCard(
+            task_id=task.id,
+            hypothesis_id=task.hypothesis_id,
+            worker_kind=task.worker_kind,
+            status="confirmed",
+            confidence=0.93,
+            summary="native skill executor ok",
+            meta={
+                "compat_mode": "native_worker",
+                "skill_mode": "worker_skill",
+                "skill_id": skill_bundle.worker_kind,
+            },
+        )
+
+    monkeypatch.setattr(
+        review_worker_runtime,
+        "get_worker_skill_executor",
+        lambda worker_kind: worker_skill_contract.WorkerSkillExecutor(
+            worker_kind=worker_kind,
+            skill_bundle=worker_skill_loader.load_worker_skill("index_reference"),
+            execute=fake_execute,
+        ),
     )
 
-    assert escalations == []
-    assert findings[0].meta["execution_mode"] == "worker_skill"
-    assert findings[0].meta["skill_id"] == "index_reference"
+    result = asyncio.run(
+        review_worker_runtime.run_native_review_worker(
+            task=review_task_schema.WorkerTaskCard(
+                id="task-native-first",
+                hypothesis_id="hyp-native-first",
+                worker_kind="index_reference",
+                objective="确认索引引用",
+                source_sheet_no="A1.01",
+                target_sheet_nos=["A4.01"],
+                context={"project_id": "proj-skill", "audit_version": 1},
+            ),
+            db="db-session",
+        )
+    )
+
+    assert result is not None
+    assert result.meta["compat_mode"] == "native_worker"
+    assert result.meta["skill_mode"] == "worker_skill"
+
+
+def test_wrapper_path_is_only_used_when_skill_executor_missing(monkeypatch):
+    orchestrator = importlib.import_module("services.audit_runtime.orchestrator")
+    review_worker_runtime = importlib.import_module("services.audit_runtime.review_worker_runtime")
+    dimension_audit = importlib.import_module("services.audit.dimension_audit")
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+
+    class _FakeSession:
+        def close(self):
+            return None
+
+    called = {"wrapper": False}
+
+    async def fake_native_runner(*, task, db):  # noqa: ANN001
+        del task, db
+        return None
+
+    def fake_dimension_wrapper(project_id, audit_version, db, task):  # noqa: ANN001
+        del project_id, audit_version, db
+        called["wrapper"] = True
+        return review_task_schema.WorkerResultCard(
+            task_id=task.id,
+            hypothesis_id=task.hypothesis_id,
+            worker_kind=task.worker_kind,
+            status="confirmed",
+            confidence=0.81,
+            summary="legacy wrapper fallback",
+            meta={
+                "compat_mode": "worker_wrapper",
+                "legacy_fallback": True,
+                "fallback_origin": "legacy_dimension_wrapper",
+            },
+        )
+
+    monkeypatch.setattr(orchestrator, "SessionLocal", lambda: _FakeSession())
+    monkeypatch.setattr(review_worker_runtime, "run_native_review_worker", fake_native_runner)
+    monkeypatch.setattr(dimension_audit, "run_dimension_worker_wrapper", fake_dimension_wrapper)
+
+    result = asyncio.run(
+        orchestrator._default_chief_worker_runner(
+            review_task_schema.WorkerTaskCard(
+                id="task-wrapper-fallback",
+                hypothesis_id="hyp-wrapper-fallback",
+                worker_kind="spatial_consistency",
+                objective="核对 A1.01 与 A4.01",
+                source_sheet_no="A1.01",
+                target_sheet_nos=["A4.01"],
+                context={"project_id": "proj-bridge", "audit_version": 11},
+            )
+        )
+    )
+
+    assert called["wrapper"] is True
+    assert result.meta["compat_mode"] == "worker_wrapper"
+    assert result.meta["legacy_fallback"] is True

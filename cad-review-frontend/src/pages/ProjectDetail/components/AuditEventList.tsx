@@ -267,10 +267,10 @@ export default function AuditEventList({
   const content = useMemo(() => {
     if (!displayEvents.length) {
       return (
-        <div className="flex min-h-[360px] items-center justify-center px-6 text-center text-[13px] leading-7 text-muted-foreground">
+        <div className="flex min-h-[280px] items-center justify-center px-6 text-center text-[13px] leading-7 text-muted-foreground">
           {viewMode === 'summary'
-            ? '审图启动后，这里会持续更新关键进展。'
-            : '开发者模式已就绪，这里显示 AI 引擎的原始流式片段。'}
+            ? '主审或副审一有关键动作，这里就会继续往下滚动。'
+            : '这里展示原始模型流，用来查卡顿、重试和输出收束。'}
         </div>
       );
     }
@@ -292,13 +292,15 @@ export default function AuditEventList({
                 )}
               >
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-secondary">
+                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center border border-border bg-secondary/40">
                     <Icon className={cn('size-4 shrink-0', style.iconClassName, event.level === 'info' ? 'animate-spin' : '')} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-5">
-                      <span className="font-medium text-foreground">{event.agentName}</span>
-                      <span className={cn(style.labelClassName)}>{style.label}</span>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] leading-5">
+                      <span className="rounded-full border border-border bg-secondary/30 px-2.5 py-0.5 font-medium text-foreground">
+                        {event.agentName}
+                      </span>
+                      <span className={cn('font-medium', style.labelClassName)}>{style.label}</span>
                       <span className="text-muted-foreground">{formatTime(event.createdAt)}</span>
                       <span className="text-muted-foreground">进度 {progressText}</span>
                       {isRetryEvent({
@@ -310,12 +312,12 @@ export default function AuditEventList({
                         event_kind: event.eventKind,
                       }) ? <span className="text-muted-foreground">retry</span> : null}
                     </div>
-                    <p className={cn('mt-1 whitespace-pre-wrap break-words text-[13px] leading-6', style.lineClassName)}>
+                    <p className={cn('mt-2 whitespace-pre-wrap break-words text-[14px] leading-7', style.lineClassName)}>
                       {event.message}
                       {repeatText}
                     </p>
                     {event.detailMessage ? (
-                      <p className="mt-2 whitespace-pre-wrap break-words text-[12px] leading-6 text-muted-foreground">
+                      <p className="mt-2 whitespace-pre-wrap break-words border-l-2 border-border pl-3 text-[12px] leading-6 text-muted-foreground">
                         {event.detailMessage}
                       </p>
                     ) : null}
@@ -374,11 +376,13 @@ export default function AuditEventList({
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-[15px] font-semibold text-foreground">关键进展</h3>
+            <h3 className="text-[15px] font-semibold text-foreground">
+              {viewMode === 'summary' ? '现场动作流' : '原始模型流'}
+            </h3>
             <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
               {viewMode === 'summary'
-                ? '默认只显示用户能看懂的进度播报，底层碎片会被自动隐藏。'
-                : '这里展示 AI 引擎的真实流式片段，方便调试它卡在哪、是否在重试。'}
+                ? '这里只保留人能看懂的动作播报：谁在干嘛、刚收束了什么、哪里还在等。'
+                : '这里展示底层原始流，用来排查卡顿、重试和输出收束。'}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -389,7 +393,7 @@ export default function AuditEventList({
               className="rounded-none border-border text-[12px] shadow-none hover:bg-secondary hover:shadow-none"
               onClick={() => setViewMode(viewMode === 'summary' ? 'process' : 'summary')}
             >
-              {viewMode === 'summary' ? '开发者模式' : '返回普通视图'}
+              {viewMode === 'summary' ? '查看原始流' : '返回动作流'}
             </Button>
             {loading ? <RefreshCw className="mt-0.5 size-4 animate-spin text-primary" /> : null}
           </div>

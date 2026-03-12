@@ -11,7 +11,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from services.audit.dimension_audit import _get_dimension_runner
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
-from services.kimi_service import call_kimi
+from services.ai_service import call_kimi
 
 
 def test_dimension_runner_uses_sdk_provider_when_enabled(monkeypatch):

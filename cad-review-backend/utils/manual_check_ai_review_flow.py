@@ -287,6 +287,25 @@ def _finding_signature(item: Dict[str, Any]) -> str:
     )
 
 
+def _extract_run_duration_seconds(runtime_audit: Dict[str, Any]) -> Optional[float]:
+    status = runtime_audit.get("status") if isinstance(runtime_audit, dict) else {}
+    if not isinstance(status, dict):
+        return None
+    started_at = _parse_datetime(status.get("started_at"))
+    finished_at = _parse_datetime(status.get("finished_at"))
+    if started_at is None or finished_at is None:
+        return None
+    return round((finished_at - started_at).total_seconds(), 3)
+
+
+def _is_successful_runtime(runtime_audit: Dict[str, Any]) -> bool:
+    status = runtime_audit.get("status") if isinstance(runtime_audit, dict) else {}
+    if not isinstance(status, dict):
+        return False
+    status_value = str(status.get("status") or "").strip().lower()
+    return status_value in {"done", "completed"}
+
+
 def build_shadow_compare_summary(reports: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     legacy = reports.get("legacy") or {}
     chief_review = reports.get("chief_review") or {}
@@ -301,18 +320,55 @@ def build_shadow_compare_summary(reports: Dict[str, Dict[str, Any]]) -> Dict[str
 
     legacy_audit = ((legacy.get("checks") or {}).get("runtime_audit") or {})
     chief_audit = ((chief_review.get("checks") or {}).get("runtime_audit") or {})
+    legacy_status = legacy_audit.get("status") if isinstance(legacy_audit, dict) else {}
+    chief_status = chief_audit.get("status") if isinstance(chief_audit, dict) else {}
+    legacy_pipeline_mode = str((legacy_status or {}).get("pipeline_mode") or "").strip() or None
+    chief_pipeline_mode = str((chief_status or {}).get("pipeline_mode") or "").strip() or None
+    legacy_duration_seconds = _extract_run_duration_seconds(legacy_audit)
+    chief_duration_seconds = _extract_run_duration_seconds(chief_audit)
+    overlap_ratio = round(len(overlap) / len(legacy_signatures | chief_signatures), 3) if (legacy_signatures or chief_signatures) else 1.0
+    legacy_only_ratio = round(len(legacy_only) / len(legacy_signatures), 3) if legacy_signatures else 0.0
+    chief_review_only_ratio = round(len(chief_only) / len(chief_signatures), 3) if chief_signatures else 0.0
+    duration_delta_seconds = None
+    if legacy_duration_seconds is not None and chief_duration_seconds is not None:
+        duration_delta_seconds = round(chief_duration_seconds - legacy_duration_seconds, 3)
+
+    gate_reasons: List[str] = []
+    if not _is_successful_runtime(legacy_audit):
+        gate_reasons.append("legacy_runtime_incomplete")
+    if not _is_successful_runtime(chief_audit):
+        gate_reasons.append("chief_review_runtime_incomplete")
+    if legacy_audit.get("audit_version") and chief_audit.get("audit_version") and legacy_audit.get("audit_version") == chief_audit.get("audit_version"):
+        gate_reasons.append("shadow_runs_not_isolated")
+    if legacy_pipeline_mode and chief_pipeline_mode and legacy_pipeline_mode == chief_pipeline_mode:
+        gate_reasons.append("pipeline_modes_not_diverged")
+    if overlap_ratio < 0.8:
+        gate_reasons.append("overlap_below_threshold")
+    if legacy_only_ratio > 0.2:
+        gate_reasons.append("legacy_miss_rate_too_high")
+    if chief_review_only_ratio > 0.2:
+        gate_reasons.append("chief_review_new_findings_too_high")
+    if duration_delta_seconds is not None and duration_delta_seconds > 30.0:
+        gate_reasons.append("chief_review_duration_regression")
 
     return {
         "legacy_audit_version": legacy_audit.get("audit_version"),
         "chief_review_audit_version": chief_audit.get("audit_version"),
         "legacy_result_count": len(legacy_results),
         "chief_review_result_count": len(chief_results),
+        "legacy_pipeline_mode": legacy_pipeline_mode,
+        "chief_review_pipeline_mode": chief_pipeline_mode,
         "overlap_count": len(overlap),
         "legacy_only_count": len(legacy_only),
         "chief_review_only_count": len(chief_only),
-        "overlap_ratio": round(len(overlap) / len(legacy_signatures | chief_signatures), 3)
-        if (legacy_signatures or chief_signatures)
-        else 1.0,
+        "overlap_ratio": overlap_ratio,
+        "legacy_only_ratio": legacy_only_ratio,
+        "chief_review_only_ratio": chief_review_only_ratio,
+        "legacy_duration_seconds": legacy_duration_seconds,
+        "chief_review_duration_seconds": chief_duration_seconds,
+        "duration_delta_seconds": duration_delta_seconds,
+        "ready_for_cutover": not gate_reasons,
+        "gate_reasons": gate_reasons,
     }
 
 
@@ -320,13 +376,21 @@ def _run_mode_env(run_mode: str) -> Dict[str, Optional[str]]:
     normalized = resolve_run_modes(run_mode)[0]
     shadow_label = None
     chief_enabled = None
+    legacy_pipeline_allowed = None
+    forced_pipeline_mode = None
     if normalized == "chief_review":
         shadow_label = "shadow_chief_review"
         chief_enabled = "1"
+        legacy_pipeline_allowed = "0"
     elif normalized == "legacy":
         shadow_label = "shadow_legacy"
+        chief_enabled = "0"
+        legacy_pipeline_allowed = "1"
+        forced_pipeline_mode = "legacy"
     return {
         "AUDIT_CHIEF_REVIEW_ENABLED": chief_enabled,
+        "AUDIT_LEGACY_PIPELINE_ALLOWED": legacy_pipeline_allowed,
+        "AUDIT_FORCE_PIPELINE_MODE": forced_pipeline_mode,
         "AUDIT_SHADOW_RUN_MODE": shadow_label,
     }
 
@@ -550,6 +614,8 @@ def _run_single_check(
                     "AUDIT_EVIDENCE_PLANNER_ENABLED": args.enable_evidence_planner,
                     "AUDIT_FEEDBACK_RUNTIME_ENABLED": args.enable_feedback_runtime,
                     "AUDIT_CHIEF_REVIEW_ENABLED": run_mode_env["AUDIT_CHIEF_REVIEW_ENABLED"] == "1",
+                    "AUDIT_LEGACY_PIPELINE_ALLOWED": run_mode_env["AUDIT_LEGACY_PIPELINE_ALLOWED"],
+                    "AUDIT_FORCE_PIPELINE_MODE": run_mode_env["AUDIT_FORCE_PIPELINE_MODE"],
                     "AUDIT_SHADOW_RUN_MODE": run_mode_env["AUDIT_SHADOW_RUN_MODE"],
                 },
             }

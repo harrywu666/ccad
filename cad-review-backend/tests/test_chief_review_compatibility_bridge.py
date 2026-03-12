@@ -215,6 +215,7 @@ def test_default_chief_worker_runner_dispatches_to_dimension_wrapper(monkeypatch
 def test_native_review_worker_returns_native_card_for_node_host_binding(monkeypatch):
     review_worker_runtime = importlib.import_module("services.audit_runtime.review_worker_runtime")
     relationship_discovery = importlib.import_module("services.audit.relationship_discovery")
+    node_host_binding_skill = importlib.import_module("services.audit_runtime.worker_skills.node_host_binding_skill")
     review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
 
     captured: dict[str, object] = {}
@@ -239,17 +240,17 @@ def test_native_review_worker_returns_native_card_for_node_host_binding(monkeypa
         ]
 
     monkeypatch.setattr(
-        relationship_discovery,
+        node_host_binding_skill,
         "_load_ready_sheets",
         lambda project_id, db, sheet_filters=None: [
             {"sheet_no": "A1-01", "sheet_name": "首层平面图", "pdf_path": "/tmp/a.pdf", "page_index": 0},
             {"sheet_no": "A4-01", "sheet_name": "节点详图", "pdf_path": "/tmp/b.pdf", "page_index": 0},
         ],
     )
-    monkeypatch.setattr(relationship_discovery, "_discover_relationship_task_v2", fake_discover_relationship_task_v2)
-    monkeypatch.setattr(relationship_discovery, "_validate_and_normalize", lambda rels, valid_sheet_nos: rels)
-    monkeypatch.setattr(review_worker_runtime, "load_runtime_skill_profile", lambda *args, **kwargs: {})
-    monkeypatch.setattr(review_worker_runtime, "load_feedback_runtime_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(node_host_binding_skill, "_discover_relationship_task_v2", fake_discover_relationship_task_v2)
+    monkeypatch.setattr(node_host_binding_skill, "_validate_and_normalize", lambda rels, valid_sheet_nos: rels)
+    monkeypatch.setattr(node_host_binding_skill, "load_runtime_skill_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(node_host_binding_skill, "load_feedback_runtime_profile", lambda *args, **kwargs: {})
 
     result = asyncio.run(
         review_worker_runtime.run_native_review_worker(
@@ -274,6 +275,7 @@ def test_native_review_worker_returns_native_card_for_node_host_binding(monkeypa
     assert result.meta["skill_mode"] == "worker_skill"
     assert result.meta["skill_id"] == "node_host_binding"
     assert result.meta["skill_path"].endswith("agents/review_worker/skills/node_host_binding/SKILL.md")
+    assert result.meta["prompt_source"] == "agent_skill"
 
 
 def test_default_chief_worker_runner_prefers_native_worker(monkeypatch):
@@ -450,6 +452,49 @@ def test_default_chief_worker_runner_prefers_native_index_worker(monkeypatch):
     assert result.meta["compat_mode"] == "native_worker"
 
 
+def test_native_review_worker_returns_skill_card_for_dimension_worker(monkeypatch):
+    review_worker_runtime = importlib.import_module("services.audit_runtime.review_worker_runtime")
+    worker_skill_registry = importlib.import_module("services.audit_runtime.worker_skill_registry")
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+
+    async def fake_dimension_skill(*, task, db, skill_bundle):  # noqa: ANN001
+        return review_task_schema.WorkerResultCard(
+            task_id=task.id,
+            hypothesis_id=task.hypothesis_id,
+            worker_kind=task.worker_kind,
+            status="confirmed",
+            confidence=0.9,
+            summary="dimension skill ok",
+            meta={
+                "compat_mode": "native_worker",
+                "skill_mode": "worker_skill",
+                "skill_id": skill_bundle.worker_kind,
+                "prompt_source": "agent_skill",
+            },
+        )
+
+    monkeypatch.setitem(worker_skill_registry._CALLABLE_REGISTRY, "elevation_consistency", fake_dimension_skill)
+
+    result = asyncio.run(
+        review_worker_runtime.run_native_review_worker(
+            task=review_task_schema.WorkerTaskCard(
+                id="task-native-dim",
+                hypothesis_id="hyp-native-dim",
+                worker_kind="elevation_consistency",
+                objective="确认尺寸一致性",
+                source_sheet_no="A1.01",
+                target_sheet_nos=["A4.01"],
+                context={"project_id": "proj-native-dim", "audit_version": 5},
+            ),
+            db="db-session",
+        )
+    )
+
+    assert result is not None
+    assert result.meta["skill_id"] == "elevation_consistency"
+    assert result.meta["prompt_source"] == "agent_skill"
+
+
 def test_native_review_worker_returns_native_card_for_material_semantic_consistency(monkeypatch):
     review_worker_runtime = importlib.import_module("services.audit_runtime.review_worker_runtime")
     material_skill = importlib.import_module("services.audit_runtime.worker_skills.material_semantic_skill")
@@ -573,7 +618,7 @@ def test_default_chief_worker_runner_prefers_native_material_worker(monkeypatch)
 
 def test_native_review_worker_returns_native_card_for_dimension_consistency(monkeypatch):
     review_worker_runtime = importlib.import_module("services.audit_runtime.review_worker_runtime")
-    dimension_audit = importlib.import_module("services.audit.dimension_audit")
+    dimension_skill = importlib.import_module("services.audit_runtime.worker_skills.dimension_consistency_skill")
     review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
 
     class _Issue:
@@ -598,20 +643,9 @@ def test_native_review_worker_returns_native_card_for_dimension_consistency(monk
     async def fake_collect_async(*args, **kwargs):  # noqa: ANN001
         return [_Issue()]
 
+    monkeypatch.setattr(dimension_skill, "_collect_dimension_pair_issues_async", fake_collect_async)
     monkeypatch.setattr(
-        dimension_audit,
-        "_collect_dimension_pair_issues_async",
-        fake_collect_async,
-    )
-    monkeypatch.setattr(
-        dimension_audit,
-        "_collect_dimension_pair_issues",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("native dimension worker should await async collector")
-        ),
-    )
-    monkeypatch.setattr(
-        dimension_audit,
+        dimension_skill,
         "_dimension_issue_evidence",
         lambda issue: {
             "sheet_no": issue.sheet_no_a,

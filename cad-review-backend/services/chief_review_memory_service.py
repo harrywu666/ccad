@@ -21,11 +21,14 @@ def _normalize_project_memory(
         "project_id": project_id,
         "audit_version": audit_version,
         "sheet_graph_version": str(source.get("sheet_graph_version") or ""),
+        "sheet_graph_semantics_source": str(source.get("sheet_graph_semantics_source") or ""),
         "sheet_summaries": list(source.get("sheet_summaries") or []),
         "confirmed_links": list(source.get("confirmed_links") or []),
         "active_hypotheses": list(source.get("active_hypotheses") or []),
+        "chief_recheck_queue": list(source.get("chief_recheck_queue") or []),
         "resolved_hypotheses": list(source.get("resolved_hypotheses") or []),
         "false_positive_hints": list(source.get("false_positive_hints") or []),
+        "chief_planner_meta": dict(source.get("chief_planner_meta") or {}),
     }
 
 

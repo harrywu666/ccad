@@ -83,6 +83,7 @@ def test_get_audit_runtime_summaries_only_returns_finished_runs_with_internal_su
                     event_kind="output_validation_failed",
                     progress_hint=15,
                     message="关系审查Agent 的输出结构不完整",
+                    meta_json=json.dumps({"actor_role": "worker"}, ensure_ascii=False),
                 ),
                 models.AuditRunEvent(
                     project_id="proj-runtime-1",
@@ -98,6 +99,7 @@ def test_get_audit_runtime_summaries_only_returns_finished_runs_with_internal_su
                         {
                             "runner_help_request": "restart_subsession",
                             "stream_layer": "internal_agent_report",
+                            "actor_role": "worker",
                         },
                         ensure_ascii=False,
                     ),
@@ -145,6 +147,9 @@ def test_get_audit_runtime_summaries_only_returns_finished_runs_with_internal_su
     assert item["counts"]["runner_help_requested"] == 1
     assert item["counts"]["runner_help_resolved"] == 1
     assert item["counts"]["output_validation_failed"] == 1
+    assert item["counts"]["worker_events"] >= 2
     assert item["agent_summaries"][0]["agent_key"] == "relationship_review_agent"
+    assert item["agent_summaries"][0]["agent_role"] == "worker"
     assert item["agent_summaries"][0]["help_requested_count"] == 1
+    assert item["recent_notes"][-1]["agent_role"] == "observer"
     assert item["recent_notes"][-1]["message"] == "Runner 已处理关系审查Agent 的求助请求"

@@ -53,6 +53,15 @@
 ./venv/bin/python utils/migrate_legacy_projects.py --dry-run
 ```
 
+## Runtime Cutover
+- 从 2026-03-12 起，`chief_review` 是默认且主用的生产运行路径。
+- legacy wrappers 仍保留，但只作为显式兼容兜底：
+  - `run_dimension_worker_wrapper`
+  - `run_index_worker_wrapper`
+  - `run_material_worker_wrapper`
+  - `run_relationship_worker_wrapper`
+- legacy stage prompt 仍可被兼容入口调用，但不再是 chief/native runtime 的主提示来源。
+
 ## Chief Review 影子验收
 - 从 2026-03-12 起，影子验收脚本统一使用 `utils/manual_check_ai_review_flow.py`，建议显式带上 `--provider-mode api` 或 `--provider-mode openrouter`，不要依赖默认 provider。
 - 推荐命令：
@@ -64,11 +73,24 @@ cd cad-review-backend
 ./venv/bin/python utils/manual_check_ai_review_flow.py --project-id <project_id> --provider-mode api --run-mode shadow_compare
 ```
 
-- 当前限制：
-  - `shadow_compare` 现在验证的是“影子框架 + API Runner 接通”，不是“新旧主流程已经分叉后的业务对比”。
-  - 本地 `manual_check_ai_review_flow.py` 的“计划预览”会触发较重的关系发现，因此 `shadow_compare` 实跑可能耗时很长；如果要做真实人工对比，先完成主流程切换，再用更长的 `--wait-seconds` 跑。
+- cutover gate：
+  - `overlap_ratio >= 0.80`
+  - `legacy_only_ratio <= 0.20`
+  - `chief_review_only_ratio <= 0.20`
+  - `duration_delta_seconds <= 30`
+  - `ready_for_cutover == true`
+
+- 失败条件：
+  - 任一路径未完成或未成功落到 `done/completed`
+  - 两条影子路径落到同一个 `audit_version` 或没有真正分叉出不同 `pipeline_mode`
+  - 主审路径相对旧路径新增太多问题，或丢失太多旧问题
+  - 主审路径耗时回归超过 30 秒
+
+- 说明：
+  - `shadow_compare` 现在输出的是业务级对比信号，而不只是框架接通。
+  - 本地 `manual_check_ai_review_flow.py` 的“计划预览”仍然会触发较重的关系发现；做真实人工验收时建议显式加更长的 `--wait-seconds`。
 
 ## Chief Review Worker Skills
-- 当前已 skill 化的副审能力：`index_reference`、`material_semantic_consistency`
+- 当前已 skill 化的副审能力：`index_reference`、`material_semantic_consistency`、`node_host_binding`、`elevation_consistency`、`spatial_consistency`
 - skill 资源目录：`agents/review_worker/skills/*/SKILL.md`
 - 运行时骨架仍在 `services/audit_runtime/*`，这轮没有把 `chief_review / runner / observer / recovery` 抽成 skill

@@ -1135,8 +1135,10 @@ export default function ProjectDetail() {
           headline={auditProgressViewModel.headline}
           supportingText={auditProgressViewModel.supportingText}
           startedAt={auditProgressViewModel.startedAt}
-          phases={[...auditProgressViewModel.phases]}
           pipeline={auditProgressViewModel.pipeline}
+          chief={auditProgressViewModel.chief}
+          workerBoard={auditProgressViewModel.workerBoard}
+          resultLedger={auditProgressViewModel.resultLedger}
           activeAgentName={auditProgressViewModel.activeAgentName}
           activeAgentMessage={auditProgressViewModel.activeAgentMessage}
           totalIssues={auditProgressViewModel.totalIssues}

@@ -69,7 +69,7 @@ async def ingest_drawings_upload(project_id: str, project, file: UploadFile, db,
         stream.write(content)
     set_progress(project_id, "processing", 10, "文件上传完成，读取页数中")
 
-    from services.kimi_service import async_recognize_sheet_info
+    from services.ai_service import async_recognize_sheet_info
 
     import fitz
 

@@ -7,6 +7,7 @@ import json
 from services.audit import material_audit
 from services.audit_runtime.worker_skill_contract import build_worker_skill_result
 from services.audit_runtime.worker_skill_loader import WorkerSkillBundle, load_worker_skill
+from services.audit_runtime.runtime_prompt_assembler import assemble_worker_runtime_prompt
 from services.feedback_runtime_service import load_feedback_runtime_profile
 from services.skill_pack_service import load_runtime_skill_profile
 
@@ -23,7 +24,6 @@ async def run_material_semantic_skill(
     skill_profile = load_runtime_skill_profile(
         db,
         skill_type="material",
-        stage_key="material_consistency_review",
     )
     feedback_profile = load_feedback_runtime_profile(db, issue_type="material")
     rule_issues, ai_review_jobs = material_audit._collect_material_rule_issues_and_ai_jobs(
@@ -44,7 +44,22 @@ async def run_material_semantic_skill(
         try:
             all_ai_results = await material_audit._run_material_ai_reviews_bounded(
                 ai_review_jobs,
-                material_audit._run_material_ai_review,
+                lambda **kwargs: material_audit._run_material_ai_review(
+                    **kwargs,
+                    prompt_bundle=assemble_worker_runtime_prompt(
+                        worker_kind="material_semantic_consistency",
+                        task_context={
+                            "sheet_no": kwargs["sheet_no"],
+                            "material_table": kwargs["material_table"],
+                            "material_used": kwargs["material_used"],
+                        },
+                        user_prompt_override=material_audit.build_material_review_prompt(
+                            kwargs["sheet_no"],
+                            material_audit.compact_material_rows(kwargs["material_table"]),
+                            material_audit.compact_material_rows(kwargs["material_used"]),
+                        ),
+                    ),
+                ),
             )
         except Exception:
             all_ai_results = [[] for _ in ai_review_jobs]
@@ -96,6 +111,7 @@ async def run_material_semantic_skill(
             summary=f"原生材料副审未发现 {task.source_sheet_no} 的材料问题",
             rule_id="material_consistency_review",
             evidence_pack_id="focus_pack",
+            meta={"prompt_source": "agent_skill"},
         )
 
     evidence = [material_audit._material_issue_evidence(issue) for issue in issues[:5]]
@@ -116,6 +132,7 @@ async def run_material_semantic_skill(
         evidence_pack_id=str(first["evidence_pack_id"]),
         evidence=evidence,
         meta={
+            "prompt_source": "agent_skill",
             "sheet_no": first["sheet_no"],
             "location": first["location"],
             "severity": first["severity"],

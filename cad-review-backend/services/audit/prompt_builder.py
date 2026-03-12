@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from services.ai_prompt_service import resolve_stage_prompts
+from services.audit_runtime.runtime_prompt_assembler import render_legacy_stage_user_prompt
 
 
 # 功能说明：压缩尺寸标注数据，保留关键字段并限制数量
@@ -47,15 +47,14 @@ def compact_material_rows(rows: List[Dict[str, Any]], *, limit: int = 80) -> Lis
 def build_single_sheet_prompt(
     sheet_no: str, sheet_name: str, dims_compact: List[Dict[str, Any]]
 ) -> str:
-    prompts = resolve_stage_prompts(
-        "dimension_single_sheet",
-        {
+    return render_legacy_stage_user_prompt(
+        stage_key="dimension_single_sheet",
+        variables={
             "sheet_no": sheet_no,
             "sheet_name": sheet_name,
             "dims_compact_json": json.dumps(dims_compact, ensure_ascii=False),
         },
     )
-    return prompts["user_prompt"]
 
 
 # 功能说明：构建两张图纸尺寸对比的提示词
@@ -67,9 +66,9 @@ def build_pair_compare_prompt(
     b_sheet_name: str,
     b_semantic: List[Dict[str, Any]],
 ) -> str:
-    prompts = resolve_stage_prompts(
-        "dimension_pair_compare",
-        {
+    return render_legacy_stage_user_prompt(
+        stage_key="dimension_pair_compare",
+        variables={
             "a_sheet_no": a_sheet_no,
             "a_sheet_name": a_sheet_name,
             "a_semantic_json": json.dumps(a_semantic, ensure_ascii=False),
@@ -78,21 +77,19 @@ def build_pair_compare_prompt(
             "b_semantic_json": json.dumps(b_semantic, ensure_ascii=False),
         },
     )
-    return prompts["user_prompt"]
 
 
 def build_visual_only_sheet_prompt(
     sheet_no: str, sheet_name: str,
 ) -> str:
     """Build prompt for pure-visual dimension analysis (no JSON dimension data)."""
-    prompts = resolve_stage_prompts(
-        "dimension_visual_only",
-        {
+    return render_legacy_stage_user_prompt(
+        stage_key="dimension_visual_only",
+        variables={
             "sheet_no": sheet_no,
             "sheet_name": sheet_name,
         },
     )
-    return prompts["user_prompt"]
 
 
 def build_material_review_prompt(
@@ -100,12 +97,11 @@ def build_material_review_prompt(
     material_table: List[Dict[str, Any]],
     material_used: List[Dict[str, Any]],
 ) -> str:
-    prompts = resolve_stage_prompts(
-        "material_consistency_review",
-        {
+    return render_legacy_stage_user_prompt(
+        stage_key="material_consistency_review",
+        variables={
             "sheet_no": sheet_no,
             "material_table_json": json.dumps(material_table, ensure_ascii=False),
             "material_used_json": json.dumps(material_used, ensure_ascii=False),
         },
     )
-    return prompts["user_prompt"]

@@ -63,6 +63,7 @@ def _patch_runtime(monkeypatch) -> None:
     monkeypatch.setattr(runtime, "_set_running", lambda project_id: True)
     monkeypatch.setattr(runtime, "_clear_running", lambda project_id: None)
     monkeypatch.setattr(runtime, "get_next_audit_version", lambda project_id, db: 1)
+    monkeypatch.setattr(runtime, "resolve_runtime_pipeline_mode", lambda: "chief_review")
     monkeypatch.setattr(
         runtime,
         "start_audit_async",
@@ -129,6 +130,7 @@ def test_start_audit_allows_incomplete_three_line_match_with_confirmation(monkey
     payload = response.json()
     assert payload["success"] is True
     assert payload["audit_version"] == 1
+    assert payload["pipeline_mode"] == "chief_review"
 
     db = session_local()
     try:

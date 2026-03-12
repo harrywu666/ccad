@@ -29,6 +29,10 @@ class PromptStageDefinition:
     default_system_prompt: str
     default_user_prompt: str
     placeholders: tuple[str, ...] = ()
+    lifecycle: str = "legacy_template_compat"
+    replacement: Optional[str] = None
+    is_primary_runtime_source: bool = False
+    runtime_scope: str = "compatibility_only"
 
 
 PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
@@ -38,6 +42,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="目录识别",
         description="识别你上传的目录图，把每一行图号和图名整理出来。",
         call_site="上传目录后，系统会先跑这一段。",
+        replacement="drawing_preprocess_pipeline",
         default_system_prompt="你是室内装饰施工图识别专家，只返回JSON，不要任何解释。",
         default_user_prompt=(
             "你将收到2张图：第1张是目录表左侧放大图（约占全图左侧46%宽度），第2张是全图。\n"
@@ -56,6 +61,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="单页图纸识别",
         description="识别每一页图纸的图号和图名，帮助系统把 PDF 页和目录对上。",
         call_site="上传 PDF 图纸后，系统逐页跑这一段。",
+        replacement="drawing_preprocess_pipeline",
         default_system_prompt="你是施工图识别Agent，只输出JSON。",
         default_user_prompt=(
             "你将收到同一页施工图的3张裁剪图：\n"
@@ -76,6 +82,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="图纸识别汇总",
         description="对逐页识别结果做统一汇总纠偏，修复OCR误差。",
         call_site="图纸识别完成后，系统会跑这一段做全局校正。",
+        replacement="drawing_preprocess_pipeline",
         default_system_prompt=(
             "你是施工图汇总Agent，负责对多页图纸识别结果进行统一校正。\n"
             "校正原则：\n"
@@ -102,6 +109,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="图纸目录匹配校验",
         description="将图纸识别结果与锁定目录做一对一匹配。",
         call_site="图纸汇总完成后，系统会跑这一段做最终匹配。",
+        replacement="drawing_preprocess_pipeline",
         default_system_prompt=(
             "你是施工图匹配校验Agent，负责将图纸页与目录条目做一对一匹配。\n"
             "匹配策略（按优先级）：\n"
@@ -129,6 +137,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="总控任务规划",
         description="系统先决定先查哪些图、哪些图要互相对照，这一段负责排任务。",
         call_site="开始审核后，正式审图前会先跑这一段。",
+        replacement="chief_review/AGENTS.md",
         default_system_prompt=(
             "你是施工图审图总控 Agent，负责把输入图纸关系生成可执行任务图。"
             "必须只返回 JSON。"
@@ -168,6 +177,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="索引视觉复核",
         description="对规则引擎判定为高歧义的索引问题做一次视觉复核，减少误报。",
         call_site="索引核对阶段，仅在规则结果存在歧义时触发。",
+        replacement="review_worker/skills/index_reference/SKILL.md",
         default_system_prompt=(
             "你是室内施工图索引复核专家。"
             "你的任务不是重新全面审图，而是只针对给定的索引疑点做确认。"
@@ -201,6 +211,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="尺寸单图语义分析",
         description="先读懂一张图里每个尺寸大概在说什么，给后面的跨图对比打基础。",
         call_site="尺寸审核时，系统会先对单张图跑这一段。",
+        replacement="review_worker/skills/elevation_consistency/SKILL.md",
         default_system_prompt=(
             "你是专业施工图审核专家，擅长结合全图与象限图做尺寸语义解析。\n\n"
             "施工图基本知识：\n"
@@ -258,6 +269,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="尺寸纯视觉分析",
         description="当 DXF 提取无尺寸数据时，AI 纯视觉读取图纸中的所有尺寸标注。",
         call_site="尺寸审核时，对无 JSON 尺寸数据的图纸跑这一段。",
+        replacement="review_worker/skills/elevation_consistency/SKILL.md",
         default_system_prompt=(
             "你是专业施工图审核专家，擅长通过视觉分析识别和提取图纸中的尺寸标注。\n\n"
             "施工图基本知识：\n"
@@ -308,6 +320,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="尺寸双图对比",
         description="把两张相关图里的尺寸一一对上，找出互相打架的地方。",
         call_site="尺寸审核时，单图分析完成后会跑这一段。",
+        replacement="review_worker/skills/spatial_consistency/SKILL.md",
         default_system_prompt=(
             "你是施工图尺寸一致性审核专家。"
             "你会基于两张图的尺寸语义列表和图片做交叉核对。\n\n"
@@ -369,6 +382,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="图纸关系发现",
         description="AI 视觉分析图纸，自动发现跨图引用关系（索引、详图引用、剖面引用等）。",
         call_site="审核开始时，构建图纸上下文后、规划审核任务前执行。",
+        replacement="review_worker/skills/node_host_binding/SKILL.md",
         default_system_prompt=(
             "你是专业施工图索引关系识别专家。\n\n"
             "你的任务是通过视觉分析施工图，识别所有跨图引用关系。\n\n"
@@ -404,6 +418,7 @@ PROMPT_STAGE_DEFINITIONS: List[PromptStageDefinition] = [
         title="材料一致性审核",
         description="根据材料表与图纸材料标注，识别语义冲突、别名误配与上下文不一致。",
         call_site="材料审核时，系统会对每张图的材料表和材料标注跑这一段。",
+        replacement="review_worker/skills/material_semantic_consistency/SKILL.md",
         default_system_prompt=(
             "你是施工图材料一致性审核专家。\n"
             "你需要结合材料编号、材料名称和表达上下文，识别真正需要人工复核的问题。\n\n"
@@ -471,6 +486,12 @@ def _serialize_stage(
         "title": definition.title,
         "description": definition.description,
         "call_site": definition.call_site,
+        "prompt_source": "legacy_stage_template",
+        "lifecycle": definition.lifecycle,
+        "runtime_scope": definition.runtime_scope,
+        "compatibility_only": definition.runtime_scope == "compatibility_only",
+        "replacement": definition.replacement,
+        "is_primary_runtime_source": definition.is_primary_runtime_source,
         "system_prompt": current_system,
         "user_prompt": current_user,
         "default_system_prompt": definition.default_system_prompt,
@@ -582,6 +603,26 @@ def resolve_stage_prompts(
     rendered_system = _render_template(system_prompt, variables or {})
     rendered_user = _render_template(user_prompt, variables or {})
     return {"system_prompt": rendered_system, "user_prompt": rendered_user}
+
+
+def resolve_stage_prompt_bundle(
+    stage_key: str,
+    variables: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    definition = get_prompt_stage_definition(stage_key)
+    prompts = resolve_stage_prompts(stage_key, variables)
+    return {
+        **prompts,
+        "meta": {
+            "prompt_source": "legacy_stage_template",
+            "stage_key": stage_key,
+            "lifecycle": definition.lifecycle,
+            "runtime_scope": definition.runtime_scope,
+            "compatibility_only": definition.runtime_scope == "compatibility_only",
+            "is_primary_runtime_source": definition.is_primary_runtime_source,
+            "replacement": definition.replacement,
+        },
+    }
 
 
 def resolve_stage_system_prompt(stage_key: str) -> str:

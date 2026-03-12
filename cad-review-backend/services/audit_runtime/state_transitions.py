@@ -21,50 +21,50 @@ from services.audit_runtime.result_view import (
 
 _STEP_AGENT_DEFAULTS: Dict[str, Dict[str, object]] = {
     "prepare": {
-        "agent_key": "master_planner_agent",
-        "agent_name": "总控规划Agent",
+        "agent_key": "chief_review_agent",
+        "agent_name": "主审 Agent",
         "event_kind": "phase_started",
         "progress_hint": 5,
     },
     "context": {
-        "agent_key": "master_planner_agent",
-        "agent_name": "总控规划Agent",
+        "agent_key": "chief_review_agent",
+        "agent_name": "主审 Agent",
         "event_kind": "phase_progress",
         "progress_hint": 10,
     },
     "relationship_discovery": {
-        "agent_key": "relationship_review_agent",
-        "agent_name": "关系审查Agent",
+        "agent_key": "worker_skill_agent",
+        "agent_name": "节点归属 Skill",
         "event_kind": "phase_progress",
         "progress_hint": 12,
     },
     "task_planning": {
-        "agent_key": "master_planner_agent",
-        "agent_name": "总控规划Agent",
+        "agent_key": "chief_review_agent",
+        "agent_name": "主审 Agent",
         "event_kind": "phase_progress",
         "progress_hint": 18,
     },
     "index": {
-        "agent_key": "index_review_agent",
-        "agent_name": "索引审查Agent",
+        "agent_key": "worker_skill_agent",
+        "agent_name": "索引引用 Skill",
         "event_kind": "phase_progress",
         "progress_hint": 35,
     },
     "dimension": {
-        "agent_key": "dimension_review_agent",
-        "agent_name": "尺寸审查Agent",
+        "agent_key": "worker_skill_agent",
+        "agent_name": "尺寸一致性 Skill",
         "event_kind": "phase_progress",
         "progress_hint": 60,
     },
     "material": {
-        "agent_key": "material_review_agent",
-        "agent_name": "材料审查Agent",
+        "agent_key": "worker_skill_agent",
+        "agent_name": "材料语义一致性 Skill",
         "event_kind": "phase_progress",
         "progress_hint": 78,
     },
     "report": {
-        "agent_key": "master_planner_agent",
-        "agent_name": "总控规划Agent",
+        "agent_key": "chief_review_agent",
+        "agent_name": "主审 Agent",
         "event_kind": "phase_completed",
         "progress_hint": 95,
     },
@@ -81,6 +81,106 @@ _OBSERVER_TRIGGER_EVENT_KINDS = {
     "master_recovery_exhausted",
 }
 
+_AGENT_IDENTITY_MAP: Dict[str, Dict[str, str]] = {
+    "master_planner_agent": {
+        "agent_key": "chief_review_agent",
+        "agent_name": "主审 Agent",
+    },
+    "relationship_review_agent": {
+        "agent_key": "worker_skill_agent",
+        "agent_name": "节点归属 Skill",
+        "skill_id": "node_host_binding",
+    },
+    "index_review_agent": {
+        "agent_key": "worker_skill_agent",
+        "agent_name": "索引引用 Skill",
+        "skill_id": "index_reference",
+    },
+    "dimension_review_agent": {
+        "agent_key": "worker_skill_agent",
+        "agent_name": "尺寸一致性 Skill",
+        "skill_id": "elevation_consistency",
+    },
+    "material_review_agent": {
+        "agent_key": "worker_skill_agent",
+        "agent_name": "材料语义一致性 Skill",
+        "skill_id": "material_semantic_consistency",
+    },
+    "runner_agent": {
+        "agent_key": "finding_synthesizer",
+        "agent_name": "结果汇总器",
+    },
+    "runner_observer_agent": {
+        "agent_key": "runtime_observer_agent",
+        "agent_name": "运行时观察器",
+    },
+}
+
+_TASK_STAGE_BY_STEP_KEY: Dict[str, str] = {
+    "prepare": "chief_prepare",
+    "context": "chief_context",
+    "chief_prompt": "chief_prompt_ready",
+    "chief_planning": "worker_task_planning",
+    "relationship_discovery": "worker_relationship_review",
+    "index": "worker_skill_execution",
+    "dimension": "worker_skill_execution",
+    "material": "worker_skill_execution",
+    "chief_review": "chief_recheck",
+    "report": "finding_synthesized",
+    "done": "finding_synthesized",
+    "result_stream": "finding_synthesized",
+}
+
+_TASK_STAGE_BY_TURN_KIND: Dict[str, str] = {
+    "relationship_group_discovery": "worker_relationship_discovery",
+    "relationship_candidate_review": "worker_relationship_review",
+    "sheet_semantic": "worker_single_sheet_semantic",
+    "sheet_semantic_v2": "worker_single_sheet_semantic",
+    "pair_compare": "worker_pair_compare",
+    "pair_compare_v2": "worker_pair_compare",
+    "planning": "worker_task_planning",
+    "task_planning": "worker_task_planning",
+}
+
+_TASK_STAGE_TITLES: Dict[str, str] = {
+    "chief_prepare": "主审准备基础数据",
+    "chief_context": "主审整理图纸上下文",
+    "chief_prompt_ready": "主审装配审图资源",
+    "worker_task_planning": "主审派发副审任务",
+    "worker_relationship_discovery": "节点归属 Skill 整理候选关系",
+    "worker_relationship_review": "节点归属 Skill 复核候选关系",
+    "worker_skill_execution": "副审 Skill 执行任务",
+    "worker_single_sheet_semantic": "尺寸一致性 Skill 提取单图语义",
+    "worker_pair_compare": "尺寸一致性 Skill 执行双图对比",
+    "chief_recheck": "主审复核副审分歧",
+    "finding_synthesized": "主审汇总审图结论",
+    "runtime_progress": "审图运行中",
+}
+
+_SKILL_STAGE_TITLES: Dict[str, Dict[str, str]] = {
+    "node_host_binding": {
+        "worker_relationship_discovery": "节点归属 Skill 整理候选关系",
+        "worker_relationship_review": "节点归属 Skill 复核候选关系",
+        "worker_skill_execution": "节点归属 Skill 执行复核",
+    },
+    "index_reference": {
+        "worker_skill_execution": "索引引用 Skill 执行复核",
+    },
+    "material_semantic_consistency": {
+        "worker_skill_execution": "材料语义一致性 Skill 执行复核",
+    },
+    "elevation_consistency": {
+        "worker_skill_execution": "标高一致性 Skill 执行复核",
+        "worker_single_sheet_semantic": "标高一致性 Skill 提取单图语义",
+        "worker_pair_compare": "标高一致性 Skill 执行双图对比",
+    },
+    "spatial_consistency": {
+        "worker_skill_execution": "空间一致性 Skill 执行复核",
+        "worker_single_sheet_semantic": "空间一致性 Skill 提取单图语义",
+        "worker_pair_compare": "空间一致性 Skill 执行双图对比",
+    },
+}
+
 
 class _PassiveObserverProvider:
     async def observe_once(self, snapshot, memory):  # noqa: ANN001
@@ -92,11 +192,197 @@ def _resolve_event_defaults(step_key: Optional[str]) -> Dict[str, object]:
     if key and key in _STEP_AGENT_DEFAULTS:
         return dict(_STEP_AGENT_DEFAULTS[key])
     return {
-        "agent_key": "master_planner_agent",
-        "agent_name": "总控规划Agent",
+        "agent_key": "chief_review_agent",
+        "agent_name": "主审 Agent",
         "event_kind": "phase_progress",
         "progress_hint": 0,
     }
+
+
+def _resolve_pipeline_mode() -> str:
+    from services.audit_runtime.orchestrator import resolve_pipeline_mode
+
+    return resolve_pipeline_mode()
+
+
+def _infer_task_stage(
+    *,
+    step_key: Optional[str],
+    event_kind: Optional[str],
+    meta: Dict[str, object],
+) -> str:
+    turn_kind = str(meta.get("turn_kind") or "").strip().lower()
+    if turn_kind:
+        stage = _TASK_STAGE_BY_TURN_KIND.get(turn_kind)
+        if stage:
+            return stage
+
+    explicit_stage = str(meta.get("task_stage") or "").strip()
+    if explicit_stage:
+        return explicit_stage
+
+    key = str(step_key or "").strip().lower()
+    if key:
+        stage = _TASK_STAGE_BY_STEP_KEY.get(key)
+        if stage:
+            return stage
+
+    normalized_event_kind = str(event_kind or "").strip().lower()
+    if normalized_event_kind in {"result_upsert", "result_summary"}:
+        return "finding_synthesized"
+    if normalized_event_kind in {"runner_turn_needs_review", "master_replan_requested"}:
+        return "chief_recheck"
+    return "runtime_progress"
+
+
+def _normalize_agent_identity(
+    *,
+    agent_key: Optional[str],
+    agent_name: Optional[str],
+    meta: Dict[str, object],
+) -> Dict[str, str]:
+    normalized_key = str(agent_key or "").strip()
+    mapped = _AGENT_IDENTITY_MAP.get(normalized_key)
+    if not mapped:
+        return {
+            "agent_key": normalized_key,
+            "agent_name": str(agent_name or "").strip(),
+        }
+
+    result = {
+        "agent_key": mapped["agent_key"],
+        "agent_name": mapped["agent_name"],
+    }
+    if mapped.get("skill_id") and not str(meta.get("skill_id") or "").strip():
+        meta["skill_id"] = mapped["skill_id"]
+    return result
+
+
+def _resolve_task_stage_title(task_stage: str, skill_id: str | None = None) -> str | None:
+    normalized_stage = str(task_stage or "").strip()
+    if not normalized_stage:
+        return None
+    normalized_skill = str(skill_id or "").strip()
+    if normalized_skill:
+        title = _SKILL_STAGE_TITLES.get(normalized_skill, {}).get(normalized_stage)
+        if title:
+            return title
+    return _TASK_STAGE_TITLES.get(normalized_stage)
+
+
+def _normalize_runtime_message(
+    *,
+    message: str,
+    identity: Dict[str, str],
+    meta: Dict[str, object],
+) -> str:
+    text = str(message or "").strip()
+    if not text:
+        return text
+
+    replacements = {
+        "总控规划Agent": identity["agent_name"],
+        "关系审查Agent": identity["agent_name"],
+        "索引审查Agent": identity["agent_name"],
+        "尺寸审查Agent": identity["agent_name"],
+        "材料审查Agent": identity["agent_name"],
+        "Runner观察Agent": "运行时观察器",
+    }
+    for before, after in replacements.items():
+        text = text.replace(before, after)
+
+    task_stage = str(meta.get("task_stage") or "").strip()
+    skill_id = str(meta.get("skill_id") or "").strip()
+    stage_title = _resolve_task_stage_title(task_stage, skill_id)
+
+    if stage_title and text in {
+        "规划中",
+        "主审路径：主审 Agent 正在整理这次审图的基础信息",
+        "主审 Agent 正在继续推进当前审图步骤",
+    }:
+        return stage_title
+
+    if stage_title and str(meta.get("event_kind") or "").strip() == "heartbeat":
+        return f"{stage_title}，后台仍在继续推进"
+
+    return text
+
+
+def _enrich_runtime_meta(
+    *,
+    step_key: Optional[str],
+    agent_key: Optional[str],
+    agent_name: Optional[str],
+    event_kind: Optional[str],
+    meta: Optional[Dict[str, object]],
+) -> tuple[Dict[str, str], Dict[str, object]]:
+    payload = dict(meta or {})
+    identity = _normalize_agent_identity(
+        agent_key=agent_key,
+        agent_name=agent_name,
+        meta=payload,
+    )
+    payload.setdefault("pipeline_mode", _resolve_pipeline_mode())
+    payload.setdefault(
+        "planner_source",
+        "chief_agent" if payload.get("pipeline_mode") == "chief_review" else "legacy_stage_planner",
+    )
+    payload.setdefault(
+        "prompt_source",
+        "agent_skill"
+        if str(payload.get("skill_id") or "").strip()
+        else (
+            "chief_agent"
+            if identity["agent_key"] in {"chief_review_agent", "finding_synthesizer", "runtime_observer_agent"}
+            else "legacy_stage_template"
+        ),
+    )
+    payload.setdefault(
+        "skill_mode",
+        "worker_skill" if str(payload.get("skill_id") or "").strip() else "none",
+    )
+    payload.setdefault(
+        "compat_mode",
+        "legacy_template_compat"
+        if payload.get("prompt_source") == "legacy_stage_template"
+        else "native_agent_runtime",
+    )
+    session_key = str(payload.get("session_key") or payload.get("subsession_key") or "").strip()
+    if session_key:
+        payload["session_key"] = session_key
+    evidence_selection_policy = str(payload.get("evidence_selection_policy") or "").strip()
+    if evidence_selection_policy:
+        payload["evidence_selection_policy"] = evidence_selection_policy
+    payload["task_stage"] = _infer_task_stage(
+        step_key=step_key,
+        event_kind=event_kind,
+        meta=payload,
+    )
+    return identity, payload
+
+
+def normalize_event_for_display(
+    *,
+    step_key: Optional[str],
+    agent_key: Optional[str],
+    agent_name: Optional[str],
+    event_kind: Optional[str],
+    message: str,
+    meta: Optional[Dict[str, object]] = None,
+) -> tuple[Dict[str, str], Dict[str, object], str]:
+    identity, payload = _enrich_runtime_meta(
+        step_key=step_key,
+        agent_key=agent_key,
+        agent_name=agent_name,
+        event_kind=event_kind,
+        meta=meta,
+    )
+    normalized_message = _normalize_runtime_message(
+        message=message,
+        identity=identity,
+        meta={**payload, "event_kind": str(event_kind or "").strip()},
+    )
+    return identity, payload, normalized_message
 
 
 def update_run_progress(
@@ -171,21 +457,29 @@ def append_run_event(
     db = SessionLocal()
     try:
         defaults = _resolve_event_defaults(step_key)
+        identity, enriched_meta, normalized_message = normalize_event_for_display(
+            step_key=step_key,
+            agent_key=(agent_key or str(defaults["agent_key"])),
+            agent_name=(agent_name or str(defaults["agent_name"])),
+            event_kind=(event_kind or str(defaults["event_kind"])),
+            message=message,
+            meta=meta,
+        )
         event = AuditRunEvent(
             project_id=project_id,
             audit_version=audit_version,
             level=(level or "info").strip() or "info",
             step_key=(step_key or "").strip() or None,
-            agent_key=(agent_key or str(defaults["agent_key"])).strip() or None,
-            agent_name=(agent_name or str(defaults["agent_name"])).strip() or None,
+            agent_key=identity["agent_key"].strip() or None,
+            agent_name=identity["agent_name"].strip() or None,
             event_kind=(event_kind or str(defaults["event_kind"])).strip() or None,
             progress_hint=(
                 int(progress_hint)
                 if progress_hint is not None
                 else int(defaults["progress_hint"])
             ),
-            message=message.strip(),
-            meta_json=json.dumps(meta, ensure_ascii=False) if meta else None,
+            message=normalized_message,
+            meta_json=json.dumps(enriched_meta, ensure_ascii=False),
         )
         db.add(event)
         db.commit()
@@ -255,7 +549,7 @@ def append_result_upsert_events(
             agent_name="Runner Agent",
             event_kind="result_upsert",
             progress_hint=None,
-            message="Runner Agent 已向报告追加一条问题",
+            message="结果汇总器 已向报告追加一条问题",
             meta={
                 "delta_kind": "upsert",
                 "view": "grouped",
@@ -283,7 +577,7 @@ def append_result_summary_event(project_id: str, audit_version: int) -> None:
         agent_name="Runner Agent",
         event_kind="result_summary",
         progress_hint=None,
-        message=f"Runner Agent 已同步报告汇总：当前共 {counts['total']} 条问题",
+        message=f"结果汇总器 已同步报告汇总：当前共 {counts['total']} 条问题",
         meta={
             "delta_kind": "summary",
             "view": "grouped",

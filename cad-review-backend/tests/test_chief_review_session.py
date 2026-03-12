@@ -34,6 +34,9 @@ def test_chief_review_session_generates_worker_task_cards():
     assert cards[0].worker_kind == "elevation_consistency"
     assert cards[0].source_sheet_no == "A3-01"
     assert cards[0].target_sheet_nos == ["A2-01", "A1-01"]
+    assert cards[0].skill_id == "elevation_consistency"
+    assert cards[0].session_key == "worker_skill:elevation_consistency:A301:A201__A101"
+    assert cards[0].evidence_selection_policy == "paired_full_with_single_sheet_semantics"
 
 
 def test_chief_review_session_marks_skillized_worker_context():
@@ -60,6 +63,8 @@ def test_chief_review_session_marks_skillized_worker_context():
     assert cards[0].worker_kind == "material_semantic_consistency"
     assert cards[0].context["execution_mode"] == "worker_skill"
     assert cards[0].context["skill_id"] == "material_semantic_consistency"
+    assert cards[0].session_key == "worker_skill:material_semantic_consistency:A101:SELF"
+    assert cards[0].evidence_selection_policy == "source_target_material_context"
 
 
 def test_chief_review_session_marks_dimension_skillized_worker_context():
@@ -86,3 +91,4 @@ def test_chief_review_session_marks_dimension_skillized_worker_context():
     assert cards[0].worker_kind == "elevation_consistency"
     assert cards[0].context["execution_mode"] == "worker_skill"
     assert cards[0].context["skill_id"] == "elevation_consistency"
+    assert cards[0].evidence_selection_policy == "paired_full_with_single_sheet_semantics"

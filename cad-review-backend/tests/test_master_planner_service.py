@@ -108,4 +108,8 @@ def test_plan_with_master_llm_sends_only_relevant_contexts(monkeypatch):
     )
 
     assert result["ok"] is True
+    assert result["planner"] == "legacy_master_llm_compat"
+    assert result["planner_source"] == "legacy_stage_planner"
+    assert result["prompt_source"] == "legacy_stage_template"
+    assert result["compat_mode"] == "legacy_template_compat"
     assert [item["sheet_no"] for item in captured_payload["contexts"]] == ["A1.01", "A4.01"]

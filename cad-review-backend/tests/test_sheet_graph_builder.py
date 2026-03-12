@@ -75,3 +75,31 @@ def test_sheet_graph_semantic_builder_uses_llm_to_confirm_sheet_types():
     )
 
     assert graph.sheet_types["A4-02"] == "detail"
+
+
+def test_build_sheet_graph_forwards_llm_runner():
+    sheet_graph_builder = importlib.import_module("services.audit_runtime.sheet_graph_builder")
+    semantic_builder = importlib.import_module("services.audit_runtime.sheet_graph_semantic_builder")
+
+    captured = {}
+
+    def fake_semantic_builder(*, candidates, llm_runner=None):  # noqa: ANN001
+        captured["llm_runner"] = llm_runner
+        return semantic_builder.SheetGraph(
+            sheet_types={},
+            linked_targets={},
+            node_hosts={},
+        )
+
+    original = sheet_graph_builder.build_sheet_graph.__globals__["build_sheet_graph_from_candidates"]
+    sheet_graph_builder.build_sheet_graph.__globals__["build_sheet_graph_from_candidates"] = fake_semantic_builder
+    try:
+        sheet_graph_builder.build_sheet_graph(
+            sheet_contexts=[_ctx("A1-01", "首层平面图")],
+            sheet_edges=[],
+            llm_runner=lambda payload: {"sheet_types": {}, "linked_targets": {}, "node_hosts": {}},
+        )
+    finally:
+        sheet_graph_builder.build_sheet_graph.__globals__["build_sheet_graph_from_candidates"] = original
+
+    assert callable(captured["llm_runner"])

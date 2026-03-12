@@ -36,15 +36,50 @@ const buildStatus = (overrides: Partial<AuditStatus> = {}): AuditStatus => ({
 });
 
 describe('buildAuditProgressViewModel', () => {
-  it('maps audit status and events into a single pipeline snapshot', () => {
+  it('maps chief summary and worker board from runtime events', () => {
     const viewModel = buildAuditProgressViewModel({
       auditStatus: buildStatus(),
       providerLabel: 'Kimi SDK',
       events: [
-        buildEvent({ id: 1, step_key: 'prepare', event_kind: 'phase_completed', progress_hint: 8 }),
-        buildEvent({ id: 2, step_key: 'context', event_kind: 'phase_completed', progress_hint: 11 }),
+        buildEvent({
+          id: 1,
+          step_key: 'task_planning',
+          agent_key: 'chief_review_agent',
+          agent_name: '主审 Agent',
+          event_kind: 'phase_progress',
+          message: '主审 Agent 已生成 12 张副审任务卡',
+        }),
+        buildEvent({
+          id: 2,
+          step_key: 'dimension',
+          agent_key: 'dimension_review_agent',
+          agent_name: '尺寸审查Agent',
+          event_kind: 'runner_turn_started',
+          message: '尺寸审查Agent 已通过 Runner 发起一次流式调用',
+          meta: {
+            actor_role: 'worker',
+            session_key: 'worker_skill:elevation_consistency:A200:SELF',
+            skill_id: 'elevation_consistency',
+          },
+        }),
         buildEvent({
           id: 3,
+          step_key: 'dimension',
+          agent_key: 'dimension_review_agent',
+          agent_name: '尺寸审查Agent',
+          event_kind: 'raw_output_saved',
+          message: '尺寸审查Agent 的原始输出已保存，便于后续排查',
+          meta: {
+            actor_role: 'worker',
+            session_key: 'worker_skill:elevation_consistency:A200:SELF',
+            skill_id: 'elevation_consistency',
+            artifact_path: '/tmp/raw/proj_1__7__dimension_review_agent__dimension_sheet_semantic__proj_1_7_dimension_review_agent_sheet_semantic_A200__20260312_000000.json',
+          },
+        }),
+        buildEvent({ id: 6, step_key: 'prepare', event_kind: 'phase_completed', progress_hint: 8 }),
+        buildEvent({ id: 4, step_key: 'context', event_kind: 'phase_completed', progress_hint: 11 }),
+        buildEvent({
+          id: 5,
           step_key: 'relationship_discovery',
           event_kind: 'runner_broadcast',
           agent_name: '关系审查Agent',
@@ -53,10 +88,13 @@ describe('buildAuditProgressViewModel', () => {
       ],
     });
 
+    expect(viewModel.pipeline[0].title).toBe('主审准备');
     expect(viewModel.pipeline[0].state).toBe('complete');
-    expect(viewModel.pipeline[1].state).toBe('complete');
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'relationship_discovery')?.state).toBe('complete');
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'index')?.state).toBe('current');
+    expect(viewModel.pipeline.find((item) => item.stepKey === 'worker_execution')?.state).toBe('current');
+    expect(viewModel.chief.plannedTaskCount).toBe(12);
+    expect(viewModel.workerBoard.completed).toHaveLength(1);
+    expect(viewModel.workerBoard.completed[0]?.title).toBe('图纸 A200');
+    expect(viewModel.workerBoard.completed[0]?.skillLabel).toBe('标高一致性 Skill');
     expect(viewModel.activeAgentName).toBe('关系审查Agent');
     expect(viewModel.activeAgentMessage).toContain('第 15 组候选关系');
     expect(viewModel.totalIssues).toBe(3);
@@ -93,9 +131,9 @@ describe('buildAuditProgressViewModel', () => {
       events: [],
     });
 
-    expect(viewModel.headline).toBe('预规划审核任务');
+    expect(viewModel.headline).toBe('主审派工');
     expect(viewModel.supportingText).toBe('当前阶段：规划审核任务图');
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'task_planning')?.state).toBe('current');
+    expect(viewModel.pipeline.find((item) => item.stepKey === 'chief_prepare')?.state).toBe('current');
   });
 
   it('marks earlier stages complete when current stage has moved forward', () => {
@@ -116,9 +154,7 @@ describe('buildAuditProgressViewModel', () => {
       ],
     });
 
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'prepare')?.state).toBe('complete');
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'context')?.state).toBe('complete');
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'relationship_discovery')?.state).toBe('complete');
-    expect(viewModel.pipeline.find((item) => item.stepKey === 'dimension')?.state).toBe('current');
+    expect(viewModel.pipeline.find((item) => item.stepKey === 'chief_prepare')?.state).toBe('complete');
+    expect(viewModel.pipeline.find((item) => item.stepKey === 'worker_execution')?.state).toBe('current');
   });
 });

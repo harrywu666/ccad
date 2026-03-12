@@ -59,6 +59,11 @@ def _to_finding(result: WorkerResultCard) -> Finding:
             ).strip(),
             "skill_id": str(result.meta.get("skill_id") or "").strip(),
             "skill_path": str(result.meta.get("skill_path") or "").strip(),
+            "skill_version": str(result.meta.get("skill_version") or "").strip(),
+            "prompt_source": str(result.meta.get("prompt_source") or "").strip(),
+            "compat_mode": str(result.meta.get("compat_mode") or "").strip(),
+            "session_key": str(result.meta.get("session_key") or "").strip(),
+            "evidence_selection_policy": str(result.meta.get("evidence_selection_policy") or "").strip(),
         },
     )
 

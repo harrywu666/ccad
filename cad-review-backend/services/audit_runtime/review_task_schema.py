@@ -26,6 +26,9 @@ class WorkerTaskCard:
     source_sheet_no: str
     target_sheet_nos: list[str] = field(default_factory=list)
     anchor_hint: dict[str, Any] = field(default_factory=dict)
+    skill_id: str = ""
+    session_key: str = ""
+    evidence_selection_policy: str = ""
     context: dict[str, Any] = field(default_factory=dict)
 
 

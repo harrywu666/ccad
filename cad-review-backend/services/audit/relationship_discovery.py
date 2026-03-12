@@ -16,10 +16,6 @@ from typing import Any, Dict, List, Tuple
 
 from domain.sheet_normalization import normalize_sheet_no
 from models import Catalog, Drawing, JsonData, SheetEdge
-from services.ai_prompt_service import (
-    resolve_stage_prompts,
-    resolve_stage_system_prompt_with_skills,
-)
 from services.audit.image_pipeline import pdf_page_to_5images
 from services.coordinate_service import enrich_json_with_coordinates
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
@@ -28,14 +24,20 @@ from services.audit_runtime.contracts import EvidencePack, EvidencePackType, Evi
 from services.audit_runtime.evidence_planner import plan_deep, plan_evidence_requests, plan_lite
 from services.audit_runtime.evidence_service import EvidenceService
 from services.audit_runtime.finding_schema import Finding
+from services.audit_runtime.runtime_prompt_assembler import (
+    RuntimePromptBundle,
+    assemble_legacy_stage_prompt,
+    render_legacy_stage_user_prompt,
+)
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider, normalize_provider_mode
 from services.audit_runtime.review_task_schema import WorkerResultCard, WorkerTaskCard
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
 from services.audit_runtime.state_transitions import append_agent_status_report, append_run_event
+from services.audit_runtime.stream_policy import audit_stream_enabled
 from services.feedback_runtime_service import load_feedback_runtime_profile
-from services.kimi_service import call_kimi_stream
+from services.ai_service import call_kimi_stream
 from services.skill_pack_service import load_runtime_skill_profile
 
 logger = logging.getLogger(__name__)
@@ -199,10 +201,7 @@ def _relationship_render_options() -> Dict[str, float | int]:
 
 
 def _relationship_stream_enabled() -> bool:
-    raw = os.getenv("AUDIT_KIMI_STREAM_ENABLED")
-    if raw is None:
-        return True
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    return audit_stream_enabled(default=False)
 
 
 def _append_relationship_stream_event(
@@ -535,6 +534,9 @@ def _relationship_worker_result_from_relationships(
             summary=f"旧关系发现入口已作为 worker 包装层执行，{task.source_sheet_no} 未发现跨图引用问题",
             meta={
                 "compat_mode": "worker_wrapper",
+                "execution_mode": "worker_wrapper",
+                "legacy_fallback": True,
+                "fallback_origin": "legacy_relationship_wrapper",
                 "sheet_no": task.source_sheet_no,
                 "location": task.objective,
                 "rule_id": "relationship_visual_review",
@@ -569,6 +571,9 @@ def _relationship_worker_result_from_relationships(
         evidence=evidence,
         meta={
             "compat_mode": "worker_wrapper",
+            "execution_mode": "worker_wrapper",
+            "legacy_fallback": True,
+            "fallback_origin": "legacy_relationship_wrapper",
             "sheet_no": first["sheet_no"],
             "location": first["location"],
             "rule_id": first["rule_id"],
@@ -724,18 +729,23 @@ async def _discover_group(
     if not all_images:
         return []
 
-    prompts = resolve_stage_prompts(
-        "sheet_relationship_discovery",
-        {
+    prompt_bundle = assemble_legacy_stage_prompt(
+        stage_key="sheet_relationship_discovery",
+        variables={
             "discovery_prompt": _build_discovery_prompt(
                 group_sheets,
                 all_catalog_entries,
             )
         },
-    )
-    system_prompt = resolve_stage_system_prompt_with_skills(
-        "sheet_relationship_discovery",
-        "index",
+        user_prompt_override=render_legacy_stage_user_prompt(
+            stage_key="sheet_relationship_discovery",
+            variables={
+                "discovery_prompt": _build_discovery_prompt(
+                    group_sheets,
+                    all_catalog_entries,
+                )
+            },
+        ),
     )
     max_tokens = _env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192)
 
@@ -753,14 +763,15 @@ async def _discover_group(
                     step_key="relationship_discovery",
                     progress_hint=15,
                     turn_kind="relationship_group_discovery",
-                    system_prompt=system_prompt,
-                    user_prompt=prompts["user_prompt"],
+                    system_prompt=prompt_bundle.system_prompt,
+                    user_prompt=prompt_bundle.user_prompt,
                     images=all_images,
                     temperature=0.0,
                     max_tokens=max_tokens,
                     meta={
                         "mode": "legacy_group",
                         "sheet_count": len(group_sheets),
+                        "prompt_source": prompt_bundle.meta.get("prompt_source"),
                         "subsession_key": _relationship_subsession_key(
                             "legacy_group",
                             *[sheet.get("sheet_no", "") for sheet in group_sheets],
@@ -783,14 +794,15 @@ async def _discover_group(
                     step_key="relationship_discovery",
                     progress_hint=15,
                     turn_kind="relationship_group_discovery",
-                    system_prompt=system_prompt,
-                    user_prompt=prompts["user_prompt"],
+                    system_prompt=prompt_bundle.system_prompt,
+                    user_prompt=prompt_bundle.user_prompt,
                     images=all_images,
                     temperature=0.0,
                     max_tokens=max_tokens,
                     meta={
                         "mode": "legacy_group",
                         "sheet_count": len(group_sheets),
+                        "prompt_source": prompt_bundle.meta.get("prompt_source"),
                         "subsession_key": _relationship_subsession_key(
                             "legacy_group",
                             *[sheet.get("sheet_no", "") for sheet in group_sheets],
@@ -838,6 +850,7 @@ async def _discover_relationship_task_v2(
     skill_profile: Dict[str, Any],
     feedback_profile: Dict[str, Any],
     hot_sheet_registry: HotSheetRegistry | None = None,
+    prompt_bundle: RuntimePromptBundle | None = None,
 ) -> List[Dict[str, Any]]:
     skip_reason = _should_skip_relationship_candidate_review(source_sheet, target_sheet)
     if skip_reason:
@@ -874,6 +887,12 @@ async def _discover_relationship_task_v2(
     plan = plans[0]
 
     async def _run_plan(plan_item: EvidencePlanItem) -> List[Dict[str, Any]]:
+        discovery_prompt = _build_relationship_task_prompt(source_sheet, target_sheet)
+        resolved_prompt_bundle = prompt_bundle or assemble_legacy_stage_prompt(
+            stage_key="sheet_relationship_discovery",
+            variables={"discovery_prompt": discovery_prompt},
+            user_prompt_override=discovery_prompt,
+        )
         pack = await evidence_service.get_evidence_pack(
             EvidenceRequest(
                 pack_type=plan_item.pack_type,
@@ -897,11 +916,8 @@ async def _discover_relationship_task_v2(
                     step_key="relationship_discovery",
                     progress_hint=15,
                     turn_kind="relationship_candidate_review",
-                    system_prompt=resolve_stage_system_prompt_with_skills(
-                        "sheet_relationship_discovery",
-                        "index",
-                    ),
-                    user_prompt=_build_relationship_task_prompt(source_sheet, target_sheet),
+                    system_prompt=resolved_prompt_bundle.system_prompt,
+                    user_prompt=resolved_prompt_bundle.user_prompt,
                     images=list(pack.images.values()),
                     temperature=0.0,
                     max_tokens=_env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192),
@@ -909,6 +925,7 @@ async def _discover_relationship_task_v2(
                         "candidate_source_sheet_no": source_sheet["sheet_no"],
                         "candidate_target_sheet_no": target_sheet["sheet_no"],
                         "pack_type": plan_item.pack_type.value,
+                        "prompt_source": resolved_prompt_bundle.meta.get("prompt_source"),
                         "subsession_key": _relationship_subsession_key(
                             "candidate_review",
                             source_sheet["sheet_no"],
@@ -933,11 +950,8 @@ async def _discover_relationship_task_v2(
                     step_key="relationship_discovery",
                     progress_hint=15,
                     turn_kind="relationship_candidate_review",
-                    system_prompt=resolve_stage_system_prompt_with_skills(
-                        "sheet_relationship_discovery",
-                        "index",
-                    ),
-                    user_prompt=_build_relationship_task_prompt(source_sheet, target_sheet),
+                    system_prompt=resolved_prompt_bundle.system_prompt,
+                    user_prompt=resolved_prompt_bundle.user_prompt,
                     images=list(pack.images.values()),
                     temperature=0.0,
                     max_tokens=_env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192),
@@ -945,6 +959,7 @@ async def _discover_relationship_task_v2(
                         "candidate_source_sheet_no": source_sheet["sheet_no"],
                         "candidate_target_sheet_no": target_sheet["sheet_no"],
                         "pack_type": plan_item.pack_type.value,
+                        "prompt_source": resolved_prompt_bundle.meta.get("prompt_source"),
                         "subsession_key": _relationship_subsession_key(
                             "candidate_review",
                             source_sheet["sheet_no"],
@@ -1423,7 +1438,7 @@ def discover_relationships(
     sheet_filters: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Synchronous wrapper for discover_relationships_async."""
-    from services.kimi_service import call_kimi
+    from services.ai_service import call_kimi
     kwargs: Dict[str, Any] = {}
     if audit_version is not None:
         kwargs["audit_version"] = audit_version
@@ -1440,7 +1455,7 @@ def discover_relationships_v2(
     hot_sheet_registry: HotSheetRegistry | None = None,
     sheet_filters: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
-    from services.kimi_service import call_kimi
+    from services.ai_service import call_kimi
     kwargs: Dict[str, Any] = {}
     if audit_version is not None:
         kwargs["audit_version"] = audit_version

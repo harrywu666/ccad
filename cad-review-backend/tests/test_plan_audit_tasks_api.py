@@ -31,6 +31,10 @@ def _clear_backend_modules() -> None:
         "services.task_planner_service",
         "services.master_planner_service",
         "services.audit.relationship_discovery",
+        "services.audit_runtime_service",
+        "services.audit_runtime.orchestrator",
+        "services.audit_runtime.chief_review_planner",
+        "services.audit_runtime.chief_review_session",
     )
     for name in list(sys.modules):
         if name in targets or name.startswith("routers."):
@@ -50,7 +54,7 @@ def _load_test_app(monkeypatch, tmp_path):
     return main.app, database.SessionLocal, models
 
 
-def test_plan_audit_tasks_runs_ai_relationship_discovery(monkeypatch, tmp_path):
+def test_plan_audit_tasks_uses_chief_review_preview_by_default(monkeypatch, tmp_path):
     app, session_local, models = _load_test_app(monkeypatch, tmp_path)
 
     db = session_local()
@@ -80,28 +84,29 @@ def test_plan_audit_tasks_runs_ai_relationship_discovery(monkeypatch, tmp_path):
     finally:
         db.close()
 
-    context_service = importlib.import_module("services.context_service")
-    relationship_discovery = importlib.import_module("services.audit.relationship_discovery")
+    audit_router = importlib.import_module("routers.audit")
+    runtime = importlib.import_module("services.audit_runtime_service")
 
     monkeypatch.setattr(
-        context_service,
-        "build_sheet_contexts",
-        lambda project_id, db: {"ready": 2, "pending": 0},
+        runtime,
+        "resolve_runtime_pipeline_mode",
+        lambda: "chief_review",
     )
     monkeypatch.setattr(
-        relationship_discovery,
-        "discover_relationships",
-        lambda project_id, db, audit_version=None: [
-            {
-                "source": "A1.01",
-                "target": "A4.01",
-                "relation": "detail_ref",
-                "global_pct": {"x": 42.0, "y": 58.0},
-                "index_label": "1",
-                "confidence": 0.93,
-                "visual_evidence": "detail bubble",
-            }
-        ],
+        audit_router,
+        "_plan_tasks_with_chief_review_preview",
+        lambda project_id, audit_version, db: {
+            "success": True,
+            "audit_version": audit_version,
+            "context_summary": {"ready": 2, "pending": 0},
+            "relationship_summary": {"discovered": 1, "source": "chief_review_preview"},
+            "task_summary": {
+                "total": 3,
+                "index_tasks": 1,
+                "dimension_tasks": 1,
+                "material_tasks": 1,
+            },
+        },
     )
 
     with TestClient(app) as client:
@@ -111,24 +116,10 @@ def test_plan_audit_tasks_runs_ai_relationship_discovery(monkeypatch, tmp_path):
     payload = response.json()
     assert payload["success"] is True
     assert payload["relationship_summary"]["discovered"] == 1
+    assert payload["relationship_summary"]["source"] == "chief_review_preview"
     assert payload["task_summary"]["index_tasks"] == 1
     assert payload["task_summary"]["dimension_tasks"] == 1
     assert payload["task_summary"]["material_tasks"] == 1
-
-    db = session_local()
-    try:
-        ai_edges = (
-            db.query(models.SheetEdge)
-            .filter(
-                models.SheetEdge.project_id == "proj-plan-api",
-                models.SheetEdge.edge_type == "ai_visual",
-            )
-            .all()
-        )
-    finally:
-        db.close()
-
-    assert len(ai_edges) == 1
 
 
 def test_plan_audit_tasks_uses_v2_relationship_runner_when_flag_enabled(monkeypatch, tmp_path):
@@ -153,8 +144,14 @@ def test_plan_audit_tasks_uses_v2_relationship_runner_when_flag_enabled(monkeypa
 
     context_service = importlib.import_module("services.context_service")
     relationship_discovery = importlib.import_module("services.audit.relationship_discovery")
+    runtime = importlib.import_module("services.audit_runtime_service")
 
     monkeypatch.setenv("AUDIT_ORCHESTRATOR_V2_ENABLED", "1")
+    monkeypatch.setattr(
+        runtime,
+        "resolve_runtime_pipeline_mode",
+        lambda: "v2",
+    )
     monkeypatch.setattr(
         context_service,
         "build_sheet_contexts",

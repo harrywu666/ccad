@@ -29,7 +29,7 @@ describe('AuditEventList', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '开发者模式' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看原始流' }));
 
     expect(screen.getByText('先整理目录，再检查跨图关系。')).toBeInTheDocument();
   });
@@ -44,7 +44,7 @@ describe('AuditEventList', () => {
       />,
     );
 
-    expect(screen.getByText('关键进展')).toBeInTheDocument();
+    expect(screen.getByText('现场动作流')).toBeInTheDocument();
     expect(screen.queryByText('terminal://audit-stream')).not.toBeInTheDocument();
     expect(screen.queryByText('这是原始模型片段')).not.toBeInTheDocument();
     expect(screen.getByText('开始规划')).toBeInTheDocument();

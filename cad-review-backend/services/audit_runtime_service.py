@@ -14,7 +14,9 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 from database import SessionLocal
-from models import AuditResult, AuditRun, AuditRunEvent, AuditTask
+from sqlalchemy import func
+
+from models import AuditResult, AuditRun, AuditRunEvent, AuditTask, ProjectMemoryRecord
 from services.audit_runtime.providers.factory import normalize_provider_mode
 
 _running_lock = threading.Lock()
@@ -24,10 +26,55 @@ _worker_generations: dict[str, int] = {}
 logger = logging.getLogger(__name__)
 
 _PLANNING_STEP_TITLES = {
-    "prepare": "准备检查",
-    "context": "构建图纸上下文",
-    "relationship_discovery": "AI 分析图纸关系",
-    "task_planning": "规划审核任务图",
+    "prepare": "主审准备基础数据",
+    "context": "主审整理图纸上下文",
+    "relationship_discovery": "副审整理候选关系",
+    "task_planning": "主审派发副审任务",
+    "chief_prompt": "主审装配审图资源",
+    "chief_planning": "主审派发副审任务",
+    "chief_review": "主审复核冲突结果",
+    "report": "主审收束审核结果",
+    "done": "主审完成结果收束",
+}
+
+_TASK_STAGE_TITLES = {
+    "chief_prepare": "主审准备基础数据",
+    "chief_context": "主审整理图纸上下文",
+    "chief_prompt_ready": "主审装配审图资源",
+    "worker_task_planning": "主审派发副审任务",
+    "worker_relationship_discovery": "节点归属 Skill 整理候选关系",
+    "worker_relationship_review": "节点归属 Skill 复核候选关系",
+    "worker_skill_execution": "副审 Skill 执行任务",
+    "worker_single_sheet_semantic": "尺寸一致性 Skill 提取单图语义",
+    "worker_pair_compare": "尺寸一致性 Skill 执行双图对比",
+    "chief_recheck": "主审复核副审分歧",
+    "finding_synthesized": "主审汇总审图结论",
+}
+
+_SKILL_STAGE_TITLES = {
+    ("node_host_binding", "worker_relationship_discovery"): "节点归属 Skill 整理候选关系",
+    ("node_host_binding", "worker_relationship_review"): "节点归属 Skill 复核候选关系",
+    ("node_host_binding", "worker_skill_execution"): "节点归属 Skill 执行复核",
+    ("index_reference", "worker_skill_execution"): "索引引用 Skill 执行复核",
+    ("material_semantic_consistency", "worker_skill_execution"): "材料语义一致性 Skill 执行复核",
+    ("elevation_consistency", "worker_skill_execution"): "标高一致性 Skill 执行复核",
+    ("elevation_consistency", "worker_single_sheet_semantic"): "标高一致性 Skill 提取单图语义",
+    ("elevation_consistency", "worker_pair_compare"): "标高一致性 Skill 执行双图对比",
+    ("spatial_consistency", "worker_skill_execution"): "空间一致性 Skill 执行复核",
+    ("spatial_consistency", "worker_single_sheet_semantic"): "空间一致性 Skill 提取单图语义",
+    ("spatial_consistency", "worker_pair_compare"): "空间一致性 Skill 执行双图对比",
+}
+
+_RUN_STEP_TO_TASK_STAGE = {
+    "等待主审启动": "chief_prepare",
+    "主审准备基础数据": "chief_prepare",
+    "主审整理图纸上下文": "chief_context",
+    "主审派发副审任务": "worker_task_planning",
+    "主审复核冲突结果": "chief_recheck",
+    "主审完成结果收束": "finding_synthesized",
+    "主审恢复中": "chief_recovery",
+    "主审流程已中断": "runtime_interrupted",
+    "主审流程失败": "runtime_failed",
 }
 
 
@@ -119,16 +166,23 @@ def get_latest_run(project_id: str, db) -> Optional[AuditRun]:
 
 
 def get_next_audit_version(project_id: str, db) -> int:
-    latest_run = get_latest_run(project_id, db)
-    latest_result = (
-        db.query(AuditResult)
-        .filter(AuditResult.project_id == project_id)
-        .order_by(AuditResult.audit_version.desc())
-        .first()
+    version_sources = (
+        AuditRun,
+        AuditResult,
+        ProjectMemoryRecord,
+        AuditRunEvent,
+        AuditTask,
     )
-    max_run_ver = latest_run.audit_version if latest_run else 0
-    max_result_ver = latest_result.audit_version if latest_result else 0
-    return max(max_run_ver, max_result_ver) + 1
+    max_version = 0
+    for model in version_sources:
+        value = (
+            db.query(func.max(model.audit_version))
+            .filter(model.project_id == project_id)
+            .scalar()
+        )
+        if isinstance(value, int):
+            max_version = max(max_version, value)
+    return max_version + 1
 
 
 def _append_task_trace(task: AuditTask, payload: Dict[str, object]) -> None:
@@ -167,7 +221,7 @@ def mark_stale_running_runs(project_id: str, db, reason: str = "任务已中断�
     stale_versions = {run.audit_version for run in stale_runs}
     for run in stale_runs:
         run.status = "failed"
-        run.current_step = "执行中断"
+        run.current_step = "主审流程已中断"
         run.error = run.error or reason
         run.finished_at = run.finished_at or now
         run.updated_at = now
@@ -233,6 +287,12 @@ def start_audit_async(
     worker.start()
 
 
+def resolve_runtime_pipeline_mode() -> str:
+    from services.audit_runtime.orchestrator import resolve_pipeline_mode
+
+    return resolve_pipeline_mode()
+
+
 def restart_master_agent_async(project_id: str, audit_version: int) -> Dict[str, object]:
     db = SessionLocal()
     try:
@@ -247,7 +307,7 @@ def restart_master_agent_async(project_id: str, audit_version: int) -> Dict[str,
         if not run:
             return {"restarted": False, "reason": "run_not_found"}
         run.status = "running"
-        run.current_step = "总控恢复中"
+        run.current_step = "主审恢复中"
         run.error = None
         run.updated_at = datetime.now()
         db.commit()
@@ -274,6 +334,8 @@ def restart_master_agent_async(project_id: str, audit_version: int) -> Dict[str,
 
 
 def build_run_snapshot(run: Optional[AuditRun]) -> Dict[str, object]:
+    pipeline_mode = resolve_runtime_pipeline_mode()
+    task_stage = _RUN_STEP_TO_TASK_STAGE.get(str(getattr(run, "current_step", "") or "").strip()) if run else None
     if not run:
         return {
             "audit_version": None,
@@ -281,6 +343,15 @@ def build_run_snapshot(run: Optional[AuditRun]) -> Dict[str, object]:
             "current_step": None,
             "progress": 0,
             "total_issues": 0,
+            "pipeline_mode": pipeline_mode,
+            "planner_source": "chief_agent" if pipeline_mode == "chief_review" else "legacy_stage_planner",
+            "task_stage": task_stage,
+            "prompt_source": None,
+            "skill_id": None,
+            "skill_mode": None,
+            "compat_mode": None,
+            "session_key": None,
+            "evidence_selection_policy": None,
             "error": None,
             "started_at": None,
             "finished_at": None,
@@ -294,6 +365,15 @@ def build_run_snapshot(run: Optional[AuditRun]) -> Dict[str, object]:
         "current_step": run.current_step,
         "progress": run.progress,
         "total_issues": run.total_issues,
+        "pipeline_mode": pipeline_mode,
+        "planner_source": "chief_agent" if pipeline_mode == "chief_review" else "legacy_stage_planner",
+        "task_stage": task_stage,
+        "prompt_source": "chief_agent" if pipeline_mode == "chief_review" and task_stage and task_stage.startswith("chief_") else None,
+        "skill_id": None,
+        "skill_mode": None,
+        "compat_mode": None,
+        "session_key": None,
+        "evidence_selection_policy": None,
         "provider_mode": normalize_provider_mode(getattr(run, "provider_mode", None)),
         "error": run.error,
         "started_at": run.started_at.isoformat() if run.started_at else None,
@@ -308,6 +388,18 @@ def _resolve_planning_step_title(step_key: Optional[str]) -> Optional[str]:
     if not key:
         return None
     return _PLANNING_STEP_TITLES.get(key)
+
+
+def _resolve_task_stage_title(task_stage: object, skill_id: object) -> Optional[str]:
+    normalized_stage = str(task_stage or "").strip()
+    if not normalized_stage:
+        return None
+    normalized_skill = str(skill_id or "").strip()
+    if normalized_skill:
+        title = _SKILL_STAGE_TITLES.get((normalized_skill, normalized_stage))
+        if title:
+            return title
+    return _TASK_STAGE_TITLES.get(normalized_stage)
 
 
 def build_recent_event_snapshot(
@@ -346,12 +438,27 @@ def build_recent_event_snapshot(
             "task_planning": 18,
         }.get((latest_event.step_key or "").strip().lower(), 8)
 
+    current_step = (
+        _resolve_task_stage_title(meta.get("task_stage"), meta.get("skill_id"))
+        or _resolve_planning_step_title(latest_event.step_key)
+        or latest_event.message
+    )
+
     return {
         "audit_version": latest_event.audit_version,
         "status": "planning",
-        "current_step": _resolve_planning_step_title(latest_event.step_key) or latest_event.message,
+        "current_step": current_step,
         "progress": progress,
         "total_issues": 0,
+        "pipeline_mode": str(meta.get("pipeline_mode") or resolve_runtime_pipeline_mode()).strip() or "chief_review",
+        "planner_source": str(meta.get("planner_source") or "").strip() or None,
+        "task_stage": str(meta.get("task_stage") or "").strip() or None,
+        "prompt_source": str(meta.get("prompt_source") or "").strip() or None,
+        "skill_id": str(meta.get("skill_id") or "").strip() or None,
+        "skill_mode": str(meta.get("skill_mode") or "").strip() or None,
+        "compat_mode": str(meta.get("compat_mode") or "").strip() or None,
+        "session_key": str(meta.get("session_key") or "").strip() or None,
+        "evidence_selection_policy": str(meta.get("evidence_selection_policy") or "").strip() or None,
         "provider_mode": provider_mode,
         "error": None,
         "started_at": latest_event.created_at.isoformat() if latest_event.created_at else None,
@@ -359,6 +466,57 @@ def build_recent_event_snapshot(
         "scope_mode": None,
         "scope_summary": None,
     }
+
+
+def enrich_snapshot_from_latest_event(
+    project_id: str,
+    audit_version: Optional[int],
+    snapshot: Dict[str, object],
+    db,
+) -> Dict[str, object]:
+    if audit_version is None:
+        return snapshot
+
+    latest_event = (
+        db.query(AuditRunEvent)
+        .filter(
+            AuditRunEvent.project_id == project_id,
+            AuditRunEvent.audit_version == audit_version,
+        )
+        .order_by(AuditRunEvent.created_at.desc(), AuditRunEvent.id.desc())
+        .first()
+    )
+    if not latest_event or not latest_event.meta_json:
+        return snapshot
+
+    try:
+        meta = json.loads(latest_event.meta_json)
+        if not isinstance(meta, dict):
+            return snapshot
+    except Exception:
+        return snapshot
+
+    merged = dict(snapshot)
+    for key in (
+        "pipeline_mode",
+        "planner_source",
+        "task_stage",
+        "prompt_source",
+        "skill_id",
+        "skill_mode",
+        "compat_mode",
+        "session_key",
+        "evidence_selection_policy",
+    ):
+        value = meta.get(key)
+        if isinstance(value, str):
+            value = value.strip() or None
+        if value is not None:
+            merged[key] = value
+    stage_title = _resolve_task_stage_title(merged.get("task_stage"), merged.get("skill_id"))
+    if stage_title:
+        merged["current_step"] = stage_title
+    return merged
 
 
 def get_audit_started_at_from_events(

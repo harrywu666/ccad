@@ -21,11 +21,14 @@ from models import (
     AuditRun,
     AuditRunEvent,
     AuditTask,
+    SheetContext,
+    SheetEdge,
     AuditIssueDrawing,
     DrawingAnnotation,
     FeedbackSample,
 )
 from services.audit.issue_preview import get_issue_preview
+from services.audit_runtime.stream_policy import should_expose_event_to_user, user_streaming_enabled
 from services.audit_runtime.result_view import (
     group_results_for_view,
     normalize_feedback_status,
@@ -88,6 +91,15 @@ class AuditStatusResponse(BaseModel):
     total_issues: int = 0
     run_status: Optional[str] = None
     provider_mode: Optional[str] = None
+    pipeline_mode: Optional[str] = None
+    planner_source: Optional[str] = None
+    task_stage: Optional[str] = None
+    prompt_source: Optional[str] = None
+    skill_id: Optional[str] = None
+    skill_mode: Optional[str] = None
+    compat_mode: Optional[str] = None
+    session_key: Optional[str] = None
+    evidence_selection_policy: Optional[str] = None
     error: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
@@ -346,6 +358,7 @@ def get_audit_status(project_id: str, db: Session = Depends(get_db)):
     from services.audit_runtime_service import (
         build_recent_event_snapshot,
         build_run_snapshot,
+        enrich_snapshot_from_latest_event,
         get_audit_started_at_from_events,
         get_latest_run,
     )
@@ -374,6 +387,7 @@ def get_audit_status(project_id: str, db: Session = Depends(get_db)):
             .first()
         )
         audit_version = latest_result.audit_version if latest_result else None
+    snapshot = enrich_snapshot_from_latest_event(project_id, audit_version, snapshot, db)
 
     total_issues = snapshot["total_issues"] or 0
     if audit_version is not None and total_issues == 0:
@@ -395,6 +409,15 @@ def get_audit_status(project_id: str, db: Session = Depends(get_db)):
         total_issues=total_issues,
         run_status=snapshot["status"],
         provider_mode=snapshot.get("provider_mode"),
+        pipeline_mode=snapshot.get("pipeline_mode"),
+        planner_source=snapshot.get("planner_source"),
+        task_stage=snapshot.get("task_stage"),
+        prompt_source=snapshot.get("prompt_source"),
+        skill_id=snapshot.get("skill_id"),
+        skill_mode=snapshot.get("skill_mode"),
+        compat_mode=snapshot.get("compat_mode"),
+        session_key=snapshot.get("session_key"),
+        evidence_selection_policy=snapshot.get("evidence_selection_policy"),
         error=snapshot["error"],
         started_at=snapshot["started_at"],
         finished_at=snapshot["finished_at"],
@@ -499,7 +522,16 @@ def _stream_env_float(name: str, default: float) -> float:
     return value if value > 0 else default
 
 
-def _serialize_audit_event_row(row: AuditRunEvent) -> AuditRunEventResponse:
+def _serialize_audit_event_row(
+    row: AuditRunEvent,
+    *,
+    include_stream_events: bool = False,
+) -> Optional[AuditRunEventResponse]:
+    from services.audit_runtime.state_transitions import normalize_event_for_display
+
+    if not include_stream_events and not should_expose_event_to_user(row.event_kind):
+        return None
+
     meta: Dict[str, Any] = {}
     if row.meta_json:
         try:
@@ -510,18 +542,26 @@ def _serialize_audit_event_row(row: AuditRunEvent) -> AuditRunEventResponse:
             meta = {}
     if row.event_kind == "runner_broadcast":
         meta.setdefault("stream_layer", "user_facing")
+    identity, normalized_meta, normalized_message = normalize_event_for_display(
+        step_key=row.step_key,
+        agent_key=row.agent_key,
+        agent_name=row.agent_name,
+        event_kind=row.event_kind,
+        message=row.message,
+        meta=meta,
+    )
     return AuditRunEventResponse(
         id=row.id,
         audit_version=row.audit_version,
         level=row.level,
         step_key=row.step_key,
-        agent_key=row.agent_key,
-        agent_name=row.agent_name,
+        agent_key=identity["agent_key"],
+        agent_name=identity["agent_name"],
         event_kind=row.event_kind,
         progress_hint=row.progress_hint,
-        message=row.message,
+        message=normalized_message,
         created_at=row.created_at.isoformat() if row.created_at else None,
-        meta=meta,
+        meta=normalized_meta,
     )
 
 
@@ -556,7 +596,13 @@ def _format_sse_event(*, event: str, data: Dict[str, Any], event_id: Optional[in
     return "\n".join(lines) + "\n\n"
 
 
-def _iter_audit_events_stream(project_id: str, version: int, since_id: Optional[int]):
+def _iter_audit_events_stream(
+    project_id: str,
+    version: int,
+    since_id: Optional[int],
+    *,
+    include_stream_events: bool = False,
+):
     last_id = int(since_id or 0)
     heartbeat_seconds = _stream_env_float("AUDIT_STREAM_HEARTBEAT_SECONDS", 25.0)
     poll_seconds = _stream_env_float("AUDIT_STREAM_POLL_SECONDS", 1.0)
@@ -584,9 +630,15 @@ def _iter_audit_events_stream(project_id: str, version: int, since_id: Optional[
 
         if rows:
             for row in rows:
-                payload = _serialize_audit_event_row(row).model_dump()
-                event_name = str(row.event_kind or "phase_event").strip() or "phase_event"
+                serialized = _serialize_audit_event_row(
+                    row,
+                    include_stream_events=include_stream_events,
+                )
                 last_id = row.id
+                if serialized is None:
+                    continue
+                payload = serialized.model_dump()
+                event_name = str(row.event_kind or "phase_event").strip() or "phase_event"
                 last_emit_at = time.monotonic()
                 sent_any = True
                 yield _format_sse_event(event=event_name, data=payload, event_id=row.id)
@@ -953,6 +1005,7 @@ def get_audit_events(
     event_kinds: Optional[str] = Query(
         None, description="事件类型过滤，逗号分隔，例如 result_upsert,result_summary"
     ),
+    include_stream_events: bool = Query(False, description="是否包含模型流式碎片事件"),
     limit: int = Query(50, ge=1, le=200, description="返回条数上限"),
     db: Session = Depends(get_db),
 ):
@@ -974,11 +1027,16 @@ def get_audit_events(
         query = query.filter(AuditRunEvent.id > since_id)
 
     rows = query.order_by(AuditRunEvent.id.asc()).limit(limit).all()
-    items = [_serialize_audit_event_row(row) for row in rows]
+    expose_stream = include_stream_events or user_streaming_enabled()
+    items = [
+        item
+        for row in rows
+        if (item := _serialize_audit_event_row(row, include_stream_events=expose_stream)) is not None
+    ]
 
     return {
         "items": items,
-        "next_since_id": items[-1].id if items else since_id,
+        "next_since_id": (rows[-1].id if rows else since_id),
     }
 
 
@@ -987,6 +1045,7 @@ def stream_audit_events(
     project_id: str,
     version: Optional[int] = Query(None, description="审核版本号"),
     since_id: Optional[int] = Query(None, description="增量拉取起点事件ID"),
+    include_stream_events: bool = Query(False, description="是否包含模型流式碎片事件"),
     db: Session = Depends(get_db),
 ):
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -996,7 +1055,12 @@ def stream_audit_events(
     resolved_version = _resolve_audit_event_version(project_id, db, version)
 
     return StreamingResponse(
-        _iter_audit_events_stream(project_id, resolved_version, since_id),
+        _iter_audit_events_stream(
+            project_id,
+            resolved_version,
+            since_id,
+            include_stream_events=(include_stream_events or user_streaming_enabled()),
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1077,6 +1141,117 @@ def get_audit_tasks(
     return tasks
 
 
+def _map_worker_kind_to_preview_task_type(worker_kind: str) -> str:
+    normalized = str(worker_kind or "").strip()
+    if normalized == "index_reference":
+        return "index"
+    if normalized == "material_semantic_consistency":
+        return "material"
+    return "dimension"
+
+
+def _plan_tasks_with_chief_review_preview(project_id: str, audit_version: int, db) -> Dict[str, Any]:  # noqa: ANN001
+    from services.context_service import build_sheet_contexts
+    from services.audit_runtime.chief_review_planner import plan_chief_review_hypotheses
+    from services.audit_runtime.chief_review_session import ChiefReviewSession
+    from services.audit_runtime.sheet_graph_builder import build_sheet_graph
+    from services.chief_review_memory_service import load_project_memory
+
+    context_summary = build_sheet_contexts(project_id, db)
+    contexts = (
+        db.query(SheetContext)
+        .filter(
+            SheetContext.project_id == project_id,
+            SheetContext.status == "ready",
+        )
+        .all()
+    )
+    edges = db.query(SheetEdge).filter(SheetEdge.project_id == project_id).all()
+
+    sheet_graph = build_sheet_graph(sheet_contexts=contexts, sheet_edges=edges)
+    memory = load_project_memory(
+        db,
+        project_id=project_id,
+        audit_version=audit_version,
+    )
+    planner_result = plan_chief_review_hypotheses(
+        project_id=project_id,
+        audit_version=audit_version,
+        memory=memory,
+        sheet_graph=sheet_graph,
+    )
+    chief_session = ChiefReviewSession(project_id=project_id, audit_version=audit_version)
+    worker_tasks = chief_session.plan_worker_tasks(
+        memory={**memory, "active_hypotheses": planner_result.items}
+    )
+
+    db.query(AuditTask).filter(
+        AuditTask.project_id == project_id,
+        AuditTask.audit_version == audit_version,
+    ).delete(synchronize_session=False)
+
+    audit_tasks: List[AuditTask] = []
+    summary = {
+        "total": 0,
+        "index_tasks": 0,
+        "dimension_tasks": 0,
+        "material_tasks": 0,
+    }
+    for item in worker_tasks:
+        task_type = _map_worker_kind_to_preview_task_type(item.worker_kind)
+        priority = item.context.get("priority")
+        try:
+            resolved_priority = max(1, min(5, int(round(float(priority)))))
+        except (TypeError, ValueError):
+            resolved_priority = 3
+        target_sheet_no = item.target_sheet_nos[0] if item.target_sheet_nos else None
+        audit_tasks.append(
+            AuditTask(
+                project_id=project_id,
+                audit_version=audit_version,
+                task_type=task_type,
+                source_sheet_no=item.source_sheet_no or None,
+                target_sheet_no=target_sheet_no,
+                priority=resolved_priority,
+                status="pending",
+                trace_json=_json.dumps(
+                    {
+                        "planner": "chief_review_preview",
+                        "worker_kind": item.worker_kind,
+                        "hypothesis_id": item.hypothesis_id,
+                        "execution_mode": item.context.get("execution_mode"),
+                        "skill_id": item.context.get("skill_id"),
+                        "session_key": item.session_key,
+                        "evidence_selection_policy": item.evidence_selection_policy,
+                        "prompt_source": planner_result.meta.get("prompt_source"),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        summary["total"] += 1
+        if task_type == "index":
+            summary["index_tasks"] += 1
+        elif task_type == "material":
+            summary["material_tasks"] += 1
+        else:
+            summary["dimension_tasks"] += 1
+
+    if audit_tasks:
+        db.add_all(audit_tasks)
+    db.commit()
+    return {
+        "success": True,
+        "audit_version": audit_version,
+        "context_summary": context_summary,
+        "relationship_summary": {
+            "discovered": len(edges),
+            "source": "chief_review_preview",
+        },
+        "task_summary": summary,
+    }
+
+
 @router.post("/projects/{project_id}/audit/tasks/plan")
 def plan_audit_tasks(
     project_id: str,
@@ -1090,18 +1265,23 @@ def plan_audit_tasks(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
+    from services.audit_runtime_service import get_next_audit_version
+    from services.audit_runtime_service import resolve_runtime_pipeline_mode
+
+    audit_version = (
+        version if version is not None else get_next_audit_version(project_id, db)
+    )
+    if resolve_runtime_pipeline_mode() == "chief_review":
+        return _plan_tasks_with_chief_review_preview(project_id, audit_version, db)
+
     from services.audit.relationship_discovery import (
         discover_relationships,
         discover_relationships_v2,
         save_ai_edges,
     )
-    from services.audit_runtime_service import get_next_audit_version
     from services.context_service import build_sheet_contexts
     from services.task_planner_service import build_audit_tasks
 
-    audit_version = (
-        version if version is not None else get_next_audit_version(project_id, db)
-    )
     context_summary = build_sheet_contexts(project_id, db)
     use_v2 = str(os.getenv("AUDIT_ORCHESTRATOR_V2_ENABLED", "")).strip().lower() in {
         "1",
@@ -1162,6 +1342,7 @@ def start_audit(
         get_latest_run,
         is_project_running,
         mark_stale_running_runs,
+        resolve_runtime_pipeline_mode,
     )
     from services.audit_runtime.providers.factory import normalize_provider_mode
 
@@ -1171,6 +1352,7 @@ def start_audit(
             "success": True,
             "message": "审核任务已在运行",
             "audit_version": latest_run.audit_version if latest_run else None,
+            "pipeline_mode": resolve_runtime_pipeline_mode(),
         }
 
     mark_stale_running_runs(project_id, db)
@@ -1182,12 +1364,13 @@ def start_audit(
 
     new_version = get_next_audit_version(project_id, db)
     provider_mode = normalize_provider_mode(request.provider_mode if request else None)
+    pipeline_mode = resolve_runtime_pipeline_mode()
 
     run = AuditRun(
         project_id=project_id,
         audit_version=new_version,
         status="running",
-        current_step="等待执行",
+        current_step="等待主审启动",
         progress=0,
         total_issues=0,
         provider_mode=provider_mode,
@@ -1217,7 +1400,12 @@ def start_audit(
         _clear_running(project_id)
         raise HTTPException(status_code=409, detail=str(exc))
 
-    return {"success": True, "message": "审核已开始", "audit_version": new_version}
+    return {
+        "success": True,
+        "message": "审核已开始",
+        "audit_version": new_version,
+        "pipeline_mode": pipeline_mode,
+    }
 
 
 @router.post("/projects/{project_id}/audit/stop")

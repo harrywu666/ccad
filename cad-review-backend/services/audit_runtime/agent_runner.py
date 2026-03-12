@@ -174,12 +174,13 @@ class ProjectAuditAgentRunner:
                 return str(raw).strip()
         return self._provider_name()
 
-    async def _acquire_llm_slot(self, *, should_cancel=None):  # noqa: ANN001
+    async def _acquire_llm_slot(self, request: RunnerTurnRequest, *, should_cancel=None):  # noqa: ANN001
         gate = get_project_llm_gate(
             project_id=self.project_id,
             audit_version=self.audit_version,
             provider_mode=self._provider_mode(),
             provider_name=self._provider_name(),
+            request_has_images=bool(request.images),
         )
         return await gate.acquire(should_cancel=should_cancel)
 
@@ -206,7 +207,7 @@ class ProjectAuditAgentRunner:
         )
         subsession.current_turn_status = "running"
         try:
-            release_llm_slot = await self._acquire_llm_slot(should_cancel=should_cancel)
+            release_llm_slot = await self._acquire_llm_slot(request, should_cancel=should_cancel)
             try:
                 result = await self.provider.run_once(request, subsession)
             finally:
@@ -306,7 +307,7 @@ class ProjectAuditAgentRunner:
 
         while True:
             try:
-                release_llm_slot = await self._acquire_llm_slot(should_cancel=should_cancel)
+                release_llm_slot = await self._acquire_llm_slot(request, should_cancel=should_cancel)
                 try:
                     result = await self.provider.run_stream(
                         request,

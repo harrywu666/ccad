@@ -120,10 +120,65 @@ def test_audit_events_stream_replays_history_and_emits_heartbeat(monkeypatch, tm
             assert response.headers["content-type"].startswith("text/event-stream")
             events = _read_sse_events(response)
 
+    assert events[0]["event"] == "phase_event"
+    assert "主审 Agent" in events[0]["data"]
+    assert "等待" in events[0]["data"]
+    assert events[1]["event"] == "heartbeat"
+
+
+def test_audit_events_stream_can_include_stream_chunks_for_debug(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-stream-events-debug", name="Stream Events Debug"))
+        db.add(models.AuditRun(project_id="proj-stream-events-debug", audit_version=2, status="running"))
+        db.add_all(
+            [
+                models.AuditRunEvent(
+                    project_id="proj-stream-events-debug",
+                    audit_version=2,
+                    level="info",
+                    step_key="task_planning",
+                    agent_key="master_planner_agent",
+                    agent_name="总控规划Agent",
+                    event_kind="model_stream_delta",
+                    progress_hint=18,
+                    message="正在整理图纸上下文",
+                    meta_json=json.dumps({"source": "master_planner_stream"}, ensure_ascii=False),
+                    created_at=datetime.now(),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-stream-events-debug",
+                    audit_version=2,
+                    level="info",
+                    step_key="task_planning",
+                    agent_key="master_planner_agent",
+                    agent_name="总控规划Agent",
+                    event_kind="phase_event",
+                    progress_hint=18,
+                    message="总控规划Agent 正在等待 Kimi 继续输出",
+                    created_at=datetime.now(),
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        with client.stream(
+            "GET",
+            "/api/projects/proj-stream-events-debug/audit/events/stream",
+            params={"version": 2, "include_stream_events": True},
+        ) as response:
+            events = _read_sse_events(response)
+
     assert events[0]["event"] == "model_stream_delta"
     assert "正在整理图纸上下文" in events[0]["data"]
     assert events[1]["event"] == "phase_event"
-    assert "总控规划Agent 正在等待 Kimi 继续输出" in events[1]["data"]
+    assert "主审 Agent" in events[1]["data"]
+    assert "等待" in events[1]["data"]
     assert events[2]["event"] == "heartbeat"
 
 
@@ -179,7 +234,7 @@ def test_audit_events_stream_supports_since_id(monkeypatch, tmp_path):
         with client.stream(
             "GET",
             "/api/projects/proj-stream-since/audit/events/stream",
-            params={"version": 1, "since_id": since_id},
+            params={"version": 1, "since_id": since_id, "include_stream_events": True},
         ) as response:
             events = _read_sse_events(response, limit=1)
 
