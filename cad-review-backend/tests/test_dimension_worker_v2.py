@@ -456,3 +456,21 @@ def test_collect_dimension_pair_issues_respects_pair_filters(monkeypatch):
 
     assert issues == []
     assert captured["pair_filters"] == [("A1.01", "A4.01")]
+
+
+def test_build_pairs_treats_pair_filters_as_hard_scope(monkeypatch):
+    dimension_audit = _load_module(monkeypatch)
+
+    json_by_sheet = {
+        "A101": {"sheet_no": "A1.01", "indexes": [{"target_sheet": "A4.02"}]},
+        "A401": {"sheet_no": "A4.01", "indexes": []},
+        "A402": {"sheet_no": "A4.02", "indexes": []},
+    }
+
+    pairs = dimension_audit._build_pairs(
+        json_by_sheet,
+        [("A1.01", "A4.01")],
+        ai_edges=[("A1.01", "A4.02")],
+    )
+
+    assert pairs == [{"a": "A101", "b": "A401"}]

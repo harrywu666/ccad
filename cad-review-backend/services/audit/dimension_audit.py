@@ -614,10 +614,11 @@ def _build_pairs(
     *,
     ai_edges: Optional[List[Tuple[str, str]]] = None,
 ) -> List[Dict[str, str]]:
-    """构建需要对比的图纸对，合并三个来源：
-    1. pair_filters（task planner 指定的）
-    2. JSON indexes（DXF 提取的跨图引用）
-    3. AI edges（AI 视觉发现的跨图关系）
+    """构建需要对比的图纸对。
+
+    规则：
+    1. 有 pair_filters 时，把它当成硬约束，只审这些图对
+    2. 无 pair_filters 时，才退回到 JSON indexes + AI edges 的全量发现
     """
     pair_keys: set[Tuple[str, str]] = set()
     pairs: List[Dict[str, str]] = []
@@ -638,6 +639,7 @@ def _build_pairs(
             b_key = normalize_sheet_no(b_raw)
             if a_key and b_key and a_key != b_key:
                 _add_pair(a_key, b_key)
+        return pairs
 
     # Source 2: JSON indexes (DXF extracted cross-sheet references)
     for src_key, src in json_by_sheet.items():

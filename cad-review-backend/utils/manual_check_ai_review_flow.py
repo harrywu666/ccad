@@ -594,43 +594,133 @@ def _build_output_name(args: argparse.Namespace, effective_run_mode: str) -> str
     return output_name
 
 
-def wait_for_tasks(
-    client,
-    project_id: str,
-    version: int,
-    deadline_ts: float,
-    interval_seconds: float,
-) -> List[Dict[str, Any]]:
-    latest: List[Dict[str, Any]] = []
-    while time.time() < deadline_ts:
-        resp = client.get(f"/api/projects/{project_id}/audit/tasks", params={"version": version})
-        if resp.status_code == 200:
-            latest = resp.json()
-            if latest:
-                return latest
-        time.sleep(interval_seconds)
-    return latest
+def _is_terminal_audit_status(value: Any) -> bool:
+    normalized = str(value or "").strip().lower()
+    return normalized in {"done", "completed", "failed"}
 
 
-def wait_for_results(
+def _resolve_runtime_deadline(
+    *,
+    wait_seconds: float,
+    wait_until_finished: bool,
+    max_wait_seconds: Optional[float],
+) -> Optional[float]:
+    if wait_until_finished:
+        if max_wait_seconds is None or max_wait_seconds <= 0:
+            return None
+        return time.time() + max_wait_seconds
+    return time.time() + max(wait_seconds, 0.0)
+
+
+def _deadline_remaining_seconds(deadline_ts: Optional[float]) -> Optional[float]:
+    if deadline_ts is None:
+        return None
+    return max(0.0, deadline_ts - time.time())
+
+
+def _build_runtime_watch_line(
+    *,
+    status: Dict[str, Any],
+    runtime_tasks: List[Dict[str, Any]],
+    runtime_results: List[Dict[str, Any]],
+) -> str:
+    ui_runtime = status.get("ui_runtime") if isinstance(status.get("ui_runtime"), dict) else {}
+    chief_runtime = ui_runtime.get("chief") if isinstance(ui_runtime.get("chief"), dict) else {}
+    worker_sessions = ui_runtime.get("worker_sessions") if isinstance(ui_runtime.get("worker_sessions"), list) else []
+    return (
+        f"status={str(status.get('status') or '').strip() or '-'} "
+        f"progress={status.get('progress')} "
+        f"step={str(status.get('current_step') or '').strip() or '-'} "
+        f"assignments={chief_runtime.get('assigned_task_count') or len(runtime_tasks)} "
+        f"visible_workers={len(worker_sessions)} "
+        f"results={len(runtime_results)}"
+    )
+
+
+def poll_runtime_snapshot(
     client,
+    *,
     project_id: str,
     version: int,
-    deadline_ts: float,
     interval_seconds: float,
-) -> List[Dict[str, Any]]:
-    latest: List[Dict[str, Any]] = []
-    while time.time() < deadline_ts:
-        resp = client.get(
+    deadline_ts: Optional[float],
+    wait_until_finished: bool,
+) -> Dict[str, Any]:
+    runtime_tasks: List[Dict[str, Any]] = []
+    runtime_results: List[Dict[str, Any]] = []
+    runtime_status: Dict[str, Any] = {}
+    runtime_history: List[Dict[str, Any]] = []
+    runtime_events: List[Dict[str, Any]] = []
+    last_watch_line = None
+    poll_count = 0
+
+    while True:
+        tasks_resp = client.get(f"/api/projects/{project_id}/audit/tasks", params={"version": version})
+        if tasks_resp.status_code == 200:
+            payload = tasks_resp.json()
+            if isinstance(payload, list):
+                runtime_tasks = payload
+
+        results_resp = client.get(
             f"/api/projects/{project_id}/audit/results",
             params={"version": version, "view": "flat"},
         )
-        if resp.status_code == 200:
-            latest = resp.json()
-            if latest:
-                return latest
+        if results_resp.status_code == 200:
+            payload = results_resp.json()
+            if isinstance(payload, list):
+                runtime_results = payload
+
+        status_resp = client.get(f"/api/projects/{project_id}/audit/status")
+        if status_resp.status_code == 200:
+            payload = status_resp.json()
+            if isinstance(payload, dict):
+                runtime_status = payload
+
+        watch_line = _build_runtime_watch_line(
+            status=runtime_status,
+            runtime_tasks=runtime_tasks,
+            runtime_results=runtime_results,
+        )
+        if watch_line != last_watch_line or poll_count % 20 == 0:
+            remaining_seconds = _deadline_remaining_seconds(deadline_ts)
+            if remaining_seconds is None:
+                print(f"[WATCH] {watch_line} remaining=unbounded")
+            else:
+                print(f"[WATCH] {watch_line} remaining={round(remaining_seconds, 1)}s")
+            last_watch_line = watch_line
+
+        status_value = str(runtime_status.get("status") or "").strip().lower()
+        if _is_terminal_audit_status(status_value):
+            break
+        if deadline_ts is not None and time.time() >= deadline_ts:
+            break
+        poll_count += 1
         time.sleep(interval_seconds)
-    return latest
+
+    runtime_history_resp = client.get(f"/api/projects/{project_id}/audit/history")
+    if runtime_history_resp.status_code == 200:
+        payload = runtime_history_resp.json()
+        if isinstance(payload, list):
+            runtime_history = payload
+
+    runtime_events_resp = client.get(
+        f"/api/projects/{project_id}/audit/events",
+        params={"version": version, "limit": 200},
+    )
+    if runtime_events_resp.status_code == 200:
+        payload = runtime_events_resp.json()
+        if isinstance(payload, dict):
+            items = payload.get("items")
+            if isinstance(items, list):
+                runtime_events = items
+
+    return {
+        "runtime_tasks": runtime_tasks,
+        "runtime_results": runtime_results,
+        "runtime_status": runtime_status,
+        "runtime_history": runtime_history,
+        "runtime_events": runtime_events,
+    }
 
 
 def save_report(output_path: Path, report: Dict[str, Any]) -> None:
@@ -694,6 +784,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-audit", action="store_true", help="Also start the real audit run")
     parser.add_argument("--allow-incomplete", action="store_true", help="Allow incomplete three-line match")
     parser.add_argument("--wait-seconds", type=float, default=30.0, help="Polling timeout for runtime task creation")
+    parser.add_argument("--wait-until-finished", action="store_true", help="Keep polling until audit reaches done/completed/failed")
+    parser.add_argument("--max-wait-seconds", type=float, help="Optional hard cap when --wait-until-finished is enabled")
     parser.add_argument("--poll-interval", type=float, default=1.5, help="Polling interval in seconds")
     parser.add_argument("--base-url", help="Real backend base URL, for example http://127.0.0.1:7002")
     parser.add_argument("--request-timeout", type=float, default=12.0, help="Per-request timeout in seconds for HTTP mode")
@@ -950,31 +1042,24 @@ def _run_single_check(
                 else:
                     start_payload = start_resp.json()
                     runtime_version = int(start_payload["audit_version"])
-                    deadline_ts = time.time() + args.wait_seconds
-                    runtime_tasks = wait_for_tasks(
+                    deadline_ts = _resolve_runtime_deadline(
+                        wait_seconds=args.wait_seconds,
+                        wait_until_finished=args.wait_until_finished,
+                        max_wait_seconds=args.max_wait_seconds,
+                    )
+                    runtime_snapshot = poll_runtime_snapshot(
                         client,
-                        args.project_id,
-                        runtime_version,
-                        deadline_ts,
-                        args.poll_interval,
+                        project_id=args.project_id,
+                        version=runtime_version,
+                        interval_seconds=args.poll_interval,
+                        deadline_ts=deadline_ts,
+                        wait_until_finished=args.wait_until_finished,
                     )
-                    runtime_results = wait_for_results(
-                        client,
-                        args.project_id,
-                        runtime_version,
-                        deadline_ts,
-                        args.poll_interval,
-                    )
-                    runtime_status_resp = client.get(f"/api/projects/{args.project_id}/audit/status")
-                    runtime_history_resp = client.get(f"/api/projects/{args.project_id}/audit/history")
-                    runtime_events_resp = client.get(
-                        f"/api/projects/{args.project_id}/audit/events",
-                        params={"version": runtime_version, "limit": 200},
-                    )
-                    runtime_status = runtime_status_resp.json() if runtime_status_resp.status_code == 200 else {}
-                    runtime_history = runtime_history_resp.json() if runtime_history_resp.status_code == 200 else []
-                    runtime_events_payload = runtime_events_resp.json() if runtime_events_resp.status_code == 200 else {}
-                    runtime_events = runtime_events_payload.get("items", []) if isinstance(runtime_events_payload, dict) else []
+                    runtime_tasks = runtime_snapshot["runtime_tasks"]
+                    runtime_results = runtime_snapshot["runtime_results"]
+                    runtime_status = runtime_snapshot["runtime_status"]
+                    runtime_history = runtime_snapshot["runtime_history"]
+                    runtime_events = runtime_snapshot["runtime_events"]
                     runtime_summary = summarize_tasks(runtime_tasks)
                     progressive_metrics = summarize_progressive_metrics(
                         tasks=runtime_tasks,
@@ -999,7 +1084,9 @@ def _run_single_check(
                         "audit_version": runtime_version,
                         "status": runtime_status,
                         "completed_within_window": completed_within_window,
-                        "window_seconds": args.wait_seconds,
+                        "window_seconds": args.max_wait_seconds if args.wait_until_finished else args.wait_seconds,
+                        "wait_until_finished": args.wait_until_finished,
+                        "max_wait_seconds": args.max_wait_seconds,
                         "running_with_recent_progress": running_with_recent_progress,
                         "task_summary_from_list": runtime_summary,
                         "matches_plan_counts": (
