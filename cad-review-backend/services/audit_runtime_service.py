@@ -15,6 +15,7 @@ from typing import Dict, Optional
 
 from database import SessionLocal
 from models import AuditResult, AuditRun, AuditRunEvent, AuditTask
+from services.audit_runtime.providers.factory import normalize_provider_mode
 
 _running_lock = threading.Lock()
 _running_projects: set[str] = set()
@@ -250,7 +251,7 @@ def restart_master_agent_async(project_id: str, audit_version: int) -> Dict[str,
         run.error = None
         run.updated_at = datetime.now()
         db.commit()
-        provider_mode = getattr(run, "provider_mode", None)
+        provider_mode = normalize_provider_mode(getattr(run, "provider_mode", None))
         allow_incomplete = str(getattr(run, "scope_mode", "") or "").strip() == "partial"
     finally:
         db.close()
@@ -293,7 +294,7 @@ def build_run_snapshot(run: Optional[AuditRun]) -> Dict[str, object]:
         "current_step": run.current_step,
         "progress": run.progress,
         "total_issues": run.total_issues,
-        "provider_mode": getattr(run, "provider_mode", None),
+        "provider_mode": normalize_provider_mode(getattr(run, "provider_mode", None)),
         "error": run.error,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
@@ -336,7 +337,7 @@ def build_recent_event_snapshot(
         except Exception:
             meta = {}
 
-    provider_mode = meta.get("provider_mode") or meta.get("provider_name")
+    provider_mode = normalize_provider_mode(meta.get("provider_mode") or meta.get("provider_name"))
     progress = latest_event.progress_hint
     if progress is None:
         progress = {

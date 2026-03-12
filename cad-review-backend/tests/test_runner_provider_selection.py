@@ -72,7 +72,7 @@ def _patch_runtime(monkeypatch) -> list[str | None]:
     return seen_provider_modes
 
 
-def test_audit_run_can_store_requested_runner_provider(monkeypatch, tmp_path):
+def test_audit_run_normalizes_removed_codex_provider_to_kimi_sdk(monkeypatch, tmp_path):
     app, session_local, models = _load_test_app(monkeypatch, tmp_path)
     _seed_project(session_local, models)
     seen_provider_modes = _patch_runtime(monkeypatch)
@@ -108,5 +108,5 @@ def test_audit_run_can_store_requested_runner_provider(monkeypatch, tmp_path):
         db.close()
 
     assert run is not None
-    assert run.provider_mode == "codex_sdk"
-    assert seen_provider_modes == ["codex_sdk"]
+    assert run.provider_mode == "kimi_sdk"
+    assert seen_provider_modes == ["kimi_sdk"]

@@ -6,7 +6,12 @@
 - Frontend API base env: `VITE_API_BASE_URL`（兼容旧变量 `VITE_API_BASE`）
 
 ## 关键环境变量
-- `KIMI_PROVIDER`: 可选，`code` 或 `official`，默认 `official`
+- `KIMI_PROVIDER`: 可选，`openrouter`、`code` 或 `official`
+- `OPENROUTER_API_KEY`: `OpenRouter` key，`KIMI_PROVIDER=openrouter` 时必填
+- `OPENROUTER_MODEL`: `OpenRouter` 模型名，默认 `openrouter/healer-alpha`
+- `OPENROUTER_REASONING_ENABLED`: 是否打开推理模式，默认 `1`
+- `OPENROUTER_HTTP_REFERER`: 可选，站点 URL
+- `OPENROUTER_X_TITLE`: 可选，站点名称
 - `KIMI_CODE_API_KEY`: `Kimi Code API` 的 key，`KIMI_PROVIDER=code` 时必填
 - `KIMI_OFFICIAL_API_KEY`: `Kimi 官方 OpenAI 兼容接口` 的 key，`KIMI_PROVIDER=official` 时优先读取
 - `MOONSHOT_API_KEY`: `Kimi 官方 OpenAI 兼容接口` 的兼容 key 名，`KIMI_PROVIDER=official` 时可作为回退
@@ -18,7 +23,13 @@
 - `CCAD_DB_BASE_DIR`: 数据库根目录（默认 `~/cad-review`）
 - `CCAD_DB_PATH`: 数据库文件绝对路径（优先级高于 `CCAD_DB_BASE_DIR`）
 
-## Kimi 接口切换
+## LLM 接口切换
+- `OpenRouter`：
+  - `KIMI_PROVIDER=openrouter`
+  - `OPENROUTER_API_KEY=...`
+  - `OPENROUTER_MODEL=openrouter/healer-alpha`
+  - `AUDIT_RUNNER_PROVIDER=api`
+  - `FEEDBACK_AGENT_PROVIDER=api`
 - `Kimi Code API`：
   - `KIMI_PROVIDER=code`
   - `KIMI_CODE_API_KEY=...`

@@ -42,6 +42,13 @@ def test_resolve_api_key_for_official_supports_moonshot_fallback(monkeypatch):
     assert kimi_service._resolve_api_key() == "moonshot-secret"
 
 
+def test_resolve_api_key_for_openrouter(monkeypatch):
+    monkeypatch.setenv("KIMI_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-secret")
+
+    assert kimi_service._resolve_api_key() == "openrouter-secret"
+
+
 def test_call_kimi_uses_official_openai_compatible_payload(monkeypatch):
     captured: dict = {}
 
@@ -150,6 +157,68 @@ def test_call_kimi_uses_code_provider_payload(monkeypatch):
     assert captured["headers"]["anthropic-version"] == "2023-06-01"
     assert captured["json"]["model"] == "k2p5"
     assert captured["json"]["messages"][0]["content"][0]["type"] == "image"
+
+
+def test_call_kimi_uses_openrouter_openai_compatible_payload(monkeypatch):
+    captured: dict = {}
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"status":"ok","provider":"openrouter"}'
+                        }
+                    }
+                ]
+            }
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return DummyResponse()
+
+    monkeypatch.setenv("KIMI_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-secret")
+    monkeypatch.setenv("OPENROUTER_MODEL", "openrouter/healer-alpha")
+    monkeypatch.setenv("OPENROUTER_REASONING_ENABLED", "1")
+    monkeypatch.setenv("OPENROUTER_HTTP_REFERER", "http://localhost:7001")
+    monkeypatch.setenv("OPENROUTER_X_TITLE", "ccad-local")
+    monkeypatch.setattr("httpx.AsyncClient", DummyClient)
+
+    result = asyncio.run(
+        kimi_service.call_kimi(
+            system_prompt="你是审图助手。",
+            user_prompt="请返回 JSON",
+            images=[b"\x89PNGrest"],
+            temperature=0.2,
+            max_tokens=2048,
+        )
+    )
+
+    assert result == {"status": "ok", "provider": "openrouter"}
+    assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer openrouter-secret"
+    assert captured["headers"]["HTTP-Referer"] == "http://localhost:7001"
+    assert captured["headers"]["X-OpenRouter-Title"] == "ccad-local"
+    assert captured["json"]["model"] == "openrouter/healer-alpha"
+    assert captured["json"]["temperature"] == 0.2
+    assert captured["json"]["reasoning"] == {"enabled": True}
+    assert captured["json"]["messages"][1]["content"][0]["type"] == "image_url"
 
 
 def test_call_kimi_retries_on_retryable_status(monkeypatch):

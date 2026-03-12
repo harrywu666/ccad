@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 from sqlalchemy.orm import Session
 
 from models import AuditRun, AuditRunEvent, Project
+from services.audit_runtime.providers.factory import normalize_provider_mode
 
 _ENDED_STATUSES = {"done", "failed", "cancelled"}
 _NOTE_EVENT_KINDS = {
@@ -162,7 +163,7 @@ def list_audit_runtime_summaries(db: Session, *, limit: int = 10) -> Dict[str, A
                 "audit_version": run.audit_version,
                 "status": run.status,
                 "current_step": run.current_step,
-                "provider_mode": run.provider_mode,
+                "provider_mode": normalize_provider_mode(getattr(run, "provider_mode", None)),
                 "started_at": _iso(run.started_at),
                 "finished_at": _iso(run.finished_at),
                 "duration_seconds": _duration_seconds(run),

@@ -21,6 +21,8 @@ KIMI_CODE_API_BASE = "https://api.kimi.com/coding/v1"
 KIMI_CODE_MODEL = "k2p5"
 KIMI_OFFICIAL_API_BASE = "https://api.moonshot.cn/v1"
 KIMI_OFFICIAL_MODEL = "kimi-k2.5"
+OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+OPENROUTER_MODEL = "openrouter/healer-alpha"
 KIMI_UA = "claude-code/1.0"
 
 
@@ -65,11 +67,18 @@ def _provider() -> str:
     raw = (os.getenv("KIMI_PROVIDER", "official") or "official").strip().lower()
     if raw in {"official", "moonshot", "openai"}:
         return "official"
+    if raw in {"openrouter", "open_router"}:
+        return "openrouter"
     return "code"
 
 
 def _resolve_api_key() -> str:
     provider = _provider()
+    if provider == "openrouter":
+        key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        if not key:
+            raise ValueError("未设置 OPENROUTER_API_KEY 环境变量")
+        return key
     if provider == "official":
         key = (
             os.getenv("KIMI_OFFICIAL_API_KEY", "").strip()
@@ -88,12 +97,21 @@ def _resolve_api_key() -> str:
 def _headers() -> dict:
     """构建API请求头"""
     key = _resolve_api_key()
-    if _provider() == "official":
-        return {
+    provider = _provider()
+    if provider in {"official", "openrouter"}:
+        headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {key}",
             "User-Agent": KIMI_UA,
         }
+        if provider == "openrouter":
+            referer = os.getenv("OPENROUTER_HTTP_REFERER", "").strip()
+            title = os.getenv("OPENROUTER_X_TITLE", "").strip()
+            if referer:
+                headers["HTTP-Referer"] = referer
+            if title:
+                headers["X-OpenRouter-Title"] = title
+        return headers
     return {
         "Content-Type": "application/json",
         "x-api-key": key,
@@ -162,7 +180,7 @@ def _build_kimi_request(
     stream: bool = False,
 ) -> tuple[str, dict[str, Any], str]:
     provider = _provider()
-    if provider == "official":
+    if provider in {"official", "openrouter"}:
         content: List[dict[str, Any]] = []
         for img in (images or []):
             content.append({
@@ -173,17 +191,23 @@ def _build_kimi_request(
             })
         content.append({"type": "text", "text": user_prompt})
         payload: dict[str, Any] = {
-            "model": os.getenv("KIMI_OFFICIAL_MODEL", KIMI_OFFICIAL_MODEL),
+            "model": os.getenv(
+                "OPENROUTER_MODEL",
+                OPENROUTER_MODEL,
+            ) if provider == "openrouter" else os.getenv("KIMI_OFFICIAL_MODEL", KIMI_OFFICIAL_MODEL),
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content},
             ],
-            "temperature": _official_temperature(temperature),
+            "temperature": temperature if provider == "openrouter" else _official_temperature(temperature),
             "max_tokens": max_tokens,
         }
+        if provider == "openrouter" and os.getenv("OPENROUTER_REASONING_ENABLED", "1").strip().lower() not in {"0", "false", "off", "no"}:
+            payload["reasoning"] = {"enabled": True}
         if stream:
             payload["stream"] = True
-        endpoint = f"{os.getenv('KIMI_OFFICIAL_API_BASE', KIMI_OFFICIAL_API_BASE).rstrip('/')}/chat/completions"
+        base_url = os.getenv("OPENROUTER_API_BASE", OPENROUTER_API_BASE) if provider == "openrouter" else os.getenv("KIMI_OFFICIAL_API_BASE", KIMI_OFFICIAL_API_BASE)
+        endpoint = f"{base_url.rstrip('/')}/chat/completions"
         return provider, payload, endpoint
 
     content = []
@@ -211,7 +235,7 @@ def _build_kimi_request(
 
 
 def _extract_response_text(provider: str, data: dict[str, Any]) -> str:
-    if provider == "official":
+    if provider in {"official", "openrouter"}:
         return data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
     return "".join(
         b.get("text", "")
@@ -221,7 +245,7 @@ def _extract_response_text(provider: str, data: dict[str, Any]) -> str:
 
 
 def _extract_stream_delta(provider: str, payload: dict[str, Any]) -> str:
-    if provider == "official":
+    if provider in {"official", "openrouter"}:
         choices = payload.get("choices")
         if not isinstance(choices, list) or not choices:
             return ""

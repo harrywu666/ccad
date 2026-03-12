@@ -12,7 +12,7 @@ describe('SettingsFeedbackAgentPrompts', () => {
     const api = await import('@/api');
     vi.mocked(api.getFeedbackAgentPromptAssets).mockResolvedValue({
       items: [
-        { key: 'prompt', title: '误报反馈 Prompt', description: 'prompt desc', file_name: 'PROMPT.md', content: 'prompt body' },
+        { key: 'prompt', title: '误报反馈 PROMPT.md', description: 'prompt desc', file_name: 'PROMPT.md', content: 'prompt body' },
         { key: 'agent', title: '误报反馈 AGENT.md', description: 'agent desc', file_name: 'AGENT.md', content: 'agent body' },
         { key: 'soul', title: '误报反馈 SOUL.md', description: 'soul desc', file_name: 'SOUL.md', content: 'soul body' },
       ],
@@ -30,14 +30,14 @@ describe('SettingsFeedbackAgentPrompts', () => {
     const api = await import('@/api');
     vi.mocked(api.getFeedbackAgentPromptAssets).mockResolvedValue({
       items: [
-        { key: 'prompt', title: '误报反馈 Prompt', description: 'prompt desc', file_name: 'PROMPT.md', content: 'prompt body' },
+        { key: 'prompt', title: '误报反馈 PROMPT.md', description: 'prompt desc', file_name: 'PROMPT.md', content: 'prompt body' },
         { key: 'agent', title: '误报反馈 AGENT.md', description: 'agent desc', file_name: 'AGENT.md', content: 'agent body' },
         { key: 'soul', title: '误报反馈 SOUL.md', description: 'soul desc', file_name: 'SOUL.md', content: 'soul body' },
       ],
     });
     vi.mocked(api.updateFeedbackAgentPromptAssets).mockResolvedValue({
       items: [
-        { key: 'prompt', title: '误报反馈 Prompt', description: 'prompt desc', file_name: 'PROMPT.md', content: 'new prompt body' },
+        { key: 'prompt', title: '误报反馈 PROMPT.md', description: 'prompt desc', file_name: 'PROMPT.md', content: 'new prompt body' },
         { key: 'agent', title: '误报反馈 AGENT.md', description: 'agent desc', file_name: 'AGENT.md', content: 'agent body' },
         { key: 'soul', title: '误报反馈 SOUL.md', description: 'soul desc', file_name: 'SOUL.md', content: 'soul body' },
       ],
@@ -54,6 +54,6 @@ describe('SettingsFeedbackAgentPrompts', () => {
         { key: 'prompt', content: 'new prompt body' },
       ]);
     });
-    expect(await screen.findByText(/提示词已保存/)).toBeInTheDocument();
+    expect(await screen.findByText(/文件已保存/)).toBeInTheDocument();
   });
 });

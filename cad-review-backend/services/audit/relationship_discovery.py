@@ -29,7 +29,7 @@ from services.audit_runtime.evidence_planner import plan_deep, plan_evidence_req
 from services.audit_runtime.evidence_service import EvidenceService
 from services.audit_runtime.finding_schema import Finding
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
-from services.audit_runtime.providers.factory import build_runner_provider
+from services.audit_runtime.providers.factory import build_runner_provider, normalize_provider_mode
 from services.audit_runtime.review_task_schema import WorkerResultCard, WorkerTaskCard
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
@@ -162,7 +162,7 @@ def _load_requested_provider_mode(project_id: str, audit_version: int) -> str | 
             .order_by(AuditRun.created_at.desc())
             .first()
         )
-        value = str(getattr(run, "provider_mode", "") or "").strip()
+        value = normalize_provider_mode(getattr(run, "provider_mode", None))
         return value or None
     finally:
         db.close()

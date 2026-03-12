@@ -3,6 +3,7 @@
 负责创建SQLite数据库连接和会话管理
 """
 
+import json
 import os
 from pathlib import Path
 from sqlalchemy import create_engine, text
@@ -327,3 +328,70 @@ def _ensure_runtime_columns():
                 conn.execute(text("ALTER TABLE audit_run_events ADD COLUMN event_kind TEXT"))
             if "progress_hint" not in audit_event_col_names:
                 conn.execute(text("ALTER TABLE audit_run_events ADD COLUMN progress_hint INTEGER"))
+
+    _cleanup_removed_provider_history()
+
+
+def _cleanup_removed_provider_history() -> None:
+    """把已下线的 provider 记录归一到当前可用值。"""
+    provider_mode_map = {
+        "codex": "kimi_sdk",
+        "codex_sdk": "kimi_sdk",
+    }
+    provider_name_map = {
+        "codex": "sdk",
+        "codex_sdk": "sdk",
+    }
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE audit_runs
+                SET provider_mode = CASE lower(trim(provider_mode))
+                    WHEN 'codex' THEN 'kimi_sdk'
+                    WHEN 'codex_sdk' THEN 'kimi_sdk'
+                    ELSE provider_mode
+                END
+                WHERE lower(trim(coalesce(provider_mode, ''))) IN ('codex', 'codex_sdk')
+            """)
+        )
+
+        event_rows = conn.execute(
+            text("""
+                SELECT id, meta_json
+                FROM audit_run_events
+                WHERE lower(coalesce(meta_json, '')) LIKE '%codex%'
+            """)
+        ).fetchall()
+        for row in event_rows:
+            meta_json = str(row[1] or "").strip()
+            if not meta_json:
+                continue
+            try:
+                payload = json.loads(meta_json)
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+
+            changed = False
+            provider_mode = str(payload.get("provider_mode") or "").strip().lower()
+            if provider_mode in provider_mode_map:
+                payload["provider_mode"] = provider_mode_map[provider_mode]
+                changed = True
+
+            provider_name = str(payload.get("provider_name") or "").strip().lower()
+            if provider_name in provider_name_map:
+                payload["provider_name"] = provider_name_map[provider_name]
+                changed = True
+
+            requested_provider_mode = str(payload.get("requested_provider_mode") or "").strip().lower()
+            if requested_provider_mode in provider_mode_map:
+                payload["requested_provider_mode"] = provider_mode_map[requested_provider_mode]
+                changed = True
+
+            if changed:
+                conn.execute(
+                    text("UPDATE audit_run_events SET meta_json = :meta_json WHERE id = :id"),
+                    {"id": row[0], "meta_json": json.dumps(payload, ensure_ascii=False)},
+                )

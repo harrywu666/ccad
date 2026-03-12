@@ -36,8 +36,6 @@ def _default_parallel_limit(provider_mode: str) -> int:
     normalized = str(provider_mode or "").strip().lower()
     if normalized in {"sdk", "kimi_sdk", "api", "cli"}:
         return 1
-    if normalized == "codex_sdk":
-        return 2
     return 1
 
 

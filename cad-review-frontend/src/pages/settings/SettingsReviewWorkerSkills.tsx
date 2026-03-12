@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import * as api from '@/api';
-import type { FeedbackAgentPromptAsset } from '@/types/api';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import type { ReviewWorkerSkillAsset } from '@/types/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
-type EditableAsset = FeedbackAgentPromptAsset & {
+type EditableSkill = ReviewWorkerSkillAsset & {
   draftContent: string;
   dirty: boolean;
   justSaved: boolean;
@@ -15,7 +14,7 @@ type EditableAsset = FeedbackAgentPromptAsset & {
 const textareaClassName =
   'min-h-[220px] w-full resize-y border border-border bg-secondary px-4 py-4 text-[14px] leading-7 text-foreground outline-none transition-colors focus:border-primary';
 
-function toEditableAsset(item: FeedbackAgentPromptAsset): EditableAsset {
+function toEditableSkill(item: ReviewWorkerSkillAsset): EditableSkill {
   return {
     ...item,
     draftContent: item.content,
@@ -33,8 +32,8 @@ function getErrorMessage(value: unknown, fallback: string) {
   return fallback;
 }
 
-export default function SettingsFeedbackAgentPrompts() {
-  const [items, setItems] = useState<EditableAsset[]>([]);
+export default function SettingsReviewWorkerSkills() {
+  const [items, setItems] = useState<EditableSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -47,10 +46,10 @@ export default function SettingsFeedbackAgentPrompts() {
     try {
       setLoading(true);
       setError('');
-      const response = await api.getFeedbackAgentPromptAssets();
-      setItems(response.items.map(toEditableAsset));
+      const response = await api.getReviewWorkerSkillAssets();
+      setItems(response.items.map(toEditableSkill));
     } catch (value) {
-      setError(getErrorMessage(value, '读取误报反馈 Agent 文件失败。'));
+      setError(getErrorMessage(value, '读取 review_worker skills 失败。'));
     } finally {
       setLoading(false);
     }
@@ -60,12 +59,12 @@ export default function SettingsFeedbackAgentPrompts() {
     void loadItems();
   }, []);
 
-  const updateItem = (key: EditableAsset['key'], patch: Partial<EditableAsset>) => {
+  const updateItem = (key: string, patch: Partial<EditableSkill>) => {
     setItems(current => current.map(item => (item.key === key ? { ...item, ...patch } : item)));
     setSaveMessage('');
   };
 
-  const handleContentChange = (key: EditableAsset['key'], value: string) => {
+  const handleContentChange = (key: string, value: string) => {
     const current = items.find(item => item.key === key);
     if (!current) return;
     updateItem(key, {
@@ -75,7 +74,7 @@ export default function SettingsFeedbackAgentPrompts() {
     });
   };
 
-  const handleSave = async (key?: EditableAsset['key']) => {
+  const handleSave = async (key?: string) => {
     const targetItems = items.filter(item => item.dirty && (!key || item.key === key));
     if (targetItems.length === 0) return;
 
@@ -84,21 +83,23 @@ export default function SettingsFeedbackAgentPrompts() {
       setSaveMessage('');
       setSaving(!key);
       setSavingKey(key || null);
-      const response = await api.updateFeedbackAgentPromptAssets(
+      const response = await api.updateReviewWorkerSkillAssets(
         targetItems.map(item => ({
           key: item.key,
           content: item.draftContent,
         })),
       );
       setItems(response.items.map(item => ({
-        ...toEditableAsset(item),
+        ...toEditableSkill(item),
         justSaved: !key || item.key === key,
       })));
-      setSaveMessage(key
-        ? `"${items.find(item => item.key === key)?.title || key}" 已保存，后面的误报反馈会直接用新内容。`
-        : '误报反馈 Agent 文件已保存，后面的误报反馈会直接用新内容。');
+      setSaveMessage(
+        key
+          ? `"${items.find(item => item.key === key)?.title || key}" 已保存，后面新的 review_worker 会直接用这版 skill。`
+          : 'review_worker skills 已保存，后面新的 review_worker 会直接用这版 skill。',
+      );
     } catch (value) {
-      setError(getErrorMessage(value, '保存误报反馈 Agent 文件失败。'));
+      setError(getErrorMessage(value, '保存 review_worker skill 失败。'));
     } finally {
       setSaving(false);
       setSavingKey(null);
@@ -106,16 +107,16 @@ export default function SettingsFeedbackAgentPrompts() {
   };
 
   return (
-    <Card className="rounded-none border border-border shadow-none">
-      <CardHeader className="gap-3 border-b border-border/80 pb-5">
+    <section className="flex flex-col gap-6 rounded-none border border-border/80 bg-background">
+      <div className="border-b border-border/80 px-6 py-5">
         <div className="flex items-start justify-between gap-6">
           <div className="space-y-3">
-            <CardTitle className="text-[24px] font-semibold text-foreground">误报反馈 Agent</CardTitle>
-            <CardDescription className="max-w-[980px] text-[14px] leading-7 text-muted-foreground">
-              这里单独管理误报反馈 Agent 的三份核心文件：PROMPT.md、AGENT.md、SOUL.md。你改完保存，后面新发起的误报反馈线程会直接用这版。
-            </CardDescription>
+            <div className="text-[20px] font-semibold text-foreground">Worker Skills</div>
+            <div className="max-w-[920px] text-[14px] leading-7 text-muted-foreground">
+              这里是副审 Worker 真正调用的能力说明文件。每个 skill 都对应一个具体的核查能力，而不是旧的 stage prompt。
+            </div>
             <div className="border-l-2 border-primary pl-3 text-[13px] leading-6 text-foreground">
-              这部分不走通用审图 stage 配置，而是直接对应误报反馈 Agent 运行时实际读取的 md 文件。
+              目前这里先放已经 skill 化的能力文件，后面新增 skill 会继续往这里加。
             </div>
           </div>
           <Button
@@ -127,8 +128,9 @@ export default function SettingsFeedbackAgentPrompts() {
             {saving ? '保存中...' : '保存全部'}
           </Button>
         </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6 pt-6">
+      </div>
+
+      <div className="flex flex-col gap-6 px-6 py-6">
         {saveMessage ? (
           <section className="border border-success/30 bg-success/10 px-5 py-4 text-[14px] text-foreground">
             {saveMessage}
@@ -143,7 +145,7 @@ export default function SettingsFeedbackAgentPrompts() {
 
         {loading ? (
           <section className="border border-border bg-secondary px-5 py-10 text-[15px] text-muted-foreground">
-            正在读取误报反馈 Agent 文件...
+            正在读取 review_worker skills...
           </section>
         ) : (
           items.map(item => (
@@ -193,7 +195,7 @@ export default function SettingsFeedbackAgentPrompts() {
             </section>
           ))
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }

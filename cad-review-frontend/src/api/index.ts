@@ -15,12 +15,15 @@ import type {
   AuditResultPreview,
 } from '@/types';
 import type {
+  AgentAssetGroupListResponse,
+  AgentAssetsResponse,
   AuditEventsResponse,
   AuditProviderMode,
   AuditRuntimeSummaryResponse,
   FeedbackAgentPromptAssetsResponse,
   FeedbackThread,
   FeedbackThreadMessage,
+  ReviewWorkerSkillAssetsResponse,
   SkillPackItem,
   SkillPackListResponse,
   SkillTypesResponse,
@@ -75,6 +78,15 @@ export const updateAIPromptSettings = (
   api.put<{ success: boolean }>('/api/settings/ai-prompts', { stages }).then(res => res.data);
 export const resetAIPromptStage = (stageKey: string) =>
   api.post<{ success: boolean }>(`/api/settings/ai-prompts/${stageKey}/reset`).then(res => res.data);
+export const getAgentAssetGroups = () =>
+  api.get<AgentAssetGroupListResponse>('/api/settings/agent-assets').then(res => res.data);
+export const getAgentAssets = (agentId: string) =>
+  api.get<AgentAssetsResponse>(`/api/settings/agent-assets/${agentId}`).then(res => res.data);
+export const updateAgentAssets = (
+  agentId: string,
+  items: Array<{ key: 'agent' | 'soul' | 'memory'; content: string }>,
+) =>
+  api.put<AgentAssetsResponse>(`/api/settings/agent-assets/${agentId}`, { items }).then(res => res.data);
 export const getSkillTypes = () =>
   api.get<SkillTypesResponse>('/api/settings/skill-types').then(res => res.data);
 export const getSkillPacks = (skillType?: string) =>
@@ -118,6 +130,12 @@ export const updateFeedbackAgentPromptAssets = (
   items: Array<{ key: 'prompt' | 'agent' | 'soul'; content: string }>,
 ) =>
   api.put<FeedbackAgentPromptAssetsResponse>('/api/settings/feedback-agent-prompts', { items }).then(res => res.data);
+export const getReviewWorkerSkillAssets = () =>
+  api.get<ReviewWorkerSkillAssetsResponse>('/api/settings/review-worker-skills').then(res => res.data);
+export const updateReviewWorkerSkillAssets = (
+  items: Array<{ key: string; content: string }>,
+) =>
+  api.put<ReviewWorkerSkillAssetsResponse>('/api/settings/review-worker-skills', { items }).then(res => res.data);
 
 // Catalog
 export const getCatalog = (projectId: string) =>
