@@ -1136,6 +1136,8 @@ export default function ProjectDetail() {
           supportingText={auditProgressViewModel.supportingText}
           startedAt={auditProgressViewModel.startedAt}
           chief={auditProgressViewModel.chief}
+          finalReview={auditProgressViewModel.finalReview}
+          organizer={auditProgressViewModel.organizer}
           workerWall={auditProgressViewModel.workerWall}
           debugTimeline={auditProgressViewModel.debugTimeline}
           eventError={auditEventsError}

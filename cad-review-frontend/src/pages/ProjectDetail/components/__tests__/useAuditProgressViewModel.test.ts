@@ -45,13 +45,29 @@ const buildStatus = (overrides: Partial<AuditStatus> = {}): AuditStatus => ({
       issue_count: 3,
       updated_at: '2026-03-10T10:03:00',
     },
+    final_review: {
+      current_assignment_title: 'A101 ↔ A401 节点归属复核',
+      current_action: '终审正在复核 asg-2',
+      summary: '已复核 3 张 assignment，其中 1 张要求补证据。',
+      accepted_count: 2,
+      needs_more_evidence_count: 1,
+      redispatch_count: 0,
+      updated_at: '2026-03-10T10:04:20',
+    },
+    organizer: {
+      current_action: '正在整理终审通过的问题',
+      summary: '已通过 2 处问题，正在输出最终问题列表。',
+      accepted_issue_count: 2,
+      current_section: '最终问题列表',
+      updated_at: '2026-03-10T10:04:30',
+    },
     worker_sessions: [
       {
-        session_key: 'worker_skill:elevation_consistency:A200:SELF',
+        session_key: 'assignment:asg-1',
         worker_name: '标高副审',
         skill_id: 'elevation_consistency',
         skill_label: '标高一致性 Skill',
-        task_title: '图纸 A200',
+        task_title: 'A200 标高一致性',
         current_action: '正在抽取单图标高语义',
         status: 'active',
         updated_at: '2026-03-10T10:03:42',
@@ -62,7 +78,7 @@ const buildStatus = (overrides: Partial<AuditStatus> = {}): AuditStatus => ({
         ],
       },
       {
-        session_key: 'worker_skill:node_host_binding:A101:A401',
+        session_key: 'assignment:asg-2',
         worker_name: '节点归属副审',
         skill_id: 'node_host_binding',
         skill_label: '节点归属 Skill',
@@ -111,6 +127,8 @@ describe('buildAuditProgressViewModel', () => {
     expect(viewModel.workerWall.active[0]?.recentActions[1]?.text).toContain('抽取单图标高语义');
     expect(viewModel.workerWall.recentCompleted).toHaveLength(1);
     expect(viewModel.workerWall.recentCompleted[0]?.status).toBe('completed');
+    expect(viewModel.finalReview.currentAssignmentTitle).toContain('A101');
+    expect(viewModel.organizer.currentSection).toBe('最终问题列表');
   });
 
   it('builds pill copy from chief card state', () => {
@@ -165,5 +183,55 @@ describe('buildAuditProgressViewModel', () => {
     expect(viewModel.workerWall.active[0]?.taskTitle).toBe('图纸 A200');
     expect(viewModel.workerWall.active[0]?.currentAction).toBe('正在抽取单图标高语义');
     expect(viewModel.supportingText).toBe('当前阶段：规划审核任务图');
+    expect(viewModel.finalReview.currentAction).toContain('待终审');
+    expect(viewModel.organizer.currentAction).toContain('等待终审');
+  });
+
+  it('keeps one worker card per assignment even when internal skill actions are many', () => {
+    const viewModel = buildAuditProgressViewModel({
+      auditStatus: buildStatus({
+        ui_runtime: {
+          ...buildStatus().ui_runtime!,
+          worker_sessions: [
+            {
+              session_key: 'assignment:asg-1',
+              worker_name: '标高副审',
+              skill_id: 'elevation_consistency',
+              skill_label: '标高一致性 Skill',
+              task_title: 'A200 标高一致性',
+              current_action: '正在比对跨图尺寸关系',
+              status: 'active',
+              updated_at: '2026-03-10T10:05:42',
+              context: { source_sheet_no: 'A200', target_sheet_no: 'A201' },
+              recent_actions: [
+                { at: '2026-03-10T10:03:02', label: '调用 Skill', text: '已启动本轮技能执行' },
+                { at: '2026-03-10T10:03:42', label: '现场播报', text: '正在抽取单图标高语义' },
+                { at: '2026-03-10T10:05:42', label: '现场播报', text: '正在比对跨图尺寸关系' },
+              ],
+            },
+            {
+              session_key: 'assignment:asg-2',
+              worker_name: '节点归属副审',
+              skill_id: 'node_host_binding',
+              skill_label: '节点归属 Skill',
+              task_title: 'A101 ↔ A401',
+              current_action: '正在复核节点归属',
+              status: 'active',
+              updated_at: '2026-03-10T10:05:50',
+              context: { source_sheet_no: 'A101', target_sheet_no: 'A401' },
+              recent_actions: [
+                { at: '2026-03-10T10:05:50', label: '现场播报', text: '正在复核节点归属' },
+              ],
+            },
+          ],
+        },
+      }),
+      providerLabel: 'Kimi SDK',
+      events: [],
+    });
+
+    expect(viewModel.workerWall.active).toHaveLength(2);
+    expect(viewModel.workerWall.active[0]?.key).toBe('assignment:asg-1');
+    expect(viewModel.workerWall.active[1]?.key).toBe('assignment:asg-2');
   });
 });

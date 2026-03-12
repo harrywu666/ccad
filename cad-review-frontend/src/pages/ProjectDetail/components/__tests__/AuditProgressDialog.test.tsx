@@ -69,6 +69,24 @@ const baseWorkerWall = {
   ],
 };
 
+const baseFinalReview = {
+  currentAssignmentTitle: 'A101 ↔ A401 节点归属复核',
+  currentAction: '终审正在复核 asg-2',
+  summary: '已复核 3 张 assignment，其中 1 张要求补证据。',
+  acceptedCount: 2,
+  needsMoreEvidenceCount: 1,
+  redispatchCount: 0,
+  updatedAt: '2026-03-10T10:04:20',
+} as const;
+
+const baseOrganizer = {
+  currentAction: '正在整理终审通过的问题',
+  summary: '已通过 2 处问题，正在输出最终问题列表。',
+  acceptedIssueCount: 2,
+  currentSection: '最终问题列表',
+  updatedAt: '2026-03-10T10:04:30',
+} as const;
+
 describe('AuditProgressDialog', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -90,6 +108,8 @@ describe('AuditProgressDialog', () => {
         startedAt="2026-03-10T10:00:00"
         chief={baseChief}
         workerWall={baseWorkerWall}
+        finalReview={baseFinalReview}
+        organizer={baseOrganizer}
         debugTimeline={{ enabled: false, events: [] }}
         onMinimize={() => {}}
         onRequestClose={async () => {}}
@@ -110,6 +130,8 @@ describe('AuditProgressDialog', () => {
         startedAt="2026-03-10T10:00:00"
         chief={baseChief}
         workerWall={baseWorkerWall}
+        finalReview={baseFinalReview}
+        organizer={baseOrganizer}
         debugTimeline={{ enabled: false, events: [] }}
         onMinimize={() => {}}
         onRequestClose={async () => {}}
@@ -119,6 +141,8 @@ describe('AuditProgressDialog', () => {
     expect(screen.getByText('主审 + 副审实时现场')).toBeInTheDocument();
     expect(screen.getByText('主审总控卡')).toBeInTheDocument();
     expect(screen.getByText('副审实时卡墙')).toBeInTheDocument();
+    expect(screen.getByText('终审复核')).toBeInTheDocument();
+    expect(screen.getByText('汇总整理')).toBeInTheDocument();
     expect(screen.getAllByText('最近完成').length).toBeGreaterThan(0);
     expect(screen.getByText('标高副审')).toBeInTheDocument();
     expect(screen.getAllByText('正在抽取单图标高语义').length).toBeGreaterThan(0);
@@ -136,6 +160,8 @@ describe('AuditProgressDialog', () => {
         startedAt="2026-03-10T10:00:00"
         chief={baseChief}
         workerWall={baseWorkerWall}
+        finalReview={baseFinalReview}
+        organizer={baseOrganizer}
         debugTimeline={{
           enabled: true,
           events: [
@@ -181,6 +207,8 @@ describe('AuditProgressDialog', () => {
         startedAt="2026-03-10T10:00:00"
         chief={baseChief}
         workerWall={baseWorkerWall}
+        finalReview={baseFinalReview}
+        organizer={baseOrganizer}
         debugTimeline={{
           enabled: true,
           events: [
@@ -220,5 +248,29 @@ describe('AuditProgressDialog', () => {
     expect(
       formatAuditElapsedText('2026-03-10T10:00:00', new Date('2026-03-10T10:03:42')),
     ).toBe('已运行 03:42');
+  });
+
+  it('renders final review and organizer states separately from worker cards', () => {
+    render(
+      <AuditProgressDialog
+        open
+        progress={48}
+        headline="主审派工"
+        supportingText="当前阶段：主审派发副审任务"
+        startedAt="2026-03-10T10:00:00"
+        chief={baseChief}
+        workerWall={baseWorkerWall}
+        finalReview={baseFinalReview}
+        organizer={baseOrganizer}
+        debugTimeline={{ enabled: false, events: [] }}
+        onMinimize={() => {}}
+        onRequestClose={async () => {}}
+      />,
+    );
+
+    expect(screen.getByText('终审复核')).toBeInTheDocument();
+    expect(screen.getByText('终审正在复核 asg-2')).toBeInTheDocument();
+    expect(screen.getByText('汇总整理')).toBeInTheDocument();
+    expect(screen.getByText('最终问题列表')).toBeInTheDocument();
   });
 });

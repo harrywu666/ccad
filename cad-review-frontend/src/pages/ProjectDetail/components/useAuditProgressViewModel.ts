@@ -4,6 +4,8 @@ import type {
   AuditUiRuntime,
   AuditUiRuntimeAction,
   AuditUiRuntimeContext,
+  AuditUiRuntimeFinalReview,
+  AuditUiRuntimeOrganizer,
   AuditUiRuntimeWorkerSession,
 } from '@/types';
 import type { AuditEvent } from '@/types/api';
@@ -37,6 +39,24 @@ export interface WorkerSessionCardViewModel {
   recentActions: AuditUiRuntimeAction[];
 }
 
+export interface FinalReviewCardViewModel {
+  currentAssignmentTitle?: string | null;
+  currentAction: string;
+  summary: string;
+  acceptedCount: number;
+  needsMoreEvidenceCount: number;
+  redispatchCount: number;
+  updatedAt?: string | null;
+}
+
+export interface OrganizerCardViewModel {
+  currentAction: string;
+  summary: string;
+  acceptedIssueCount: number;
+  currentSection?: string | null;
+  updatedAt?: string | null;
+}
+
 export interface AuditProgressViewModel {
   headline: string;
   supportingText: string;
@@ -44,6 +64,8 @@ export interface AuditProgressViewModel {
   progress: number;
   startedAt?: string | null;
   chief: ChiefCardViewModel;
+  finalReview: FinalReviewCardViewModel;
+  organizer: OrganizerCardViewModel;
   workerWall: {
     active: WorkerSessionCardViewModel[];
     recentCompleted: WorkerSessionCardViewModel[];
@@ -88,7 +110,8 @@ const HEADLINE_FLOW = [
   { match: ['校验三线匹配', '构建图纸上下文', 'AI 分析图纸关系'], title: '主审准备' },
   { match: ['规划审核任务图', '从任务账本恢复总控现场', '主审规划副审任务', '主审派发副审任务'], title: '主审派工' },
   { match: ['索引核对', '尺寸核对', '材料核对'], title: '副审执行' },
-  { match: ['审核完成', '主审汇总完成', '主审完成结果收束', '生成报告'], title: '主审汇总' },
+  { match: ['主审复核冲突结果'], title: '终审复核' },
+  { match: ['审核完成', '主审汇总完成', '主审完成结果收束', '生成报告'], title: '汇总整理' },
 ];
 
 const WORKER_SKILL_LABELS: Record<string, string> = {
@@ -439,7 +462,7 @@ function buildFallbackRuntime(currentStep: string, events: AuditEvent[], totalIs
   if (blockedWorkerCount > 0) summaryParts.push(`${blockedWorkerCount} 个副审待处理`);
   if (queuedTaskCount > 0) summaryParts.push(`${queuedTaskCount} 张任务待启动`);
 
-  return {
+  const fallbackRuntime: AuditUiRuntime = {
     chief: {
       title: '主审',
       current_action: latestChief?.message || (currentStep ? `主审正在推进：${currentStep}` : '主审正在准备审图任务'),
@@ -454,6 +477,11 @@ function buildFallbackRuntime(currentStep: string, events: AuditEvent[], totalIs
     },
     worker_sessions: active,
     recent_completed: completed,
+  };
+  return {
+    ...fallbackRuntime,
+    final_review: buildFallbackFinalReview(currentStep, totalIssues, fallbackRuntime),
+    organizer: buildFallbackOrganizer(currentStep, totalIssues, fallbackRuntime),
   };
 }
 
@@ -472,6 +500,106 @@ function normalizeChief(uiRuntime: AuditUiRuntime, totalIssues: number): ChiefCa
   };
 }
 
+function buildFallbackFinalReview(
+  currentStep: string,
+  totalIssues: number,
+  uiRuntime: AuditUiRuntime,
+): AuditUiRuntimeFinalReview {
+  const currentAssignmentTitle = uiRuntime.worker_sessions?.[0]?.task_title
+    || uiRuntime.recent_completed?.[0]?.task_title
+    || null;
+
+  if (currentStep.includes('复核')) {
+    return {
+      current_assignment_title: currentAssignmentTitle,
+      current_action: '终审正在复核最新回流的 assignment',
+      summary: '终审会判断副审结论能否进入最终通过态，并决定是否补证据或补派单。',
+      accepted_count: 0,
+      needs_more_evidence_count: 0,
+      redispatch_count: 0,
+      updated_at: uiRuntime.chief.updated_at || null,
+    };
+  }
+
+  if (currentStep.includes('收束') || currentStep.includes('汇总') || currentStep.includes('报告')) {
+    return {
+      current_assignment_title: currentAssignmentTitle,
+      current_action: '待终审结果已回流，主审正在收束通过项',
+      summary: '终审已完成本轮裁决，当前正在把通过项交给汇总整理。',
+      accepted_count: totalIssues,
+      needs_more_evidence_count: 0,
+      redispatch_count: 0,
+      updated_at: uiRuntime.chief.updated_at || null,
+    };
+  }
+
+  return {
+    current_assignment_title: currentAssignmentTitle,
+    current_action: '待终审队列等待中',
+    summary: '副审回流后，终审意见会在这里单独展示。',
+    accepted_count: 0,
+    needs_more_evidence_count: 0,
+    redispatch_count: 0,
+    updated_at: uiRuntime.chief.updated_at || null,
+  };
+}
+
+function buildFallbackOrganizer(
+  currentStep: string,
+  totalIssues: number,
+  uiRuntime: AuditUiRuntime,
+): AuditUiRuntimeOrganizer {
+  if (currentStep.includes('收束') || currentStep.includes('汇总') || currentStep.includes('报告')) {
+    return {
+      current_action: '正在整理终审通过的问题',
+      summary: `已通过 ${totalIssues} 处问题，正在输出最终问题列表。`,
+      accepted_issue_count: totalIssues,
+      current_section: '最终问题列表',
+      updated_at: uiRuntime.chief.updated_at || null,
+    };
+  }
+
+  return {
+    current_action: '等待终审通过后启动汇总',
+    summary: '只有终审放行的问题，才会进入最终汇总整理。',
+    accepted_issue_count: totalIssues,
+    current_section: '待生成',
+    updated_at: uiRuntime.chief.updated_at || null,
+  };
+}
+
+function normalizeFinalReview(
+  uiRuntime: AuditUiRuntime,
+  totalIssues: number,
+  currentStep: string,
+): FinalReviewCardViewModel {
+  const finalReview = uiRuntime.final_review || buildFallbackFinalReview(currentStep, totalIssues, uiRuntime);
+  return {
+    currentAssignmentTitle: finalReview.current_assignment_title || null,
+    currentAction: finalReview.current_action || '待终审队列等待中',
+    summary: finalReview.summary || '副审回流后，终审意见会在这里单独展示。',
+    acceptedCount: finalReview.accepted_count || 0,
+    needsMoreEvidenceCount: finalReview.needs_more_evidence_count || 0,
+    redispatchCount: finalReview.redispatch_count || 0,
+    updatedAt: finalReview.updated_at || null,
+  };
+}
+
+function normalizeOrganizer(
+  uiRuntime: AuditUiRuntime,
+  totalIssues: number,
+  currentStep: string,
+): OrganizerCardViewModel {
+  const organizer = uiRuntime.organizer || buildFallbackOrganizer(currentStep, totalIssues, uiRuntime);
+  return {
+    currentAction: organizer.current_action || '等待终审通过后启动汇总',
+    summary: organizer.summary || '终审通过的问题会在这里整理成最终报告。',
+    acceptedIssueCount: organizer.accepted_issue_count || totalIssues,
+    currentSection: organizer.current_section || '待生成',
+    updatedAt: organizer.updated_at || null,
+  };
+}
+
 export function buildAuditProgressViewModel({
   auditStatus,
   events = [],
@@ -482,6 +610,8 @@ export function buildAuditProgressViewModel({
   const totalIssues = auditStatus?.total_issues || 0;
   const uiRuntime = auditStatus?.ui_runtime || buildFallbackRuntime(currentStep, events, totalIssues);
   const chief = normalizeChief(uiRuntime, totalIssues);
+  const finalReview = normalizeFinalReview(uiRuntime, totalIssues, currentStep);
+  const organizer = normalizeOrganizer(uiRuntime, totalIssues, currentStep);
   const activeCards = (uiRuntime.worker_sessions || []).map(normalizeWorkerCard);
   const recentCompletedCards = (uiRuntime.recent_completed || []).map(normalizeWorkerCard);
 
@@ -494,6 +624,8 @@ export function buildAuditProgressViewModel({
     progress,
     startedAt: auditStatus?.started_at,
     chief,
+    finalReview,
+    organizer,
     workerWall: {
       active: activeCards,
       recentCompleted: recentCompletedCards,

@@ -215,8 +215,28 @@ export interface AuditUiRuntimeChief {
   updated_at?: string | null;
 }
 
+export interface AuditUiRuntimeFinalReview {
+  current_assignment_title?: string | null;
+  current_action: string;
+  summary: string;
+  accepted_count: number;
+  needs_more_evidence_count: number;
+  redispatch_count: number;
+  updated_at?: string | null;
+}
+
+export interface AuditUiRuntimeOrganizer {
+  current_action: string;
+  summary: string;
+  accepted_issue_count: number;
+  current_section?: string | null;
+  updated_at?: string | null;
+}
+
 export interface AuditUiRuntime {
   chief: AuditUiRuntimeChief;
+  final_review?: AuditUiRuntimeFinalReview | null;
+  organizer?: AuditUiRuntimeOrganizer | null;
   worker_sessions: AuditUiRuntimeWorkerSession[];
   recent_completed: AuditUiRuntimeWorkerSession[];
 }

@@ -12,7 +12,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +32,8 @@ import type { AuditEvent } from "@/types/api";
 import AuditEventList from "./AuditEventList";
 import type {
   ChiefCardViewModel,
+  FinalReviewCardViewModel,
+  OrganizerCardViewModel,
   WorkerSessionCardViewModel,
 } from "./useAuditProgressViewModel";
 
@@ -42,6 +44,8 @@ interface AuditProgressDialogProps {
   supportingText: string;
   startedAt?: string | null;
   chief: ChiefCardViewModel;
+  finalReview: FinalReviewCardViewModel;
+  organizer: OrganizerCardViewModel;
   workerWall: {
     active: WorkerSessionCardViewModel[];
     recentCompleted: WorkerSessionCardViewModel[];
@@ -78,6 +82,60 @@ function SummaryMetricCard({
       <p className="mt-3 text-[28px] font-semibold tracking-[-0.04em] text-foreground">{value}</p>
       <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{hint}</p>
     </div>
+  );
+}
+
+function StageStatusCard({
+  title,
+  icon,
+  summary,
+  currentAction,
+  updatedAt,
+  metrics,
+  secondaryLabel,
+}: {
+  title: string;
+  icon: ReactNode;
+  summary: string;
+  currentAction: string;
+  updatedAt?: string | null;
+  metrics: Array<{ label: string; value: string }>;
+  secondaryLabel?: string | null;
+}) {
+  return (
+    <section className="border border-border bg-white px-5 py-5 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center border border-primary/20 bg-primary/10 text-primary">
+              {icon}
+            </div>
+            <div>
+              <h3 className="text-[18px] font-semibold text-foreground">{title}</h3>
+              <p className="mt-1 text-[13px] leading-6 text-muted-foreground">{summary}</p>
+            </div>
+          </div>
+          <p className="mt-4 text-[16px] font-semibold leading-7 text-foreground">{currentAction}</p>
+          {secondaryLabel ? (
+            <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{secondaryLabel}</p>
+          ) : null}
+        </div>
+        {updatedAt ? (
+          <span className="text-[11px] text-muted-foreground">最近更新 {formatEventClock(updatedAt)}</span>
+        ) : null}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {metrics.map((metric) => (
+          <span
+            key={`${title}-${metric.label}`}
+            className="rounded-full border border-border bg-secondary/20 px-3 py-1 text-[11px] font-medium text-foreground"
+          >
+            {metric.label} {metric.value}
+          </span>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -295,6 +353,8 @@ export default function AuditProgressDialog({
   supportingText,
   startedAt,
   chief,
+  finalReview,
+  organizer,
   workerWall,
   debugTimeline,
   eventError,
@@ -551,7 +611,7 @@ export default function AuditProgressDialog({
                       <div>
                         <h3 className="text-[18px] font-semibold text-foreground">副审实时卡墙</h3>
                         <p className="mt-1 text-[13px] leading-6 text-muted-foreground">
-                          一张卡对应一个正在运行或暂时阻塞的副审会话，动作流直接并入卡片正文。
+                          一张卡绑定一张 assignment，卡内可以有多次 Skill 动作，但不会再膨胀出新的前台卡片。
                         </p>
                       </div>
                       <span className="rounded-full border border-border bg-secondary/30 px-3 py-1 text-[11px] font-medium text-muted-foreground">
@@ -573,6 +633,34 @@ export default function AuditProgressDialog({
                       )}
                     </div>
                   </section>
+
+                  <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                    <StageStatusCard
+                      title="终审复核"
+                      icon={<Bot className="size-4" />}
+                      summary={finalReview.summary}
+                      currentAction={finalReview.currentAction}
+                      updatedAt={finalReview.updatedAt}
+                      secondaryLabel={finalReview.currentAssignmentTitle || null}
+                      metrics={[
+                        { label: "已放行", value: String(finalReview.acceptedCount) },
+                        { label: "补证据", value: String(finalReview.needsMoreEvidenceCount) },
+                        { label: "补派单", value: String(finalReview.redispatchCount) },
+                      ]}
+                    />
+                    <StageStatusCard
+                      title="汇总整理"
+                      icon={<Sparkles className="size-4" />}
+                      summary={organizer.summary}
+                      currentAction={organizer.currentAction}
+                      updatedAt={organizer.updatedAt}
+                      secondaryLabel={organizer.currentSection || null}
+                      metrics={[
+                        { label: "已通过问题", value: String(organizer.acceptedIssueCount) },
+                        { label: "当前章节", value: organizer.currentSection || '待生成' },
+                      ]}
+                    />
+                  </div>
 
                   <section className="mt-4 border border-border bg-white px-5 py-5 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
                     <div className="flex items-center gap-2">
