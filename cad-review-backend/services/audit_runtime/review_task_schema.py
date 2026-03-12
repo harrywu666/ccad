@@ -5,6 +5,61 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class ReviewAssignment(BaseModel):
+    """主审派给单个副审卡的正式任务契约。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    assignment_id: str = Field(min_length=1)
+    review_intent: str = Field(min_length=1)
+    source_sheet_no: str = Field(min_length=1)
+    target_sheet_nos: list[str]
+    task_title: str = Field(min_length=1)
+    acceptance_criteria: list[str] = Field(min_length=1)
+    expected_evidence_types: list[str] = Field(min_length=1)
+    priority: float = Field(ge=0.0, le=1.0)
+    dispatch_reason: str = Field(min_length=1)
+
+    @field_validator(
+        "assignment_id",
+        "review_intent",
+        "source_sheet_no",
+        "task_title",
+        "dispatch_reason",
+        mode="before",
+    )
+    @classmethod
+    def _validate_required_text(cls, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("value must not be empty")
+        return text
+
+    @field_validator("target_sheet_nos", mode="before")
+    @classmethod
+    def _validate_targets(cls, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            raise ValueError("target_sheet_nos must be a list")
+        normalized = [str(item or "").strip() for item in value]
+        if not normalized or len(normalized) > 2:
+            raise ValueError("target_sheet_nos must contain 1-2 sheets")
+        if any(not item for item in normalized):
+            raise ValueError("target_sheet_nos items must not be empty")
+        return normalized
+
+    @field_validator("acceptance_criteria", "expected_evidence_types", mode="before")
+    @classmethod
+    def _validate_non_empty_text_list(cls, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            raise ValueError("value must be a list")
+        normalized = [str(item or "").strip() for item in value]
+        if not normalized or any(not item for item in normalized):
+            raise ValueError("list items must not be empty")
+        return normalized
+
 
 @dataclass(frozen=True)
 class HypothesisCard:
@@ -45,4 +100,4 @@ class WorkerResultCard:
     meta: dict[str, Any] = field(default_factory=dict)
 
 
-__all__ = ["HypothesisCard", "WorkerTaskCard", "WorkerResultCard"]
+__all__ = ["ReviewAssignment", "HypothesisCard", "WorkerTaskCard", "WorkerResultCard"]
