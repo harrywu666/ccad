@@ -6,9 +6,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from services.audit_runtime.review_task_schema import HypothesisCard, WorkerTaskCard
+from services.audit_runtime.worker_skill_registry import is_skillized_worker
 
 
 def _infer_worker_kind(hypothesis: HypothesisCard) -> str:
+    suggested = str(hypothesis.context.get("suggested_worker_kind") or "").strip()
+    if suggested:
+        return suggested
     text = f"{hypothesis.topic} {hypothesis.objective}".strip()
     if "标高" in text:
         return "elevation_consistency"
@@ -50,22 +54,25 @@ class ChiefReviewSession:
         for index, raw in enumerate(active_hypotheses):
             hypothesis = _normalize_hypothesis(dict(raw or {}), index)
             worker_kind = _infer_worker_kind(hypothesis)
-            task_id = f"{hypothesis.id}:{worker_kind}"
+            context = {
+                "project_id": self.project_id,
+                "audit_version": self.audit_version,
+                "priority": hypothesis.priority,
+                **hypothesis.context,
+            }
+            if is_skillized_worker(worker_kind):
+                context.setdefault("execution_mode", "worker_skill")
+                context.setdefault("skill_id", worker_kind)
             tasks.append(
                 WorkerTaskCard(
-                    id=task_id,
+                    id=f"{hypothesis.id}:{worker_kind}",
                     hypothesis_id=hypothesis.id,
                     worker_kind=worker_kind,
                     objective=hypothesis.objective,
                     source_sheet_no=hypothesis.source_sheet_no,
                     target_sheet_nos=list(hypothesis.target_sheet_nos),
                     anchor_hint=dict(hypothesis.context.get("anchor_hint") or {}),
-                    context={
-                        "project_id": self.project_id,
-                        "audit_version": self.audit_version,
-                        "priority": hypothesis.priority,
-                        **hypothesis.context,
-                    },
+                    context=context,
                 )
             )
         return tasks

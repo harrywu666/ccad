@@ -34,6 +34,7 @@ class Finding(BaseModel):
     review_round: int = Field(ge=1)
     triggered_by: Optional[str] = None
     description: str = ""
+    meta: Dict[str, Any] = Field(default_factory=dict)
 
 
 def _safe_json_loads(payload: Optional[str]) -> Dict[str, Any]:
@@ -170,6 +171,7 @@ def finding_from_audit_result(item: Any) -> Finding:
         review_round=review_round,
         triggered_by=triggered_by,
         description=description,
+        meta=evidence.get("meta") if isinstance(evidence.get("meta"), dict) else {},
     )
 
 
@@ -184,6 +186,8 @@ def merge_finding_into_evidence_json(
     payload.setdefault("rule_id", finding.rule_id)
     payload.setdefault("source_agent", finding.source_agent)
     payload.setdefault("evidence_pack_id", finding.evidence_pack_id)
+    if finding.meta:
+        payload["meta"] = dict(finding.meta)
     if finding.triggered_by:
         payload.setdefault("triggered_by", finding.triggered_by)
     try:

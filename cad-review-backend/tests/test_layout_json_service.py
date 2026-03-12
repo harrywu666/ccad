@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 import sys
 from pathlib import Path
 
@@ -9,11 +10,12 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-
-from services.layout_json_service import backfill_layout_json, load_enriched_layout_json
+def _layout_json_service():
+    return importlib.import_module("services.layout_json_service")
 
 
 def test_load_enriched_layout_json_does_not_backfill_implicitly(monkeypatch, tmp_path):
+    layout_json_service = _layout_json_service()
     project_dir = tmp_path / "projects" / "proj-preview"
     json_dir = project_dir / "jsons"
     dwg_dir = project_dir / "dwg"
@@ -57,7 +59,7 @@ def test_load_enriched_layout_json_does_not_backfill_implicitly(monkeypatch, tmp
         ],
     )
 
-    payload = load_enriched_layout_json(str(source_json))
+    payload = layout_json_service.load_enriched_layout_json(str(source_json))
 
     assert payload is not None
     assert payload["indexes"][0]["position"] == [541.48, 287.771]
@@ -71,6 +73,7 @@ def test_load_enriched_layout_json_does_not_backfill_implicitly(monkeypatch, tmp
 
 
 def test_backfill_layout_json_updates_legacy_index_visual_anchor(monkeypatch, tmp_path):
+    layout_json_service = _layout_json_service()
     project_dir = tmp_path / "projects" / "proj-preview"
     json_dir = project_dir / "jsons"
     dwg_dir = project_dir / "dwg"
@@ -98,8 +101,6 @@ def test_backfill_layout_json_updates_legacy_index_visual_anchor(monkeypatch, tm
         encoding="utf-8",
     )
 
-    import services.layout_json_service as layout_json_service
-
     monkeypatch.setattr(
         layout_json_service,
         "read_layout_indexes_from_dwg",
@@ -114,10 +115,10 @@ def test_backfill_layout_json_updates_legacy_index_visual_anchor(monkeypatch, tm
         ],
     )
 
-    raw = backfill_layout_json(str(source_json))
+    raw = layout_json_service.backfill_layout_json(str(source_json))
     assert raw is not None
 
-    payload = load_enriched_layout_json(str(source_json))
+    payload = layout_json_service.load_enriched_layout_json(str(source_json))
     assert payload is not None
     assert payload["indexes"][0]["position"] == [539.182, 286.706]
     assert payload["indexes"][0]["insert_position"] == [541.48, 287.771]
@@ -131,6 +132,7 @@ def test_backfill_layout_json_updates_legacy_index_visual_anchor(monkeypatch, tm
 
 
 def test_backfill_layout_json_refreshes_stale_layout_page_range(monkeypatch, tmp_path):
+    layout_json_service = _layout_json_service()
     project_dir = tmp_path / "projects" / "proj-preview"
     json_dir = project_dir / "jsons"
     dwg_dir = project_dir / "dwg"
@@ -154,8 +156,6 @@ def test_backfill_layout_json_refreshes_stale_layout_page_range(monkeypatch, tmp
         encoding="utf-8",
     )
 
-    import services.layout_json_service as layout_json_service
-
     monkeypatch.setattr(
         layout_json_service,
         "read_layout_page_range_from_dwg",
@@ -167,7 +167,7 @@ def test_backfill_layout_json_refreshes_stale_layout_page_range(monkeypatch, tmp
         lambda dwg_path, layout_name: [],
     )
 
-    raw = backfill_layout_json(str(source_json))
+    raw = layout_json_service.backfill_layout_json(str(source_json))
     assert raw is not None
     assert raw["layout_page_range"] == {"min": [0.0, 0.0], "max": [841.0, 594.0]}
 
@@ -176,6 +176,7 @@ def test_backfill_layout_json_refreshes_stale_layout_page_range(monkeypatch, tmp
 
 
 def test_backfill_layout_json_adds_detail_titles(monkeypatch, tmp_path):
+    layout_json_service = _layout_json_service()
     project_dir = tmp_path / "projects" / "proj-preview"
     json_dir = project_dir / "jsons"
     dwg_dir = project_dir / "dwg"
@@ -200,8 +201,6 @@ def test_backfill_layout_json_adds_detail_titles(monkeypatch, tmp_path):
         encoding="utf-8",
     )
 
-    import services.layout_json_service as layout_json_service
-
     monkeypatch.setattr(layout_json_service, "read_layout_indexes_from_dwg", lambda dwg_path, layout_name: [])
     monkeypatch.setattr(
         layout_json_service,
@@ -220,16 +219,17 @@ def test_backfill_layout_json_adds_detail_titles(monkeypatch, tmp_path):
         ],
     )
 
-    raw = backfill_layout_json(str(source_json))
+    raw = layout_json_service.backfill_layout_json(str(source_json))
     assert raw is not None
 
-    payload = load_enriched_layout_json(str(source_json))
+    payload = layout_json_service.load_enriched_layout_json(str(source_json))
     assert payload is not None
     assert payload["detail_titles"][0]["label"] == "A1"
     assert payload["detail_titles"][0]["source"] == "model_space"
 
 
 def test_backfill_layout_json_adds_layout_fragments(monkeypatch, tmp_path):
+    layout_json_service = _layout_json_service()
     project_dir = tmp_path / "projects" / "proj-preview"
     json_dir = project_dir / "jsons"
     dwg_dir = project_dir / "dwg"
@@ -254,8 +254,6 @@ def test_backfill_layout_json_adds_layout_fragments(monkeypatch, tmp_path):
         ),
         encoding="utf-8",
     )
-
-    import services.layout_json_service as layout_json_service
 
     monkeypatch.setattr(layout_json_service, "read_layout_indexes_from_dwg", lambda dwg_path, layout_name: [])
     monkeypatch.setattr(layout_json_service, "read_layout_detail_titles_from_dwg", lambda dwg_path, layout_name: [])
@@ -295,7 +293,7 @@ def test_backfill_layout_json_adds_layout_fragments(monkeypatch, tmp_path):
         },
     )
 
-    raw = backfill_layout_json(str(source_json))
+    raw = layout_json_service.backfill_layout_json(str(source_json))
     assert raw is not None
     assert raw["sheet_no"] == "PL-01"
     assert raw["sheet_name"] == "平面图"

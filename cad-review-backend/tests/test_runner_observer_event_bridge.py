@@ -66,7 +66,7 @@ def test_observer_decision_is_written_to_audit_run_events(monkeypatch, tmp_path)
     monkeypatch.setattr(
         observer_session.ProjectRunnerObserverSession,
         "get_or_create",
-        classmethod(lambda cls, project_id, *, audit_version, provider=None: _FakeObserverSession()),
+        classmethod(lambda cls, project_id, *, audit_version, provider=None, provider_mode=None: _FakeObserverSession()),
     )
 
     state_transitions.append_run_event(
@@ -130,7 +130,7 @@ def test_observer_event_bridge_falls_back_to_event_meta_without_audit_run(monkey
     monkeypatch.setattr(
         observer_session.ProjectRunnerObserverSession,
         "get_or_create",
-        classmethod(lambda cls, project_id, *, audit_version, provider=None: _FakeObserverSession()),
+        classmethod(lambda cls, project_id, *, audit_version, provider=None, provider_mode=None: _FakeObserverSession()),
     )
 
     state_transitions.append_run_event(
@@ -189,7 +189,7 @@ def test_observer_event_bridge_rewrites_mark_needs_review_to_restart_subsession(
     monkeypatch.setattr(
         observer_session.ProjectRunnerObserverSession,
         "get_or_create",
-        classmethod(lambda cls, project_id, *, audit_version, provider=None: _FakeObserverSession()),
+        classmethod(lambda cls, project_id, *, audit_version, provider=None, provider_mode=None: _FakeObserverSession()),
     )
     monkeypatch.setattr(
         state_transitions,
@@ -266,7 +266,7 @@ def test_observer_event_bridge_marks_unexecuted_action_honestly(monkeypatch, tmp
     monkeypatch.setattr(
         observer_session.ProjectRunnerObserverSession,
         "get_or_create",
-        classmethod(lambda cls, project_id, *, audit_version, provider=None: _FakeObserverSession()),
+        classmethod(lambda cls, project_id, *, audit_version, provider=None, provider_mode=None: _FakeObserverSession()),
     )
 
     state_transitions.append_run_event(
@@ -336,7 +336,7 @@ def test_observer_event_bridge_executes_restart_master_agent_with_project_memory
     monkeypatch.setattr(
         observer_session.ProjectRunnerObserverSession,
         "get_or_create",
-        classmethod(lambda cls, project_id, *, audit_version, provider=None: _FakeObserverSession()),
+        classmethod(lambda cls, project_id, *, audit_version, provider=None, provider_mode=None: _FakeObserverSession()),
     )
     monkeypatch.setattr(
         state_transitions,
@@ -378,3 +378,78 @@ def test_observer_event_bridge_executes_restart_master_agent_with_project_memory
     assert payload["action_name"] == "restart_master_agent"
     assert payload["executed"] is True
     assert payload["result"]["restarted"] is True
+
+
+def test_observer_event_bridge_skips_when_observer_is_debounced(monkeypatch, tmp_path):
+    session_local, models, state_transitions, observer_session, observer_types = _load_runtime(
+        monkeypatch,
+        tmp_path,
+    )
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-observer-debounced", name="Observer Debounced"))
+        db.add(models.AuditRun(project_id="proj-observer-debounced", audit_version=1, status="running"))
+        db.commit()
+    finally:
+        db.close()
+
+    class _FakeObserverSession:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def should_observe(self) -> bool:
+            return self.calls == 0
+
+        async def observe(self, snapshot):  # noqa: ANN001
+            self.calls += 1
+            return observer_types.RunnerObserverDecision(
+                summary="现场需要继续观察",
+                risk_level="low",
+                suggested_action="observe_only",
+                reason="第一次观察",
+                should_intervene=False,
+                confidence=0.8,
+                user_facing_broadcast="Runner 正在继续观察当前流程",
+            )
+
+    fake_session = _FakeObserverSession()
+    monkeypatch.setattr(
+        observer_session.ProjectRunnerObserverSession,
+        "get_or_create",
+        classmethod(lambda cls, project_id, *, audit_version, provider=None, provider_mode=None: fake_session),
+    )
+
+    state_transitions.append_run_event(
+        "proj-observer-debounced",
+        1,
+        step_key="dimension",
+        event_kind="runner_turn_retrying",
+        message="第一次触发观察",
+        meta={"provider_name": "sdk", "provider_mode": "kimi_sdk"},
+    )
+    state_transitions.append_run_event(
+        "proj-observer-debounced",
+        1,
+        step_key="dimension",
+        event_kind="runner_turn_retrying",
+        message="第二次触发观察",
+        meta={"provider_name": "sdk", "provider_mode": "kimi_sdk"},
+    )
+
+    db = session_local()
+    try:
+        decision_rows = (
+            db.query(models.AuditRunEvent)
+            .filter(
+                models.AuditRunEvent.project_id == "proj-observer-debounced",
+                models.AuditRunEvent.audit_version == 1,
+                models.AuditRunEvent.event_kind == "runner_observer_decision",
+            )
+            .all()
+        )
+    finally:
+        db.close()
+
+    assert fake_session.calls == 1
+    assert len(decision_rows) == 1

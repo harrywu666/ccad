@@ -1,4 +1,4 @@
-"""主审与副审共享任务卡结构。"""
+"""主审/副审共享的最小任务卡结构。"""
 
 from __future__ import annotations
 
@@ -42,8 +42,4 @@ class WorkerResultCard:
     meta: dict[str, Any] = field(default_factory=dict)
 
 
-__all__ = [
-    "HypothesisCard",
-    "WorkerTaskCard",
-    "WorkerResultCard",
-]
+__all__ = ["HypothesisCard", "WorkerTaskCard", "WorkerResultCard"]

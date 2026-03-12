@@ -18,6 +18,27 @@ from services.skill_pack_service import load_runtime_skill_profile
 logger = logging.getLogger(__name__)
 
 
+def _call_master_planner(
+    project_id: str,
+    contexts: List[SheetContext],
+    edges: List[SheetEdge],
+    *,
+    audit_version: int,
+) -> Dict[str, Any]:
+    try:
+        return plan_with_master_llm(
+            project_id,
+            contexts,
+            edges,
+            audit_version=audit_version,
+        )
+    except TypeError as exc:
+        message = str(exc)
+        if "unexpected keyword argument 'audit_version'" not in message:
+            raise
+        return plan_with_master_llm(project_id, contexts, edges)
+
+
 def _clamp_priority(priority: int) -> int:
     return max(1, min(5, int(priority)))
 
@@ -342,7 +363,7 @@ def build_audit_tasks(project_id: str, audit_version: int, db) -> Dict[str, Any]
     planner_reason = "rule_based"
     planner_warnings: List[str] = []
 
-    llm_plan = plan_with_master_llm(
+    llm_plan = _call_master_planner(
         project_id,
         contexts,
         edges,

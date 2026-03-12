@@ -83,7 +83,13 @@ def test_dimension_worker_v2_emits_stream_events(monkeypatch, tmp_path):
         async def get_evidence_pack(self, request):
             return dimension_audit.EvidencePack(
                 pack_type=request.pack_type,
-                images={"source_full": b"source"},
+                images={
+                    "source_full": b"source",
+                    "source_top_left": b"source",
+                    "source_top_right": b"source",
+                    "source_bottom_left": b"source",
+                    "source_bottom_right": b"source",
+                },
                 source_pdf_path=request.source_pdf_path,
                 source_page_index=request.source_page_index,
             )
@@ -135,3 +141,151 @@ def test_dimension_worker_v2_emits_stream_events(monkeypatch, tmp_path):
         and "第 2 次重试" in str(event.get("message") or "")
         for event in captured_events
     )
+
+
+def test_dimension_worker_v2_uses_unique_subsession_key_per_sheet_job(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUDIT_KIMI_STREAM_ENABLED", "1")
+    dimension_audit = _load_module(monkeypatch)
+
+    captured_meta: list[dict[str, object]] = []
+
+    class _FakeEvidenceService:
+        async def get_evidence_pack(self, request):
+            return dimension_audit.EvidencePack(
+                pack_type=request.pack_type,
+                images={
+                    "source_full": b"source",
+                    "source_top_left": b"source",
+                    "source_top_right": b"source",
+                    "source_bottom_left": b"source",
+                    "source_bottom_right": b"source",
+                },
+                source_pdf_path=request.source_pdf_path,
+                source_page_index=request.source_page_index,
+            )
+
+    class _FakeRunner:
+        async def run_stream(self, request, should_cancel=None):  # noqa: ANN001
+            del should_cancel
+            captured_meta.append(dict(request.meta or {}))
+            return dimension_audit.RunnerTurnResult(
+                provider_name="sdk",
+                output=[],
+                status="ok",
+                raw_output="[]",
+            )
+
+    monkeypatch.setattr(dimension_audit, "get_evidence_service", lambda: _FakeEvidenceService())
+    monkeypatch.setattr(
+        dimension_audit,
+        "_get_dimension_runner",
+        lambda *args, **kwargs: _FakeRunner(),
+    )
+
+    result = asyncio.run(
+        dimension_audit._execute_sheet_jobs(
+            [
+                {
+                    "sheet_key": "A101",
+                    "sheet_no": "A1.01",
+                    "pdf_path": "/tmp/a101.pdf",
+                    "page_index": 0,
+                    "prompt": "test",
+                    "cache_key": "cache-key-a",
+                    "visual_only": False,
+                },
+                {
+                    "sheet_key": "A401",
+                    "sheet_no": "A4.01",
+                    "pdf_path": "/tmp/a401.pdf",
+                    "page_index": 1,
+                    "prompt": "test-2",
+                    "cache_key": "cache-key-b",
+                    "visual_only": False,
+                },
+            ],
+            2,
+            tmp_path,
+            lambda **kwargs: [],
+            project_id="proj-dim-stream",
+            audit_version=7,
+        )
+    )
+
+    assert len(result) == 2
+    assert [item["subsession_key"] for item in captured_meta] == [
+        "sheet_semantic:A101",
+        "sheet_semantic:A401",
+    ]
+
+
+def test_dimension_worker_wrapper_passes_pair_filters(monkeypatch):
+    dimension_audit = _load_module(monkeypatch)
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+    captured: dict[str, object] = {}
+
+    def fake_dimension_audit(project_id, audit_version, db, pair_filters=None, hot_sheet_registry=None):  # noqa: ANN001
+        captured["pair_filters"] = pair_filters
+        return []
+
+    monkeypatch.setattr(dimension_audit, "audit_dimensions", fake_dimension_audit)
+
+    result = dimension_audit.run_dimension_worker_wrapper(
+        "proj-dim-wrapper",
+        3,
+        "db-session",
+        review_task_schema.WorkerTaskCard(
+            id="task-dim-wrapper",
+            hypothesis_id="hyp-dim-wrapper",
+            worker_kind="spatial_consistency",
+            objective="核对两张图",
+            source_sheet_no="A1.01",
+            target_sheet_nos=["A4.01"],
+            context={"project_id": "proj-dim-wrapper", "audit_version": 3},
+        ),
+    )
+
+    assert captured["pair_filters"] == [("A1.01", "A4.01")]
+    assert result.meta["compat_mode"] == "worker_wrapper"
+
+
+def test_collect_dimension_pair_issues_respects_pair_filters(monkeypatch):
+    dimension_audit = _load_module(monkeypatch)
+
+    captured: dict[str, object] = {}
+
+    class _FakeQuery:
+        def filter(self, *args, **kwargs):  # noqa: ANN001
+            return self
+
+        def first(self):
+            return object()
+
+        def all(self):
+            return []
+
+    class _FakeDb:
+        def query(self, model):  # noqa: ANN001
+            return _FakeQuery()
+
+    monkeypatch.setattr(dimension_audit, "_cache_dir_for_project", lambda project: Path("/tmp"))
+    monkeypatch.setattr(dimension_audit, "_load_json_by_sheet", lambda *args, **kwargs: {"A101": {"sheet_no": "A1.01"}, "A401": {"sheet_no": "A4.01"}})
+    monkeypatch.setattr(dimension_audit, "_load_drawing_assets", lambda *args, **kwargs: {})
+    monkeypatch.setattr(dimension_audit, "load_runtime_skill_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(dimension_audit, "load_feedback_runtime_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(dimension_audit, "resolve_dimension_runtime_policy", lambda *args, **kwargs: {})
+    def fake_build_pairs(json_by_sheet, pair_filters, ai_edges=None):  # noqa: ANN001
+        captured["pair_filters"] = pair_filters
+        return []
+
+    monkeypatch.setattr(dimension_audit, "_build_pairs", fake_build_pairs)
+
+    issues = dimension_audit._collect_dimension_pair_issues(
+        "proj-dim-filter",
+        1,
+        _FakeDb(),
+        pair_filters=[("A1.01", "A4.01")],
+    )
+
+    assert issues == []
+    assert captured["pair_filters"] == [("A1.01", "A4.01")]

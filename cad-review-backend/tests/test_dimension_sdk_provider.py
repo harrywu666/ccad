@@ -11,12 +11,13 @@ if str(BACKEND_DIR) not in sys.path:
 
 from services.audit.dimension_audit import _get_dimension_runner
 from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+from services.kimi_service import call_kimi
 
 
 def test_dimension_runner_uses_sdk_provider_when_enabled(monkeypatch):
     ProjectAuditAgentRunner.clear_registry()
     monkeypatch.setenv("AUDIT_RUNNER_PROVIDER", "sdk")
 
-    runner = _get_dimension_runner("proj-sdk-dim", 9, call_kimi=lambda **kwargs: None)
+    runner = _get_dimension_runner("proj-sdk-dim", 9, call_kimi=call_kimi)
 
     assert runner.provider.provider_name == "sdk"

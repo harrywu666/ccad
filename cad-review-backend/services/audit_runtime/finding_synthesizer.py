@@ -53,7 +53,45 @@ def _to_finding(result: WorkerResultCard) -> Finding:
         review_round=max(1, int(result.meta.get("review_round") or 1)),
         triggered_by=result.hypothesis_id,
         description=result.summary,
+        meta={
+            "execution_mode": str(
+                result.meta.get("skill_mode") or result.meta.get("execution_mode") or "worker_result"
+            ).strip(),
+            "skill_id": str(result.meta.get("skill_id") or "").strip(),
+            "skill_path": str(result.meta.get("skill_path") or "").strip(),
+        },
     )
+
+
+def _resolve_conflicting_group(items: list[WorkerResultCard]) -> Finding | None:
+    confirmed = sorted(
+        [item for item in items if str(item.status or "").strip().lower() == "confirmed"],
+        key=lambda item: float(item.confidence),
+        reverse=True,
+    )
+    conflicting = sorted(
+        [
+            item
+            for item in items
+            if str(item.status or "").strip().lower() in {"rejected", "dismissed"}
+        ],
+        key=lambda item: float(item.confidence),
+        reverse=True,
+    )
+    if not confirmed or not conflicting:
+        return None
+    if float(confirmed[0].confidence) >= 0.9 and float(conflicting[0].confidence) <= 0.55:
+        return _to_finding(confirmed[0])
+    confirmed_avg = sum(float(item.confidence) for item in confirmed) / len(confirmed)
+    conflicting_avg = sum(float(item.confidence) for item in conflicting) / len(conflicting)
+    if (
+        len(confirmed) >= len(conflicting)
+        and confirmed_avg >= 0.86
+        and conflicting_avg <= 0.58
+        and float(confirmed[0].confidence) - float(conflicting[0].confidence) >= 0.2
+    ):
+        return _to_finding(confirmed[0])
+    return None
 
 
 def synthesize_findings(
@@ -70,6 +108,10 @@ def synthesize_findings(
     for hypothesis_id, items in grouped.items():
         statuses = {str(item.status or "").strip().lower() for item in items}
         if "confirmed" in statuses and ("rejected" in statuses or "dismissed" in statuses):
+            resolved = _resolve_conflicting_group(items)
+            if resolved is not None:
+                findings.append(resolved)
+                continue
             escalations.append(
                 {
                     "hypothesis_id": hypothesis_id,

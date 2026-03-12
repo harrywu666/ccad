@@ -53,20 +53,28 @@ def _agent_name(request: RunnerTurnRequest) -> str:
 
 def _progress_message(request: RunnerTurnRequest, meta: Dict[str, Any]) -> str:
     turn_kind = str(request.turn_kind or "").strip().lower()
+    run_mode = str(meta.get("run_mode") or "").strip().lower()
     candidate_index = _int_or_none(meta.get("candidate_index"))
     source_sheet_no = str(meta.get("source_sheet_no") or meta.get("candidate_source_sheet_no") or "").strip()
     target_sheet_no = str(meta.get("target_sheet_no") or meta.get("candidate_target_sheet_no") or "").strip()
 
+    prefix_map = {
+        "shadow_legacy": "影子旧路径：",
+        "shadow_chief_review": "影子主审路径：",
+        "chief_review": "主审路径：",
+    }
+    prefix = prefix_map.get(run_mode, "")
+
     if turn_kind == "relationship_candidate_review" and candidate_index is not None:
         base = f"{_agent_name(request)} 正在复核第 {candidate_index} 组候选关系"
         if source_sheet_no and target_sheet_no:
-            return f"{base}，当前核对 {source_sheet_no} 和 {target_sheet_no}"
-        return base
+            return f"{prefix}{base}，当前核对 {source_sheet_no} 和 {target_sheet_no}"
+        return f"{prefix}{base}"
     if turn_kind == "relationship_group_discovery":
-        return f"{_agent_name(request)} 正在整理值得继续复核的候选关系"
+        return f"{prefix}{_agent_name(request)} 正在整理值得继续复核的候选关系"
     if turn_kind in {"planning", "task_planning"}:
-        return f"{_agent_name(request)} 正在整理这次审图的基础信息"
-    return f"{_agent_name(request)} 正在继续推进当前审图步骤"
+        return f"{prefix}{_agent_name(request)} 正在整理这次审图的基础信息"
+    return f"{prefix}{_agent_name(request)} 正在继续推进当前审图步骤"
 
 
 def _decorate_with_run_mode(message: str, meta: Dict[str, Any]) -> str:

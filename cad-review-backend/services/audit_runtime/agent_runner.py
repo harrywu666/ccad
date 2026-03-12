@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from services.audit_runtime.output_guard import guard_output
 from services.audit_runtime.cancel_registry import AuditCancellationRequested
+from services.audit_runtime.llm_request_gate import get_project_llm_gate
 from services.audit_runtime.providers.kimi_sdk_provider import SdkStreamIdleTimeoutError
 from services.audit_runtime.runner_broadcasts import build_runner_broadcast_message
 from services.audit_runtime.runner_types import (
@@ -70,7 +71,7 @@ class ProjectAuditAgentRunner:
                 cls._registry[key] = runner
             elif shared_context:
                 runner.shared_context.update(shared_context)
-            if provider is not None:
+            if provider is not None and runner.provider is None:
                 runner.provider = provider
             return runner
 
@@ -100,13 +101,11 @@ class ProjectAuditAgentRunner:
             cls._registry.pop((project_id, int(audit_version)), None)
 
     def resolve_subsession(self, request: RunnerTurnRequest) -> RunnerSubsession:
-        lookup_key = self._subsession_lookup_key(request)
+        slot_key = self._subsession_slot_key(request)
+        session_key = self._session_key(request)
         with self._subsession_lock:
-            subsession = self._subsessions.get(lookup_key)
+            subsession = self._subsessions.get(slot_key)
             if subsession is None:
-                session_key = f"{self.project_id}:{self.audit_version}:{request.agent_key}"
-                if lookup_key != request.agent_key:
-                    session_key = f"{session_key}:{lookup_key}"
                 subsession = RunnerSubsession(
                     project_id=self.project_id,
                     audit_version=self.audit_version,
@@ -114,18 +113,34 @@ class ProjectAuditAgentRunner:
                     session_key=session_key,
                     shared_context=self.shared_context,
                 )
-                self._subsessions[lookup_key] = subsession
+                self._subsessions[slot_key] = subsession
             return subsession
 
     def get_existing_subsession(self, agent_key: str) -> Optional[RunnerSubsession]:
         with self._subsession_lock:
-            return self._subsessions.get(agent_key)
+            exact = self._subsessions.get(agent_key)
+            if exact is not None:
+                return exact
+            candidates = [
+                subsession
+                for key, subsession in self._subsessions.items()
+                if key == agent_key or key.startswith(f"{agent_key}::")
+            ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: float(item.turn_started_at or 0.0))
 
-    @staticmethod
-    def _subsession_lookup_key(request: RunnerTurnRequest) -> str:
-        raw = request.meta.get("subsession_key") if isinstance(request.meta, dict) else None
-        value = str(raw or "").strip()
-        return value or request.agent_key
+    def _subsession_slot_key(self, request: RunnerTurnRequest) -> str:
+        extra_key = str((request.meta or {}).get("subsession_key") or "").strip()
+        if not extra_key:
+            return request.agent_key
+        return f"{request.agent_key}::{extra_key}"
+
+    def _session_key(self, request: RunnerTurnRequest) -> str:
+        extra_key = str((request.meta or {}).get("subsession_key") or "").strip()
+        if not extra_key:
+            return f"{self.project_id}:{self.audit_version}:{request.agent_key}"
+        return f"{self.project_id}:{self.audit_version}:{request.agent_key}:{extra_key}"
 
     async def _cancel_active_turns_async(self) -> bool:
         cancelled = False
@@ -158,6 +173,14 @@ class ProjectAuditAgentRunner:
                 return str(raw).strip()
         return self._provider_name()
 
+    async def _acquire_llm_slot(self, *, should_cancel=None):  # noqa: ANN001
+        gate = get_project_llm_gate(
+            project_id=self.project_id,
+            audit_version=self.audit_version,
+            provider_mode=self._provider_mode(),
+        )
+        return await gate.acquire(should_cancel=should_cancel)
+
     async def run_once(
         self,
         request: RunnerTurnRequest,
@@ -181,7 +204,11 @@ class ProjectAuditAgentRunner:
         )
         subsession.current_turn_status = "running"
         try:
-            result = await self.provider.run_once(request, subsession)
+            release_llm_slot = await self._acquire_llm_slot(should_cancel=should_cancel)
+            try:
+                result = await self.provider.run_once(request, subsession)
+            finally:
+                release_llm_slot()
             self._mark_progress(subsession, phase="completed")
             subsession.current_turn_status = "idle"
             subsession.current_phase = "idle"
@@ -276,12 +303,16 @@ class ProjectAuditAgentRunner:
 
         while True:
             try:
-                result = await self.provider.run_stream(
-                    request,
-                    subsession,
-                    on_event=_on_provider_event,
-                    should_cancel=should_cancel,
-                )
+                release_llm_slot = await self._acquire_llm_slot(should_cancel=should_cancel)
+                try:
+                    result = await self.provider.run_stream(
+                        request,
+                        subsession,
+                        on_event=_on_provider_event,
+                        should_cancel=should_cancel,
+                    )
+                finally:
+                    release_llm_slot()
                 result = self._apply_output_guard(request, subsession, result)
                 self._mark_progress(subsession, phase="completed")
                 subsession.current_turn_status = "idle"

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from database import SessionLocal
 from models import AIPromptSetting
+from services.agent_asset_service import load_agent_asset_bundle
 from services.skill_pack_service import format_skill_rules_block, load_active_skill_rules
 
 PLACEHOLDER_PATTERN = re.compile(r"{{\s*([a-zA-Z0-9_]+)\s*}}")
@@ -634,3 +635,22 @@ def resolve_stage_system_prompt_with_skills(
     if not rules_block:
         return rendered_system
     return f"{rendered_system}\n\n{rules_block}"
+
+
+def build_agent_runtime_prompt(
+    agent_id: str,
+    *,
+    memory_override: Optional[str] = None,
+    extra_sections: Optional[List[str]] = None,
+) -> str:
+    """把 AGENTS / SOUL / MEMORY 组装成运行时上下文。"""
+    bundle = load_agent_asset_bundle(agent_id)
+    sections: List[str] = [
+        bundle.agent_markdown.strip(),
+        bundle.soul_markdown.strip(),
+        (memory_override if memory_override is not None else bundle.memory_markdown).strip(),
+    ]
+    for item in extra_sections or []:
+        if isinstance(item, str) and item.strip():
+            sections.append(item.strip())
+    return "\n\n".join(item for item in sections if item)

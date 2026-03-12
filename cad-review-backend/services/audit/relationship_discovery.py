@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -29,6 +30,7 @@ from services.audit_runtime.evidence_service import EvidenceService
 from services.audit_runtime.finding_schema import Finding
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider
+from services.audit_runtime.review_task_schema import WorkerResultCard, WorkerTaskCard
 from services.audit_runtime.runner_types import RunnerTurnRequest, RunnerTurnResult
 from services.audit_runtime.cancel_registry import AuditCancellationRequested, is_cancel_requested
 from services.audit_runtime.state_transitions import append_agent_status_report, append_run_event
@@ -39,6 +41,16 @@ from services.skill_pack_service import load_runtime_skill_profile
 logger = logging.getLogger(__name__)
 
 _DEFAULT_GROUP_SIZE = 4
+
+
+def _relationship_subsession_key(scope: str, *sheet_nos: str) -> str:
+    normalized = [
+        normalize_sheet_no(sheet_no) or str(sheet_no or "").strip()
+        for sheet_no in sheet_nos
+        if str(sheet_no or "").strip()
+    ]
+    digest = hashlib.sha1("|".join(normalized).encode("utf-8")).hexdigest()[:12]
+    return f"{scope}:{digest}"
 
 
 def _build_relationship_agent_report(
@@ -109,15 +121,51 @@ def _get_relationship_runner(
     *,
     call_kimi,  # noqa: ANN001
 ) -> ProjectAuditAgentRunner:
+    provider_mode = _load_requested_provider_mode(project_id, audit_version)
+    runner_signature = (
+        f"{provider_mode or 'env'}:{id(call_kimi)}:{id(call_kimi_stream)}"
+    )
+    existing = ProjectAuditAgentRunner.get_existing(project_id, audit_version=audit_version)
+    if existing and str(existing.shared_context.get("runner_signature") or "") != runner_signature:
+        ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
+    shared_context = {
+        "project_id": project_id,
+        "audit_version": audit_version,
+        "runner_signature": runner_signature,
+    }
+    if provider_mode:
+        shared_context["provider_mode"] = provider_mode
     return ProjectAuditAgentRunner.get_or_create(
         project_id,
         audit_version=audit_version,
         provider=build_runner_provider(
+            requested_mode=provider_mode,
             run_once_func=call_kimi,
             run_stream_func=call_kimi_stream,
         ),
-        shared_context={"project_id": project_id, "audit_version": audit_version},
+        shared_context=shared_context,
     )
+
+
+def _load_requested_provider_mode(project_id: str, audit_version: int) -> str | None:
+    from database import SessionLocal
+    from models import AuditRun
+
+    db = SessionLocal()
+    try:
+        run = (
+            db.query(AuditRun)
+            .filter(
+                AuditRun.project_id == project_id,
+                AuditRun.audit_version == audit_version,
+            )
+            .order_by(AuditRun.created_at.desc())
+            .first()
+        )
+        value = str(getattr(run, "provider_mode", "") or "").strip()
+        return value or None
+    finally:
+        db.close()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -387,8 +435,18 @@ def _build_candidate_relationship_tasks(
     return tasks
 
 
-def _load_ready_sheets(project_id: str, db) -> List[Dict[str, Any]]:
+def _load_ready_sheets(
+    project_id: str,
+    db,
+    *,
+    sheet_filters: List[str] | None = None,
+) -> List[Dict[str, Any]]:
     """Load all ready sheets with their catalog info, JSON data, and drawing assets."""
+    allowed_sheet_nos = {
+        normalize_sheet_no(item)
+        for item in list(sheet_filters or [])
+        if normalize_sheet_no(item)
+    }
     catalog_items = (
         db.query(Catalog)
         .filter(Catalog.project_id == project_id, Catalog.status == "locked")
@@ -421,6 +479,8 @@ def _load_ready_sheets(project_id: str, db) -> List[Dict[str, Any]]:
 
         sheet_no = cat.sheet_no or json_data.sheet_no or ""
         if not sheet_no.strip():
+            continue
+        if allowed_sheet_nos and normalize_sheet_no(sheet_no) not in allowed_sheet_nos:
             continue
 
         # Load JSON payload for index data (as reference)
@@ -459,6 +519,81 @@ def _load_ready_sheets(project_id: str, db) -> List[Dict[str, Any]]:
         })
 
     return sheets
+
+
+def _relationship_worker_result_from_relationships(
+    task: WorkerTaskCard,
+    relationships: List[Dict[str, Any]],
+) -> WorkerResultCard:
+    if not relationships:
+        return WorkerResultCard(
+            task_id=task.id,
+            hypothesis_id=task.hypothesis_id,
+            worker_kind=task.worker_kind,
+            status="rejected",
+            confidence=0.71,
+            summary=f"旧关系发现入口已作为 worker 包装层执行，{task.source_sheet_no} 未发现跨图引用问题",
+            meta={
+                "compat_mode": "worker_wrapper",
+                "sheet_no": task.source_sheet_no,
+                "location": task.objective,
+                "rule_id": "relationship_visual_review",
+                "evidence_pack_id": "paired_overview_pack",
+                "issue_count": 0,
+            },
+        )
+
+    evidence: List[Dict[str, Any]] = []
+    confidence = 0.81
+    for item in relationships[:5]:
+        finding = dict(item.get("finding") or {})
+        confidence = max(confidence, float(item.get("confidence") or finding.get("confidence") or 0.81))
+        evidence.append(
+            {
+                "sheet_no": str(finding.get("sheet_no") or item.get("source") or task.source_sheet_no or "UNKNOWN").strip() or "UNKNOWN",
+                "location": str(finding.get("location") or f"{item.get('source')} -> {item.get('target')}").strip() or "未定位",
+                "rule_id": str(finding.get("rule_id") or "relationship_visual_review").strip() or "relationship_visual_review",
+                "evidence_pack_id": str(finding.get("evidence_pack_id") or item.get("evidence_pack_id") or "paired_overview_pack").strip() or "paired_overview_pack",
+                "description": str(finding.get("description") or item.get("visual_evidence") or "").strip(),
+                "severity": str(finding.get("severity") or "warning").strip().lower() or "warning",
+            }
+        )
+    first = evidence[0]
+    return WorkerResultCard(
+        task_id=task.id,
+        hypothesis_id=task.hypothesis_id,
+        worker_kind=task.worker_kind,
+        status="confirmed",
+        confidence=confidence,
+        summary=first["description"] or f"旧关系发现入口返回 {len(relationships)} 处跨图关联问题",
+        evidence=evidence,
+        meta={
+            "compat_mode": "worker_wrapper",
+            "sheet_no": first["sheet_no"],
+            "location": first["location"],
+            "rule_id": first["rule_id"],
+            "evidence_pack_id": first["evidence_pack_id"],
+            "severity": first["severity"],
+            "issue_count": len(relationships),
+            "review_round": 1,
+        },
+    )
+
+
+def run_relationship_worker_wrapper(
+    project_id: str,
+    audit_version: int,
+    db,
+    task: WorkerTaskCard,
+) -> WorkerResultCard:
+    sheet_filters = [task.source_sheet_no, *list(task.target_sheet_nos or [])]
+    relationships = discover_relationships_v2(
+        project_id,
+        db,
+        audit_version=audit_version,
+        sheet_filters=sheet_filters,
+    )
+    return _relationship_worker_result_from_relationships(task, relationships)
 
 
 def _classify_sheet_type(sheet_no: str, sheet_name: str) -> str:
@@ -623,7 +758,14 @@ async def _discover_group(
                     images=all_images,
                     temperature=0.0,
                     max_tokens=max_tokens,
-                    meta={"mode": "legacy_group", "sheet_count": len(group_sheets)},
+                    meta={
+                        "mode": "legacy_group",
+                        "sheet_count": len(group_sheets),
+                        "subsession_key": _relationship_subsession_key(
+                            "legacy_group",
+                            *[sheet.get("sheet_no", "") for sheet in group_sheets],
+                        ),
+                    },
                 ),
                 should_cancel=lambda: is_cancel_requested(project_id),
             )
@@ -646,7 +788,14 @@ async def _discover_group(
                     images=all_images,
                     temperature=0.0,
                     max_tokens=max_tokens,
-                    meta={"mode": "legacy_group", "sheet_count": len(group_sheets)},
+                    meta={
+                        "mode": "legacy_group",
+                        "sheet_count": len(group_sheets),
+                        "subsession_key": _relationship_subsession_key(
+                            "legacy_group",
+                            *[sheet.get("sheet_no", "") for sheet in group_sheets],
+                        ),
+                    },
                 )
             )
             result = turn_result.output if turn_result.status == "ok" else []
@@ -760,6 +909,12 @@ async def _discover_relationship_task_v2(
                         "candidate_source_sheet_no": source_sheet["sheet_no"],
                         "candidate_target_sheet_no": target_sheet["sheet_no"],
                         "pack_type": plan_item.pack_type.value,
+                        "subsession_key": _relationship_subsession_key(
+                            "candidate_review",
+                            source_sheet["sheet_no"],
+                            target_sheet["sheet_no"],
+                            plan_item.pack_type.value,
+                        ),
                     },
                 ),
                 should_cancel=lambda: is_cancel_requested(project_id),
@@ -790,6 +945,12 @@ async def _discover_relationship_task_v2(
                         "candidate_source_sheet_no": source_sheet["sheet_no"],
                         "candidate_target_sheet_no": target_sheet["sheet_no"],
                         "pack_type": plan_item.pack_type.value,
+                        "subsession_key": _relationship_subsession_key(
+                            "candidate_review",
+                            source_sheet["sheet_no"],
+                            target_sheet["sheet_no"],
+                            plan_item.pack_type.value,
+                        ),
                     },
                 )
             )
@@ -947,12 +1108,13 @@ async def discover_relationships_async(
     *,
     audit_version: int | None = None,
     concurrency: int | None = None,
+    sheet_filters: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Main entry: AI-driven relationship discovery across all sheets.
 
     Returns validated list of cross-sheet relationships with coordinates.
     """
-    sheets = _load_ready_sheets(project_id, db)
+    sheets = _load_ready_sheets(project_id, db, sheet_filters=sheet_filters)
     if not sheets:
         logger.info("关系发现: 无就绪图纸, project=%s", project_id)
         return []
@@ -1095,7 +1257,7 @@ async def discover_relationships_async(
 
     all_raw: List[Dict[str, Any]] = []
     for i, result in enumerate(group_results):
-        if isinstance(result, AuditCancellationRequested):
+        if isinstance(result, AuditCancellationRequested) or result.__class__.__name__ == "AuditCancellationRequested":
             raise result
         if isinstance(result, Exception):
             logger.warning("关系发现 group %s 失败: %s", i, result)
@@ -1130,19 +1292,23 @@ async def discover_relationships_v2_async(
     *,
     audit_version: int | None = None,
     hot_sheet_registry: HotSheetRegistry | None = None,
+    sheet_filters: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
-    sheets = _load_ready_sheets(project_id, db)
+    sheets = _load_ready_sheets(project_id, db, sheet_filters=sheet_filters)
     if not sheets:
         return []
 
     valid_sheet_nos = {normalize_sheet_no(s["sheet_no"]) for s in sheets if normalize_sheet_no(s["sheet_no"])}
     candidate_tasks = _build_candidate_relationship_tasks(sheets, valid_sheet_nos)
     if not candidate_tasks:
+        fallback_kwargs: Dict[str, Any] = {"audit_version": audit_version}
+        if sheet_filters is not None:
+            fallback_kwargs["sheet_filters"] = sheet_filters
         return await discover_relationships_async(
             project_id,
             db,
             call_kimi,
-            audit_version=audit_version,
+            **fallback_kwargs,
         )
 
     skill_profile = load_runtime_skill_profile(
@@ -1249,12 +1415,21 @@ async def discover_relationships_v2_async(
     return validated
 
 
-def discover_relationships(project_id: str, db, *, audit_version: int | None = None) -> List[Dict[str, Any]]:
+def discover_relationships(
+    project_id: str,
+    db,
+    *,
+    audit_version: int | None = None,
+    sheet_filters: List[str] | None = None,
+) -> List[Dict[str, Any]]:
     """Synchronous wrapper for discover_relationships_async."""
     from services.kimi_service import call_kimi
-    if audit_version is None:
-        return asyncio.run(discover_relationships_async(project_id, db, call_kimi))
-    return asyncio.run(discover_relationships_async(project_id, db, call_kimi, audit_version=audit_version))
+    kwargs: Dict[str, Any] = {}
+    if audit_version is not None:
+        kwargs["audit_version"] = audit_version
+    if sheet_filters is not None:
+        kwargs["sheet_filters"] = sheet_filters
+    return asyncio.run(discover_relationships_async(project_id, db, call_kimi, **kwargs))
 
 
 def discover_relationships_v2(
@@ -1263,17 +1438,17 @@ def discover_relationships_v2(
     *,
     audit_version: int | None = None,
     hot_sheet_registry: HotSheetRegistry | None = None,
+    sheet_filters: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
     from services.kimi_service import call_kimi
-    return asyncio.run(
-        discover_relationships_v2_async(
-            project_id,
-            db,
-            call_kimi,
-            audit_version=audit_version,
-            hot_sheet_registry=hot_sheet_registry,
-        )
-    )
+    kwargs: Dict[str, Any] = {}
+    if audit_version is not None:
+        kwargs["audit_version"] = audit_version
+    if hot_sheet_registry is not None:
+        kwargs["hot_sheet_registry"] = hot_sheet_registry
+    if sheet_filters is not None:
+        kwargs["sheet_filters"] = sheet_filters
+    return asyncio.run(discover_relationships_v2_async(project_id, db, call_kimi, **kwargs))
 
 
 def save_ai_edges(project_id: str, relationships: List[Dict[str, Any]], db) -> int:

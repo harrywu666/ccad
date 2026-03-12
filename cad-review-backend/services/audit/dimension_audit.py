@@ -31,6 +31,7 @@ from services.audit_runtime.evidence_service import get_evidence_service
 from services.audit_runtime.finding_schema import Finding, GroundingRequiredError, apply_finding_to_audit_result
 from services.audit_runtime.hot_sheet_registry import HotSheetRegistry
 from services.audit_runtime.providers.factory import build_runner_provider
+from services.audit_runtime.review_task_schema import WorkerResultCard, WorkerTaskCard
 from services.audit_runtime.runner_types import (
     ProviderStreamEvent,
     RunnerTurnRequest,
@@ -49,6 +50,95 @@ from services.skill_pack_service import load_runtime_skill_profile
 from services.storage_path_service import resolve_project_dir
 
 logger = logging.getLogger(__name__)
+
+
+def _dimension_issue_evidence(issue: AuditResult) -> Dict[str, Any]:
+    try:
+        payload = json.loads(str(issue.evidence_json or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        payload = {}
+    anchors = list(payload.get("anchors") or [])
+    anchor = dict(anchors[0] or {}) if anchors else {}
+    return {
+        "sheet_no": str(anchor.get("sheet_no") or issue.sheet_no_a or issue.sheet_no_b or "UNKNOWN").strip() or "UNKNOWN",
+        "location": str(anchor.get("grid") or issue.location or "未定位").strip() or "未定位",
+        "rule_id": str(issue.rule_id or "dimension_pair_compare").strip() or "dimension_pair_compare",
+        "evidence_pack_id": str(issue.evidence_pack_id or "paired_overview_pack").strip() or "paired_overview_pack",
+        "description": str(issue.description or "").strip(),
+        "severity": str(issue.severity or "warning").strip().lower() or "warning",
+    }
+
+
+def _dimension_worker_result_from_issues(task: WorkerTaskCard, issues: List[AuditResult]) -> WorkerResultCard:
+    if not issues:
+        return WorkerResultCard(
+            task_id=task.id,
+            hypothesis_id=task.hypothesis_id,
+            worker_kind=task.worker_kind,
+            status="rejected",
+            confidence=0.72,
+            summary=f"旧尺寸审查入口已作为 worker 包装层执行，{task.source_sheet_no} 未发现尺寸类问题",
+            meta={
+                "compat_mode": "worker_wrapper",
+                "sheet_no": task.source_sheet_no,
+                "location": task.objective,
+                "rule_id": "dimension_pair_compare",
+                "evidence_pack_id": "paired_overview_pack",
+                "issue_count": 0,
+            },
+        )
+
+    evidence = [_dimension_issue_evidence(issue) for issue in issues[:5]]
+    first = evidence[0]
+    status = "confirmed"
+    if any(str(issue.finding_status or "").strip().lower() == "needs_review" for issue in issues):
+        status = "needs_review"
+    confidence_values = [
+        float(issue.confidence)
+        for issue in issues
+        if isinstance(issue.confidence, (int, float))
+    ]
+    confidence = max(confidence_values) if confidence_values else 0.84
+    return WorkerResultCard(
+        task_id=task.id,
+        hypothesis_id=task.hypothesis_id,
+        worker_kind=task.worker_kind,
+        status=status,
+        confidence=confidence,
+        summary=str(issues[0].description or f"旧尺寸审查入口返回 {len(issues)} 处尺寸问题").strip(),
+        evidence=evidence,
+        escalate_to_chief=(status == "needs_review"),
+        meta={
+            "compat_mode": "worker_wrapper",
+            "sheet_no": first["sheet_no"],
+            "location": first["location"],
+            "rule_id": first["rule_id"],
+            "evidence_pack_id": first["evidence_pack_id"],
+            "severity": first["severity"],
+            "issue_count": len(issues),
+            "review_round": max(int(issue.review_round or 1) for issue in issues),
+        },
+    )
+
+
+def run_dimension_worker_wrapper(
+    project_id: str,
+    audit_version: int,
+    db,
+    task: WorkerTaskCard,
+) -> WorkerResultCard:
+    pair_filters = [
+        (task.source_sheet_no, target_sheet_no)
+        for target_sheet_no in list(task.target_sheet_nos or [])
+        if str(target_sheet_no or "").strip()
+    ]
+    issues = audit_dimensions(
+        project_id,
+        audit_version,
+        db,
+        pair_filters=pair_filters or None,
+    )
+    return _dimension_worker_result_from_issues(task, issues)
 
 
 def _build_dimension_agent_report(
@@ -159,7 +249,17 @@ def _get_dimension_runner(
     call_kimi,  # noqa: ANN001
 ) -> ProjectAuditAgentRunner:
     provider_mode = _load_requested_provider_mode(project_id, audit_version)
-    shared_context = {"project_id": project_id, "audit_version": audit_version}
+    runner_signature = (
+        f"{provider_mode or 'env'}:{id(call_kimi)}:{id(call_kimi_stream)}"
+    )
+    existing = ProjectAuditAgentRunner.get_existing(project_id, audit_version=audit_version)
+    if existing and str(existing.shared_context.get("runner_signature") or "") != runner_signature:
+        ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
+    shared_context = {
+        "project_id": project_id,
+        "audit_version": audit_version,
+        "runner_signature": runner_signature,
+    }
     if provider_mode:
         shared_context["provider_mode"] = provider_mode
     return ProjectAuditAgentRunner.get_or_create(
@@ -711,6 +811,7 @@ async def _execute_sheet_jobs(
                         "sheet_no": job["sheet_no"],
                         "visual_only": bool(job.get("visual_only")),
                         "pack_type": pack_type.value,
+                        "subsession_key": f"sheet_semantic:{job['sheet_key']}",
                     },
                 ),
                 should_cancel=lambda: is_cancel_requested(project_id),
@@ -736,6 +837,9 @@ async def _execute_sheet_jobs(
                     user_prompt=job["prompt"],
                     images=images,
                     temperature=0.0,
+                    meta={
+                        "subsession_key": f"sheet_semantic:{job['sheet_key']}",
+                    },
                 )
             )
             semantic_result = turn_result.output if turn_result.status == "ok" else []
@@ -954,6 +1058,7 @@ async def _execute_pair_jobs(
                         "mode": "pair_compare",
                         "source_sheet_no": job["a_sheet_no"],
                         "target_sheet_no": job["b_sheet_no"],
+                        "subsession_key": f"pair_compare:{job['a_key']}:{job['b_key']}",
                     },
                 ),
                 should_cancel=lambda: is_cancel_requested(project_id),
@@ -986,6 +1091,9 @@ async def _execute_pair_jobs(
                     ),
                     images=pair_images if pair_images else [],
                     temperature=0.0,
+                    meta={
+                        "subsession_key": f"pair_compare:{job['a_key']}:{job['b_key']}",
+                    },
                 )
             )
             compare_result = turn_result.output if turn_result.status == "ok" else []
@@ -1235,14 +1343,14 @@ def _build_dimension_issues(
     return issues
 
 
-# 功能说明：执行尺寸审核主函数，分析图纸间尺寸一致性
-def audit_dimensions(
+async def _collect_dimension_pair_issues_async(
     project_id: str,
     audit_version: int,
     db,
     pair_filters: Optional[List[Tuple[str, str]]] = None,
     hot_sheet_registry: HotSheetRegistry | None = None,
 ) -> List[AuditResult]:
+    """执行尺寸核查并返回 issues，但不负责落库。"""
     from services.kimi_service import call_kimi
 
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -1369,9 +1477,7 @@ def audit_dimensions(
         )
         return pc_results, pc_hit, pc_miss
 
-    pair_compare_results, pair_cache_hit, pair_cache_miss = asyncio.run(
-        _run_all_async()
-    )
+    pair_compare_results, pair_cache_hit, pair_cache_miss = await _run_all_async()
     logger.info(
         "dimension_audit pair_compare project=%s cache_hit=%s cache_miss=%s pair_total=%s",
         project_id,
@@ -1403,16 +1509,52 @@ def audit_dimensions(
                 confidence=confidence,
                 source_agent="dimension_review_agent",
             )
-    add_and_commit(db, issues)
-    append_result_upsert_events(
-        project_id,
-        audit_version,
-        issue_ids=[issue.id for issue in issues],
-    )
     logger.info(
         "dimension_audit done project=%s version=%s issues=%s",
         project_id,
         audit_version,
         len(issues),
+    )
+    return issues
+
+
+def _collect_dimension_pair_issues(
+    project_id: str,
+    audit_version: int,
+    db,
+    pair_filters: Optional[List[Tuple[str, str]]] = None,
+    hot_sheet_registry: HotSheetRegistry | None = None,
+) -> List[AuditResult]:
+    return asyncio.run(
+        _collect_dimension_pair_issues_async(
+            project_id,
+            audit_version,
+            db,
+            pair_filters=pair_filters,
+            hot_sheet_registry=hot_sheet_registry,
+        )
+    )
+
+
+# 功能说明：执行尺寸审核主函数，分析图纸间尺寸一致性
+def audit_dimensions(
+    project_id: str,
+    audit_version: int,
+    db,
+    pair_filters: Optional[List[Tuple[str, str]]] = None,
+    hot_sheet_registry: HotSheetRegistry | None = None,
+) -> List[AuditResult]:
+    issues = _collect_dimension_pair_issues(
+        project_id,
+        audit_version,
+        db,
+        pair_filters=pair_filters,
+        hot_sheet_registry=hot_sheet_registry,
+    )
+    add_and_commit(db, issues)
+    append_result_upsert_events(
+        project_id,
+        audit_version,
+        issue_ids=[issue.id for issue in issues],
     )
     return issues

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, List, Optional, Callable, Dict
 
 from services.audit_runtime.sheet_graph_candidates_builder import build_sheet_graph_candidates
 from services.audit_runtime.sheet_graph_semantic_builder import (
