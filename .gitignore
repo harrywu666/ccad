@@ -6,6 +6,7 @@
 .tmp_test3_jsons/
 .artifacts/
 .run/
+.worktrees/
 
 # Backend
 cad-review-backend/.env
