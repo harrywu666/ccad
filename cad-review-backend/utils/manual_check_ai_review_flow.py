@@ -435,6 +435,21 @@ def _count_grounded_final_issues(runtime_results: List[Dict[str, Any]]) -> int:
     return grounded
 
 
+def _load_local_env_file(backend_dir: Path) -> None:
+    env_path = backend_dir / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def _local_provider_env_overrides(provider_mode: Optional[str]) -> Dict[str, Optional[str]]:
     normalized = str(provider_mode or "").strip().lower()
     if normalized == "openrouter":
@@ -778,6 +793,7 @@ def _run_single_check(
                 }
             )
             env_context.__enter__()
+            _load_local_env_file(backend_dir)
             provider_preflight = _provider_preflight(args.provider_mode)
             report["checks"]["provider_preflight"] = {
                 "mode": "local",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from utils.manual_check_ai_review_flow import (
+    _load_local_env_file,
     _local_provider_env_overrides,
     _provider_preflight,
     _run_mode_env,
@@ -111,6 +113,17 @@ def test_provider_preflight_requires_matching_env(monkeypatch):
     assert official["missing_env"] == ["KIMI_OFFICIAL_API_KEY", "MOONSHOT_API_KEY"]
     assert openrouter["ok"] is False
     assert openrouter["missing_env"] == ["OPENROUTER_API_KEY"]
+
+
+def test_load_local_env_file_populates_missing_env(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    backend_dir = tmp_path / "backend"
+    backend_dir.mkdir()
+    (backend_dir / ".env").write_text("OPENROUTER_API_KEY=test-openrouter-key\n", encoding="utf-8")
+
+    _load_local_env_file(backend_dir)
+
+    assert os.environ["OPENROUTER_API_KEY"] == "test-openrouter-key"
 
 
 def test_assignment_final_review_summary_exposes_provider_blocker():
