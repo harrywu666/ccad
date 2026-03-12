@@ -77,6 +77,7 @@ interface WorkerFallbackSnapshot {
   context: AuditUiRuntimeContext;
   recent_actions: AuditUiRuntimeAction[];
   event_id: number;
+  action_priority: number;
 }
 
 const RAW_PROCESS_EVENT_KINDS = new Set(['model_stream_delta', 'provider_stream_delta']);
@@ -116,6 +117,19 @@ const ACTION_LABELS: Record<string, string> = {
   runner_turn_deferred: '等待重试',
   runner_session_failed: '执行失败',
   runner_turn_cancelled: '已中断',
+};
+
+const ACTION_PRIORITY: Record<string, number> = {
+  runner_session_started: 0,
+  runner_turn_started: 1,
+  runner_broadcast: 3,
+  output_validation_failed: 3,
+  output_repair_started: 3,
+  output_repair_succeeded: 4,
+  raw_output_saved: 4,
+  runner_turn_deferred: 5,
+  runner_session_failed: 5,
+  runner_turn_cancelled: 5,
 };
 
 function clampProgress(progress?: number | null) {
@@ -381,6 +395,7 @@ function buildFallbackRuntime(currentStep: string, events: AuditEvent[], totalIs
     } else {
       status = 'active';
     }
+    const actionPriority = ACTION_PRIORITY[eventKind] ?? 2;
 
     const nextSnapshot: WorkerFallbackSnapshot = {
       session_key: key,
@@ -388,12 +403,15 @@ function buildFallbackRuntime(currentStep: string, events: AuditEvent[], totalIs
       skill_id: skillId || null,
       skill_label: resolveSkillLabel(skillId),
       task_title: taskTitle,
-      current_action: currentAction,
+      current_action: existing && existing.action_priority > actionPriority
+        ? existing.current_action
+        : currentAction,
       status,
       updated_at: event.created_at,
       context: buildContext(event),
       recent_actions: [...(existing?.recent_actions || []), recentAction].slice(-3),
       event_id: event.id,
+      action_priority: Math.max(existing?.action_priority ?? 0, actionPriority),
     };
     sessions.set(key, nextSnapshot);
   });

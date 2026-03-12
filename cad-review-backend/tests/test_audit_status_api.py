@@ -322,6 +322,27 @@ def test_audit_status_includes_ui_runtime_snapshot(monkeypatch, tmp_path):
                 models.AuditRunEvent(
                     project_id="proj-status-ui-runtime",
                     audit_version=9,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="runner_turn_started",
+                    progress_hint=38,
+                    message="尺寸审查Agent 已通过 Runner 发起一次流式调用",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "turn_kind": "dimension_sheet_semantic",
+                            "session_key": "proj-status-ui-runtime:9:dimension_review_agent:sheet_semantic:A101",
+                            "skill_id": "elevation_consistency",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=3, seconds=44),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-ui-runtime",
+                    audit_version=9,
                     level="success",
                     step_key="index",
                     agent_key="index_review_agent",

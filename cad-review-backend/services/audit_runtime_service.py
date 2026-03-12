@@ -106,6 +106,18 @@ _MEANINGFUL_ACTION_LABELS = {
     "runner_session_failed": "执行失败",
     "runner_turn_cancelled": "已中断",
 }
+_ACTION_PRIORITY = {
+    "runner_session_started": 0,
+    "runner_turn_started": 1,
+    "runner_broadcast": 3,
+    "output_validation_failed": 3,
+    "output_repair_started": 3,
+    "output_repair_succeeded": 4,
+    "raw_output_saved": 4,
+    "runner_turn_deferred": 5,
+    "runner_session_failed": 5,
+    "runner_turn_cancelled": 5,
+}
 
 
 def _as_text(value: object) -> str:
@@ -858,6 +870,7 @@ def build_ui_runtime_snapshot(
                 "updated_at": row.created_at.isoformat() if row.created_at else None,
                 "context": _build_worker_context(meta, session_key),
                 "recent_actions": [],
+                "_action_priority": _ACTION_PRIORITY.get(event_kind, 2),
                 "_last_event_id": row.id,
             }
             worker_sessions[session_key] = state
@@ -870,7 +883,10 @@ def build_ui_runtime_snapshot(
             state["task_title"] = task_title
 
         current_action = _resolve_worker_current_action(row, meta, skill_id, task_title)
-        state["current_action"] = current_action
+        action_priority = _ACTION_PRIORITY.get(event_kind, 2)
+        if int(state.get("_action_priority") or 0) <= action_priority:
+            state["current_action"] = current_action
+            state["_action_priority"] = action_priority
         state["updated_at"] = row.created_at.isoformat() if row.created_at else None
         state["context"] = _build_worker_context(meta, session_key)
         state["_last_event_id"] = row.id
