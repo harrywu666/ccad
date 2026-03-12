@@ -25,10 +25,13 @@ def _normalize_project_memory(
         "sheet_summaries": list(source.get("sheet_summaries") or []),
         "confirmed_links": list(source.get("confirmed_links") or []),
         "active_hypotheses": list(source.get("active_hypotheses") or []),
+        "pending_assignments": list(source.get("pending_assignments") or []),
+        "completed_assignment_ids": list(source.get("completed_assignment_ids") or []),
         "chief_recheck_queue": list(source.get("chief_recheck_queue") or []),
         "resolved_hypotheses": list(source.get("resolved_hypotheses") or []),
         "false_positive_hints": list(source.get("false_positive_hints") or []),
         "chief_planner_meta": dict(source.get("chief_planner_meta") or {}),
+        "chief_dispatch_meta": dict(source.get("chief_dispatch_meta") or {}),
     }
 
 

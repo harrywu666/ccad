@@ -769,6 +769,45 @@ async def _default_chief_worker_runner(task):  # noqa: ANN001
         db.close()
 
 
+async def _dispatch_review_assignments_incrementally(
+    *,
+    chief_session,
+    assignments: list,
+    worker_runner=None,  # noqa: ANN001
+):
+    from services.audit_runtime.chief_dispatch_policy import evaluate_dispatch_state
+    from services.audit_runtime.review_worker_pool import ReviewWorkerPool
+
+    pending_assignments = list(assignments)
+    pool = ReviewWorkerPool(
+        max_concurrency=1,
+        worker_runner=worker_runner or _default_chief_worker_runner,
+    )
+    worker_results = []
+
+    while True:
+        decision = evaluate_dispatch_state(
+            pending_assignments=pending_assignments,
+            active_worker_count=0,
+            final_review_pending_count=0,
+            has_new_directions=False,
+        )
+        if decision.should_stop:
+            break
+        if decision.should_wait:
+            await asyncio.sleep(0)
+            continue
+        next_assignment = chief_session.next_assignment(pending_assignments)
+        if next_assignment is None:
+            break
+        pending_assignments.pop(0)
+        worker_task = chief_session.build_worker_task_from_assignment(next_assignment)
+        batch_results = await pool.run_batch([worker_task]) or []
+        worker_results.extend(batch_results)
+
+    return worker_results
+
+
 def _persist_chief_findings(project_id: str, audit_version: int, findings: list) -> None:  # noqa: ANN001
     if not findings:
         return
@@ -1055,7 +1094,25 @@ def execute_pipeline_chief_review(
             progress=18,
         )
         chief_session = ChiefReviewSession(project_id=project_id, audit_version=audit_version)
-        worker_tasks = chief_session.plan_worker_tasks(memory=memory)
+        assignments = chief_session.plan_assignments(memory=memory)
+        db = SessionLocal()
+        try:
+            memory = save_project_memory(
+                db,
+                project_id=project_id,
+                audit_version=audit_version,
+                payload={
+                    **memory,
+                    "pending_assignments": [item.model_dump() for item in assignments],
+                    "completed_assignment_ids": [],
+                    "chief_dispatch_meta": {
+                        "planned_assignment_count": len(assignments),
+                        "dispatch_mode": "incremental_assignment",
+                    },
+                },
+            )
+        finally:
+            db.close()
         _append_master_event(
             project_id,
             audit_version,
@@ -1063,20 +1120,25 @@ def execute_pipeline_chief_review(
             step_key="chief_planning",
             event_kind="phase_completed",
             progress_hint=20,
-            message=f"主审 Agent 已生成 {len(worker_tasks)} 张副审任务卡",
+            message=f"主审 Agent 已生成 {len(assignments)} 张副审任务卡",
             meta={
                 "planner": "chief_review_agent",
                 "planner_source": planner_result.meta.get("planner_source"),
-                "worker_tasks": len(worker_tasks),
+                "review_assignments": len(assignments),
+                "worker_tasks": len(assignments),
                 "chief_recheck_count": len(planner_result.chief_recheck_queue),
                 "task_stage": "worker_task_planning",
             },
         )
 
         worker_results = []
-        if worker_tasks:
-            pool = ReviewWorkerPool(max_concurrency=4, worker_runner=_default_chief_worker_runner)
-            worker_results = asyncio.run(pool.run_batch(worker_tasks)) or []
+        if assignments:
+            worker_results = asyncio.run(
+                _dispatch_review_assignments_incrementally(
+                    chief_session=chief_session,
+                    assignments=assignments,
+                )
+            ) or []
 
         findings, escalations = synthesize_findings(worker_results=worker_results)
         db = SessionLocal()
@@ -1086,7 +1148,15 @@ def execute_pipeline_chief_review(
                 project_id=project_id,
                 audit_version=audit_version,
                 payload=_update_chief_review_memory(
-                    memory,
+                    {
+                        **memory,
+                        "pending_assignments": [],
+                        "completed_assignment_ids": [item.assignment_id for item in assignments],
+                        "chief_dispatch_meta": {
+                            **dict(memory.get("chief_dispatch_meta") or {}),
+                            "completed_assignment_count": len(worker_results),
+                        },
+                    },
                     worker_results=worker_results,
                     findings=findings,
                     escalations=escalations,

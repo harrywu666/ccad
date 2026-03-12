@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 from pathlib import Path
@@ -223,3 +224,48 @@ def test_build_chief_sheet_graph_passes_semantic_runner(monkeypatch):
 
     assert graph.sheet_types["A1-01"] == "plan"
     assert callable(captured["llm_runner"])
+
+
+def test_orchestrator_dispatches_incrementally_instead_of_single_bulk_batch():
+    orchestrator = importlib.import_module("services.audit_runtime.orchestrator")
+    chief_review_session = importlib.import_module("services.audit_runtime.chief_review_session")
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+
+    session = chief_review_session.ChiefReviewSession(project_id="proj-chief", audit_version=8)
+    assignments = [
+        review_task_schema.ReviewAssignment(
+            assignment_id=f"assignment-{index}",
+            review_intent="elevation_consistency",
+            source_sheet_no="A1.06",
+            target_sheet_nos=[f"A2.0{index}"],
+            task_title=f"A1.06 -> A2.0{index}",
+            acceptance_criteria=["核对标高"],
+            expected_evidence_types=["anchors"],
+            priority=0.9,
+            dispatch_reason="chief_dispatch",
+        )
+        for index in range(1, 4)
+    ]
+    captured: list[str] = []
+
+    async def _fake_worker_runner(task):
+        captured.append(str(task.context.get("assignment_id")))
+        return review_task_schema.WorkerResultCard(
+            task_id=task.id,
+            hypothesis_id=task.hypothesis_id,
+            worker_kind=task.worker_kind,
+            status="confirmed",
+            confidence=0.88,
+            summary=f"{task.id} ok",
+        )
+
+    worker_results = asyncio.run(
+        orchestrator._dispatch_review_assignments_incrementally(
+            chief_session=session,
+            assignments=assignments,
+            worker_runner=_fake_worker_runner,
+        )
+    )
+
+    assert captured == ["assignment-1", "assignment-2", "assignment-3"]
+    assert len(worker_results) == 3

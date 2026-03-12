@@ -92,3 +92,32 @@ def test_chief_review_session_marks_dimension_skillized_worker_context():
     assert cards[0].context["execution_mode"] == "worker_skill"
     assert cards[0].context["skill_id"] == "elevation_consistency"
     assert cards[0].evidence_selection_policy == "paired_full_with_single_sheet_semantics"
+
+
+def test_chief_review_session_splits_multi_target_hypothesis_into_small_assignments():
+    chief_review_session = importlib.import_module("services.audit_runtime.chief_review_session")
+
+    session = chief_review_session.ChiefReviewSession(
+        project_id="proj-chief",
+        audit_version=7,
+    )
+    assignments = session.plan_assignments(
+        memory={
+            "active_hypotheses": [
+                {
+                    "id": "hyp-1",
+                    "topic": "标高一致性",
+                    "objective": "核对 A1.06 与 A2.00, A2.01, A2.02 的标高一致性",
+                    "source_sheet_no": "A1.06",
+                    "target_sheet_nos": ["A2.00", "A2.01", "A2.02"],
+                }
+            ]
+        }
+    )
+
+    assert [item.target_sheet_nos for item in assignments] == [["A2.00"], ["A2.01"], ["A2.02"]]
+    assert [item.assignment_id for item in assignments] == [
+        "hyp-1::part-1",
+        "hyp-1::part-2",
+        "hyp-1::part-3",
+    ]
