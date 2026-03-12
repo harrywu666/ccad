@@ -96,6 +96,8 @@ class WorkerResultCard:
     confidence: float
     summary: str
     evidence: list[dict[str, Any]] = field(default_factory=list)
+    markdown_conclusion: str = ""
+    evidence_bundle: dict[str, Any] = field(default_factory=dict)
     escalate_to_chief: bool = False
     meta: dict[str, Any] = field(default_factory=dict)
 

@@ -209,3 +209,64 @@ def test_dimension_skill_prefetches_cross_sheet_evidence(monkeypatch):
     assert result.meta["cross_sheet_anchor_count"] == 1
     assert result.meta["prefetch_request_count"] == 1
     assert result.meta["cross_sheet_prefetch_status"] == "ready"
+
+
+def test_dimension_skill_preserves_anchor_payload_in_evidence_bundle(monkeypatch):
+    dimension_skill = importlib.import_module("services.audit_runtime.worker_skills.dimension_consistency_skill")
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+
+    class _Issue:
+        def __init__(self):
+            self.project_id = "proj-dim-bundle"
+            self.audit_version = 1
+            self.type = "dimension"
+            self.severity = "warning"
+            self.sheet_no_a = "A1.06"
+            self.sheet_no_b = "A2.00"
+            self.location = "入口立面"
+            self.description = "标高不一致"
+            self.evidence_json = (
+                '{"anchors":[{"sheet_no":"A1.06","role":"source",'
+                '"global_pct":{"x":42.1,"y":61.2}}]}'
+            )
+            self.confidence = 0.88
+            self.finding_status = "confirmed"
+            self.review_round = 1
+            self.rule_id = "dimension_pair_compare"
+            self.evidence_pack_id = "paired_overview_pack"
+
+    async def fake_collect(*args, **kwargs):  # noqa: ANN001
+        return [_Issue()]
+
+    monkeypatch.setattr(dimension_skill, "_collect_dimension_pair_issues_async", fake_collect)
+    monkeypatch.setattr(
+        dimension_skill,
+        "_dimension_issue_evidence",
+        lambda issue: {
+            "sheet_no": issue.sheet_no_a,
+            "location": issue.location,
+            "rule_id": issue.rule_id,
+            "evidence_pack_id": issue.evidence_pack_id,
+            "description": issue.description,
+            "severity": issue.severity,
+        },
+    )
+
+    result = asyncio.run(
+        dimension_skill.run_dimension_consistency_skill(
+            task=review_task_schema.WorkerTaskCard(
+                id="task-dim-bundle",
+                hypothesis_id="hyp-dim-bundle",
+                worker_kind="elevation_consistency",
+                objective="核对 A1.06 与 A2.00",
+                source_sheet_no="A1.06",
+                target_sheet_nos=["A2.00"],
+                context={"project_id": "proj-dim-bundle", "audit_version": 1},
+            ),
+            db="db-session",
+        )
+    )
+
+    assert result.markdown_conclusion.startswith("## 任务结论")
+    assert result.evidence_bundle["grounding_status"] == "grounded"
+    assert result.evidence_bundle["anchors"][0]["sheet_no"] == "A1.06"

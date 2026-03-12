@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from services.audit import index_audit
-from services.audit_runtime.worker_skill_contract import build_worker_skill_result
+from services.audit_runtime.worker_skill_contract import build_worker_skill_result, extract_anchors_from_issue_results
 from services.audit_runtime.worker_skill_loader import WorkerSkillBundle, load_worker_skill
 from services.audit_runtime.runtime_prompt_assembler import assemble_worker_runtime_prompt
 from services.feedback_runtime_service import load_feedback_runtime_profile
@@ -131,6 +131,15 @@ async def run_index_reference_skill(
         rule_id=str(first["rule_id"]),
         evidence_pack_id=str(first["evidence_pack_id"]),
         evidence=evidence,
+        anchors=extract_anchors_from_issue_results(issues),
+        raw_skill_outputs=[
+            {
+                "sheet_no_a": str(issue.sheet_no_a or ""),
+                "sheet_no_b": str(issue.sheet_no_b or ""),
+                "description": str(issue.description or "").strip(),
+            }
+            for issue in issues[:5]
+        ],
         escalate_to_chief=(status == "needs_review"),
         meta={
             "prompt_source": "agent_skill",

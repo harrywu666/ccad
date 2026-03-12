@@ -245,10 +245,15 @@ async def run_node_host_binding_skill(
         )
 
     evidence: list[dict[str, Any]] = []
+    anchors: list[dict[str, Any]] = []
     confidence = 0.81
     for item in relationships[:5]:
         finding = dict(item.get("finding") or {})
         confidence = max(confidence, float(item.get("confidence") or finding.get("confidence") or 0.81))
+        for anchor_key in ("source_anchor", "target_anchor"):
+            anchor = item.get(anchor_key)
+            if isinstance(anchor, dict):
+                anchors.append(dict(anchor))
         evidence.append(
             {
                 "sheet_no": str(finding.get("sheet_no") or item.get("source") or task.source_sheet_no or "UNKNOWN").strip()
@@ -275,6 +280,15 @@ async def run_node_host_binding_skill(
         rule_id=str(first["rule_id"]),
         evidence_pack_id=str(first["evidence_pack_id"]),
         evidence=evidence,
+        anchors=anchors,
+        raw_skill_outputs=[
+            {
+                "source": str(item.get("source") or ""),
+                "target": str(item.get("target") or ""),
+                "description": str((item.get("finding") or {}).get("description") or item.get("visual_evidence") or "").strip(),
+            }
+            for item in relationships[:5]
+        ],
         meta={
             "prompt_source": "agent_skill",
             "sheet_no": first["sheet_no"],

@@ -12,7 +12,7 @@ from services.audit_runtime.cross_sheet_index import build_cross_sheet_index
 from services.audit_runtime.cross_sheet_locator import locate_across_sheets
 from services.audit_runtime.evidence_prefetch_service import prefetch_regions
 from services.audit_runtime.runtime_prompt_assembler import assemble_worker_runtime_prompt
-from services.audit_runtime.worker_skill_contract import build_worker_skill_result
+from services.audit_runtime.worker_skill_contract import build_worker_skill_result, extract_anchors_from_issue_results
 from services.audit_runtime.worker_skill_loader import WorkerSkillBundle, load_worker_skill
 
 
@@ -291,6 +291,15 @@ async def run_dimension_consistency_skill(
         rule_id=str(first["rule_id"]),
         evidence_pack_id=str(first["evidence_pack_id"]),
         evidence=evidence,
+        anchors=extract_anchors_from_issue_results(issues),
+        raw_skill_outputs=[
+            {
+                "sheet_no_a": str(issue.sheet_no_a or ""),
+                "sheet_no_b": str(issue.sheet_no_b or ""),
+                "description": str(issue.description or "").strip(),
+            }
+            for issue in issues[:5]
+        ],
         escalate_to_chief=(status == "needs_review"),
         meta={
             "prompt_source": "agent_skill",
