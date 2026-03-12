@@ -53,3 +53,38 @@ def test_review_worker_pool_runs_tasks_in_parallel():
 
     assert len(results) == 3
     assert peak >= 2
+
+
+def test_worker_pool_uses_assignment_id_as_visible_session_key():
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+    review_worker_pool = importlib.import_module("services.audit_runtime.review_worker_pool")
+
+    async def _fake_worker(task):
+        return review_task_schema.WorkerResultCard(
+            task_id=task.id,
+            hypothesis_id=task.hypothesis_id,
+            worker_kind=task.worker_kind,
+            status="confirmed",
+            confidence=0.9,
+            summary=f"{task.id} ok",
+            meta={"session_key": task.session_key},
+        )
+
+    pool = review_worker_pool.ReviewWorkerPool(
+        max_concurrency=1,
+        worker_runner=_fake_worker,
+    )
+    task = review_task_schema.WorkerTaskCard(
+        id="asg-1",
+        hypothesis_id="hyp-1",
+        worker_kind="elevation_consistency",
+        objective="check-1",
+        source_sheet_no="A3-01",
+        target_sheet_nos=["A2-01"],
+        context={"assignment_id": "asg-1"},
+    )
+
+    results = asyncio.run(pool.run_batch([task]))
+
+    assert results[0].meta["assignment_id"] == "asg-1"
+    assert results[0].meta["visible_session_key"] == "assignment:asg-1"

@@ -216,6 +216,16 @@ def _extract_session_key(row: AuditRunEvent, meta: Dict[str, Any]) -> str:
     return ""
 
 
+def _resolve_visible_session_key(meta: Dict[str, Any], session_key: str) -> str:
+    visible = _as_text(meta.get("visible_session_key"))
+    if visible:
+        return visible
+    assignment_id = _as_text(meta.get("assignment_id"))
+    if assignment_id:
+        return f"assignment:{assignment_id}"
+    return session_key
+
+
 def _extract_session_tail(session_key: str) -> List[str]:
     normalized = _as_text(session_key)
     if not normalized:
@@ -358,6 +368,67 @@ def _build_worker_context(meta: Dict[str, Any], session_key: str) -> Dict[str, O
         "target_sheet_no": target_sheet_no,
         "sheet_no": sheet_no,
     }
+
+
+def _merge_worker_context(
+    current: Dict[str, Optional[str]] | None,
+    incoming: Dict[str, Optional[str]],
+) -> Dict[str, Optional[str]]:
+    base = dict(current or {})
+    for key, value in incoming.items():
+        if value and not base.get(key):
+            base[key] = value
+    return {
+        "source_sheet_no": base.get("source_sheet_no"),
+        "target_sheet_no": base.get("target_sheet_no"),
+        "sheet_no": base.get("sheet_no"),
+    }
+
+
+def _worker_group_signature(row: AuditRunEvent, skill_id: str) -> str:
+    return "::".join(
+        [
+            _as_text(getattr(row, "agent_key", None)) or "unknown",
+            _as_text(skill_id) or "unknown",
+        ]
+    )
+
+
+def _resolve_worker_group_key(
+    *,
+    row: AuditRunEvent,
+    meta: Dict[str, Any],
+    session_key: str,
+    skill_id: str,
+    worker_sessions: Dict[str, Dict[str, object]],
+) -> str:
+    visible_key = _resolve_visible_session_key(meta, session_key)
+    if visible_key != session_key:
+        return visible_key
+    signature = _worker_group_signature(row, skill_id)
+    matched_keys = [
+        key
+        for key, item in worker_sessions.items()
+        if bool(item.get("_has_assignment_identity")) and item.get("_signature") == signature
+    ]
+    if len(matched_keys) == 1:
+        return matched_keys[0]
+    return session_key
+
+
+def _append_recent_action(
+    state: Dict[str, object],
+    action: Dict[str, object],
+) -> None:
+    recent_actions = list(state.get("recent_actions") or [])
+    for last_action in recent_actions:
+        if (
+            str(last_action.get("label") or "") == str(action.get("label") or "")
+            and str(last_action.get("text") or "") == str(action.get("text") or "")
+        ):
+            return
+    recent_actions.append(action)
+    state["recent_actions"] = recent_actions[-3:]
 
 
 def _set_running(project_id: str) -> bool:
@@ -857,10 +928,17 @@ def build_ui_runtime_snapshot(
 
         skill_id = _resolve_skill_id(row, meta)
         task_title = _extract_task_title(row, meta, session_key)
-        state = worker_sessions.get(session_key)
+        group_key = _resolve_worker_group_key(
+            row=row,
+            meta=meta,
+            session_key=session_key,
+            skill_id=skill_id,
+            worker_sessions=worker_sessions,
+        )
+        state = worker_sessions.get(group_key)
         if state is None:
             state = {
-                "session_key": session_key,
+                "session_key": group_key,
                 "worker_name": _resolve_worker_name(row, skill_id),
                 "skill_id": skill_id or None,
                 "skill_label": _resolve_skill_label(skill_id),
@@ -872,8 +950,10 @@ def build_ui_runtime_snapshot(
                 "recent_actions": [],
                 "_action_priority": _ACTION_PRIORITY.get(event_kind, 2),
                 "_last_event_id": row.id,
+                "_signature": _worker_group_signature(row, skill_id),
+                "_has_assignment_identity": group_key != session_key or bool(_as_text(meta.get("assignment_id"))),
             }
-            worker_sessions[session_key] = state
+            worker_sessions[group_key] = state
 
         if skill_id and not state.get("skill_id"):
             state["skill_id"] = skill_id
@@ -888,8 +968,13 @@ def build_ui_runtime_snapshot(
             state["current_action"] = current_action
             state["_action_priority"] = action_priority
         state["updated_at"] = row.created_at.isoformat() if row.created_at else None
-        state["context"] = _build_worker_context(meta, session_key)
+        state["context"] = _merge_worker_context(
+            state.get("context") if isinstance(state.get("context"), dict) else None,
+            _build_worker_context(meta, session_key),
+        )
         state["_last_event_id"] = row.id
+        if group_key != session_key or _as_text(meta.get("assignment_id")):
+            state["_has_assignment_identity"] = True
 
         if event_kind in _WORKER_COMPLETED_EVENT_KINDS:
             state["status"] = "completed"
@@ -899,10 +984,7 @@ def build_ui_runtime_snapshot(
             state["status"] = "active"
 
         action = _build_action_entry(row, meta, skill_id, task_title)
-        recent_actions = state.setdefault("recent_actions", [])
-        assert isinstance(recent_actions, list)
-        recent_actions.append(action)
-        state["recent_actions"] = recent_actions[-3:]
+        _append_recent_action(state, action)
 
     worker_items = sorted(
         worker_sessions.values(),

@@ -439,7 +439,10 @@ class ProjectAuditAgentRunner:
             event_kind=event_kind,
             progress_hint=request.progress_hint,
             message=message,
-            meta=meta,
+            meta={
+                **(request.meta or {}),
+                **(meta or {}),
+            },
             dispatch_observer=dispatch_observer,
         )
 

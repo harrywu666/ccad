@@ -422,3 +422,219 @@ def test_audit_status_includes_ui_runtime_snapshot(monkeypatch, tmp_path):
     assert recent_completed[0]["session_key"] == "proj-status-ui-runtime:9:index_review_agent:pair_compare:A201:A401"
     assert recent_completed[0]["status"] == "completed"
     assert recent_completed[0]["task_title"] == "A201 ↔ A401"
+
+
+def test_status_api_reports_one_worker_card_per_assignment_even_when_multiple_internal_runner_events_exist(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    now = datetime.now()
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-status-assignment-collapsed", name="Assignment Collapse", status="auditing"))
+        db.add(
+            models.AuditRun(
+                project_id="proj-status-assignment-collapsed",
+                audit_version=11,
+                status="running",
+                current_step="主审派发副审任务",
+                progress=52,
+                total_issues=0,
+                provider_mode="sdk",
+                started_at=now - timedelta(minutes=8),
+            )
+        )
+        db.add_all(
+            [
+                models.AuditRunEvent(
+                    project_id="proj-status-assignment-collapsed",
+                    audit_version=11,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="runner_turn_started",
+                    progress_hint=20,
+                    message="尺寸审查Agent 已通过 Runner 发起一次流式调用",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "assignment_id": "asg-1",
+                            "visible_session_key": "assignment:asg-1",
+                            "turn_kind": "dimension_sheet_semantic",
+                            "session_key": "proj-status-assignment-collapsed:11:dimension_review_agent:sheet_semantic:A101",
+                            "skill_id": "elevation_consistency",
+                            "source_sheet_no": "A1.01",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=3),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-assignment-collapsed",
+                    audit_version=11,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="runner_broadcast",
+                    progress_hint=21,
+                    message="尺寸审查Agent 正在抽取 A101 的单图标高语义",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "assignment_id": "asg-1",
+                            "visible_session_key": "assignment:asg-1",
+                            "turn_kind": "dimension_sheet_semantic",
+                            "session_key": "proj-status-assignment-collapsed:11:dimension_review_agent:sheet_semantic:A101",
+                            "skill_id": "elevation_consistency",
+                            "source_sheet_no": "A1.01",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=2, seconds=50),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-assignment-collapsed",
+                    audit_version=11,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="runner_broadcast",
+                    progress_hint=22,
+                    message="尺寸审查Agent 正在比对 A101 与 A201",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "assignment_id": "asg-1",
+                            "visible_session_key": "assignment:asg-1",
+                            "turn_kind": "dimension_pair_compare",
+                            "session_key": "proj-status-assignment-collapsed:11:dimension_review_agent:pair_compare:A101:A201",
+                            "skill_id": "elevation_consistency",
+                            "source_sheet_no": "A1.01",
+                            "target_sheet_no": "A2.01",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=2, seconds=40),
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.get("/api/projects/proj-status-assignment-collapsed/audit/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["ui_runtime"]["worker_sessions"]) == 1
+    assert payload["ui_runtime"]["worker_sessions"][0]["session_key"] == "assignment:asg-1"
+
+
+def test_status_api_does_not_reinflate_worker_cards_when_assignment_and_legacy_events_mix(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    now = datetime.now()
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-status-assignment-mixed", name="Assignment Mixed", status="auditing"))
+        db.add(
+            models.AuditRun(
+                project_id="proj-status-assignment-mixed",
+                audit_version=12,
+                status="running",
+                current_step="主审派发副审任务",
+                progress=53,
+                total_issues=0,
+                provider_mode="sdk",
+                started_at=now - timedelta(minutes=8),
+            )
+        )
+        db.add_all(
+            [
+                models.AuditRunEvent(
+                    project_id="proj-status-assignment-mixed",
+                    audit_version=12,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="runner_broadcast",
+                    progress_hint=21,
+                    message="尺寸审查Agent 正在抽取 A101 的单图标高语义",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "assignment_id": "asg-1",
+                            "visible_session_key": "assignment:asg-1",
+                            "turn_kind": "dimension_sheet_semantic",
+                            "session_key": "proj-status-assignment-mixed:12:dimension_review_agent:sheet_semantic:A101",
+                            "skill_id": "elevation_consistency",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=2, seconds=50),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-assignment-mixed",
+                    audit_version=12,
+                    level="info",
+                    step_key="dimension",
+                    agent_key="dimension_review_agent",
+                    agent_name="尺寸审查Agent",
+                    event_kind="runner_broadcast",
+                    progress_hint=22,
+                    message="尺寸审查Agent 正在比对 A101 与 A201",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "turn_kind": "dimension_pair_compare",
+                            "session_key": "proj-status-assignment-mixed:12:dimension_review_agent:pair_compare:A101:A201",
+                            "skill_id": "elevation_consistency",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=2, seconds=40),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-assignment-mixed",
+                    audit_version=12,
+                    level="warning",
+                    step_key="relationship_discovery",
+                    agent_key="relationship_review_agent",
+                    agent_name="关系审查Agent",
+                    event_kind="runner_turn_deferred",
+                    progress_hint=23,
+                    message="关系审查Agent 这一步暂时还没拿到稳定结果",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "worker",
+                            "assignment_id": "asg-2",
+                            "visible_session_key": "assignment:asg-2",
+                            "turn_kind": "relationship_candidate_review",
+                            "session_key": "proj-status-assignment-mixed:12:relationship_review_agent:candidate_review:7a2185fd3cdc",
+                            "skill_id": "node_host_binding",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=1),
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.get("/api/projects/proj-status-assignment-mixed/audit/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    worker_sessions = payload["ui_runtime"]["worker_sessions"]
+    assert len(worker_sessions) <= 2
+    assert {item["session_key"] for item in worker_sessions} == {
+        "assignment:asg-1",
+        "assignment:asg-2",
+    }

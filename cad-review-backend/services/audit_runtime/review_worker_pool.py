@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import Awaitable, Callable
 
 from services.audit_runtime.review_task_schema import WorkerResultCard, WorkerTaskCard
@@ -30,7 +31,15 @@ class ReviewWorkerPool:
 
         async def _run(task: WorkerTaskCard) -> WorkerResultCard:
             async with semaphore:
-                return await self._worker_runner(task)
+                result = await self._worker_runner(task)
+                assignment_id = str(task.context.get("assignment_id") or task.id or "").strip()
+                if not assignment_id:
+                    return result
+                meta = dict(result.meta or {})
+                meta.setdefault("assignment_id", assignment_id)
+                meta.setdefault("visible_session_key", f"assignment:{assignment_id}")
+                meta.setdefault("session_key", task.session_key)
+                return replace(result, meta=meta)
 
         return await asyncio.gather(*[_run(task) for task in tasks])
 
