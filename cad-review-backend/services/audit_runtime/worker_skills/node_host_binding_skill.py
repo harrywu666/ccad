@@ -18,7 +18,7 @@ from services.audit_runtime.cross_sheet_index import build_cross_sheet_index
 from services.audit_runtime.cross_sheet_locator import locate_across_sheets
 from services.audit_runtime.evidence_prefetch_service import prefetch_regions
 from services.audit_runtime.runtime_prompt_assembler import assemble_worker_runtime_prompt
-from services.audit_runtime.worker_skill_contract import build_worker_skill_result
+from services.audit_runtime.worker_skill_contract import build_task_event_meta, build_worker_skill_result
 from services.audit_runtime.worker_skill_loader import WorkerSkillBundle, load_worker_skill
 from services.feedback_runtime_service import load_feedback_runtime_profile
 from services.skill_pack_service import load_runtime_skill_profile
@@ -124,6 +124,7 @@ async def run_node_host_binding_skill(
     skill_bundle: WorkerSkillBundle | None = None,
 ):
     skill = skill_bundle or load_worker_skill("node_host_binding")
+    event_meta = build_task_event_meta(task)
     project_id = str(task.context.get("project_id") or "").strip()
     audit_version = int(task.context.get("audit_version") or 0)
     sheet_filters = [task.source_sheet_no, *list(task.target_sheet_nos or [])]
@@ -218,6 +219,7 @@ async def run_node_host_binding_skill(
                         "target_sheet_no": target_sheet["sheet_no"],
                         "objective": task.objective,
                     },
+                    extra_meta=event_meta,
                     user_prompt_override=_build_relationship_task_prompt(source_sheet, target_sheet),
                 ),
             )

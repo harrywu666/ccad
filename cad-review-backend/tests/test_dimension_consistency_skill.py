@@ -122,6 +122,60 @@ def test_dimension_skill_returns_rejected_when_no_issues(monkeypatch):
     assert result.meta["prompt_source"] == "agent_skill"
 
 
+def test_dimension_skill_passes_assignment_meta_into_runtime_prompt(monkeypatch):
+    dimension_skill = importlib.import_module("services.audit_runtime.worker_skills.dimension_consistency_skill")
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+
+    captured: dict[str, object] = {}
+
+    async def fake_collect(*args, **kwargs):  # noqa: ANN001
+        sheet_bundle = kwargs["sheet_prompt_bundle_builder"](
+            {"sheet_no": "A1.01", "sheet_name": "首层平面图", "prompt": "单图提示", "visual_only": False},
+            "dimension_single_sheet",
+        )
+        pair_bundle = kwargs["pair_prompt_bundle_builder"](
+            {
+                "a_sheet_no": "A1.01",
+                "a_sheet_name": "首层平面图",
+                "b_sheet_no": "A4.01",
+                "b_sheet_name": "节点详图",
+                "semantic_a": [],
+                "semantic_b": [],
+            }
+        )
+        captured["sheet_assignment_id"] = sheet_bundle.meta.get("assignment_id")
+        captured["sheet_visible_session_key"] = sheet_bundle.meta.get("visible_session_key")
+        captured["pair_assignment_id"] = pair_bundle.meta.get("assignment_id")
+        captured["pair_visible_session_key"] = pair_bundle.meta.get("visible_session_key")
+        return []
+
+    monkeypatch.setattr(dimension_skill, "_collect_dimension_pair_issues_async", fake_collect)
+
+    asyncio.run(
+        dimension_skill.run_dimension_consistency_skill(
+            task=review_task_schema.WorkerTaskCard(
+                id="task-dim-assignment-meta",
+                hypothesis_id="hyp-dim-assignment-meta",
+                worker_kind="elevation_consistency",
+                objective="核对 A1.01 与 A4.01",
+                source_sheet_no="A1.01",
+                target_sheet_nos=["A4.01"],
+                context={
+                    "project_id": "proj-dim-assignment-meta",
+                    "audit_version": 1,
+                    "assignment_id": "asg-dim-1",
+                },
+            ),
+            db="db-session",
+        )
+    )
+
+    assert captured["sheet_assignment_id"] == "asg-dim-1"
+    assert captured["sheet_visible_session_key"] == "assignment:asg-dim-1"
+    assert captured["pair_assignment_id"] == "asg-dim-1"
+    assert captured["pair_visible_session_key"] == "assignment:asg-dim-1"
+
+
 def test_dimension_skill_prefetches_cross_sheet_evidence(monkeypatch):
     dimension_skill = importlib.import_module("services.audit_runtime.worker_skills.dimension_consistency_skill")
     review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")

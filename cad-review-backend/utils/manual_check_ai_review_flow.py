@@ -29,7 +29,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 
-RUN_MODES = ("legacy", "chief_review", "shadow_compare")
+RUN_MODES = ("legacy", "chief_review", "shadow_compare", "assignment_final_review")
 
 
 class ClientResponse:
@@ -270,7 +270,7 @@ def resolve_run_modes(run_mode: Optional[str]) -> List[str]:
     normalized = str(run_mode or "legacy").strip().lower() or "legacy"
     if normalized == "shadow_compare":
         return ["legacy", "chief_review"]
-    if normalized in {"legacy", "chief_review"}:
+    if normalized in {"legacy", "chief_review", "assignment_final_review"}:
         return [normalized]
     return ["legacy"]
 
@@ -378,8 +378,8 @@ def _run_mode_env(run_mode: str) -> Dict[str, Optional[str]]:
     chief_enabled = None
     legacy_pipeline_allowed = None
     forced_pipeline_mode = None
-    if normalized == "chief_review":
-        shadow_label = "shadow_chief_review"
+    if normalized in {"chief_review", "assignment_final_review"}:
+        shadow_label = "shadow_assignment_final_review" if normalized == "assignment_final_review" else "shadow_chief_review"
         chief_enabled = "1"
         legacy_pipeline_allowed = "0"
     elif normalized == "legacy":
@@ -392,6 +392,178 @@ def _run_mode_env(run_mode: str) -> Dict[str, Optional[str]]:
         "AUDIT_LEGACY_PIPELINE_ALLOWED": legacy_pipeline_allowed,
         "AUDIT_FORCE_PIPELINE_MODE": forced_pipeline_mode,
         "AUDIT_SHADOW_RUN_MODE": shadow_label,
+    }
+
+
+def _safe_json_loads(payload: Any) -> Dict[str, Any]:
+    if isinstance(payload, dict):
+        return payload
+    text = str(payload or "").strip()
+    if not text:
+        return {}
+    try:
+        value = json.loads(text)
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _count_grounded_final_issues(runtime_results: List[Dict[str, Any]]) -> int:
+    grounded = 0
+    for item in runtime_results:
+        evidence = _safe_json_loads(item.get("evidence_json"))
+        finding = evidence.get("finding") if isinstance(evidence.get("finding"), dict) else {}
+        anchors = finding.get("anchors") if isinstance(finding.get("anchors"), list) else evidence.get("anchors")
+        if not isinstance(anchors, list):
+            continue
+        for anchor in anchors:
+            if not isinstance(anchor, dict):
+                continue
+            point = anchor.get("global_pct")
+            region = anchor.get("highlight_region")
+            if isinstance(point, dict) and point.get("x") is not None and point.get("y") is not None:
+                grounded += 1
+                break
+            if (
+                isinstance(region, dict)
+                and isinstance(region.get("bbox_pct"), dict)
+                and region["bbox_pct"].get("width") not in (None, 0)
+                and region["bbox_pct"].get("height") not in (None, 0)
+            ):
+                grounded += 1
+                break
+    return grounded
+
+
+def _local_provider_env_overrides(provider_mode: Optional[str]) -> Dict[str, Optional[str]]:
+    normalized = str(provider_mode or "").strip().lower()
+    if normalized == "openrouter":
+        return {"KIMI_PROVIDER": "openrouter"}
+    if normalized == "api":
+        return {"KIMI_PROVIDER": "official"}
+    return {}
+
+
+def _provider_preflight(provider_mode: Optional[str]) -> Dict[str, Any]:
+    normalized = str(provider_mode or "").strip().lower()
+    if not normalized:
+        return {
+            "ok": True,
+            "skipped": True,
+            "detail": "未显式指定 provider_mode，跳过本地 provider 环境预检。",
+        }
+
+    required_env: List[str]
+    if normalized == "openrouter":
+        required_env = ["OPENROUTER_API_KEY"]
+    else:
+        required_env = ["KIMI_OFFICIAL_API_KEY", "MOONSHOT_API_KEY"]
+    present_env = [
+        name
+        for name in required_env
+        if str(os.getenv(name) or "").strip()
+    ]
+    missing_env = [name for name in required_env if name not in present_env]
+    ok = bool(present_env)
+    if ok:
+        detail = f"provider 预检通过，已检测到 {present_env[0]}。"
+    else:
+        detail = f"缺少 provider 环境变量：{' / '.join(required_env)}。"
+    return {
+        "ok": ok,
+        "skipped": False,
+        "provider_mode": normalized,
+        "required_env": required_env,
+        "present_env": present_env,
+        "missing_env": missing_env,
+        "detail": detail,
+    }
+
+
+def _summarize_runtime_failures(runtime_events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    failed_events = [
+        event
+        for event in runtime_events
+        if str(event.get("event_kind") or "").strip() == "runner_session_failed"
+    ]
+    last_failure = failed_events[-1] if failed_events else {}
+    message = str(last_failure.get("message") or "").strip() or None
+    blocking_reason = None
+    if message and ("KIMI_OFFICIAL_API_KEY" in message or "MOONSHOT_API_KEY" in message or "OPENROUTER_API_KEY" in message):
+        blocking_reason = "missing_provider_env"
+    return {
+        "failed_runner_event_count": len(failed_events),
+        "last_failure_message": message,
+        "last_failure_event_kind": str(last_failure.get("event_kind") or "").strip() or None,
+        "blocking_reason": blocking_reason,
+    }
+
+
+def build_assignment_final_review_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
+    status = payload.get("status") if isinstance(payload.get("status"), dict) else {}
+    ui_runtime = status.get("ui_runtime") if isinstance(status.get("ui_runtime"), dict) else {}
+    chief_runtime = ui_runtime.get("chief") if isinstance(ui_runtime.get("chief"), dict) else {}
+    worker_sessions = ui_runtime.get("worker_sessions") if isinstance(ui_runtime.get("worker_sessions"), list) else []
+    runtime_tasks = payload.get("runtime_tasks") if isinstance(payload.get("runtime_tasks"), list) else []
+    runtime_results = payload.get("runtime_results") if isinstance(payload.get("runtime_results"), list) else []
+    runtime_events = payload.get("runtime_events") if isinstance(payload.get("runtime_events"), list) else []
+    runtime_report = payload.get("runtime_report") if isinstance(payload.get("runtime_report"), dict) else {}
+    provider_preflight = payload.get("provider_preflight") if isinstance(payload.get("provider_preflight"), dict) else {}
+    organizer_markdown_available = bool(payload.get("organizer_markdown_available"))
+    assigned_task_count = chief_runtime.get("assigned_task_count")
+    assigned_task_count = int(assigned_task_count) if isinstance(assigned_task_count, (int, float, str)) and str(assigned_task_count).strip().isdigit() else 0
+    assignment_count = max(len(runtime_tasks), assigned_task_count)
+    visible_worker_keys = {
+        str(item.get("session_key") or "").strip()
+        for item in worker_sessions
+        if str(item.get("session_key") or "").strip()
+    }
+    for event in runtime_events:
+        meta = event.get("meta") if isinstance(event.get("meta"), dict) else {}
+        visible_key = str(meta.get("visible_session_key") or "").strip()
+        if visible_key:
+            visible_worker_keys.add(visible_key)
+        assignment_id = str(meta.get("assignment_id") or "").strip()
+        if assignment_id:
+            visible_worker_keys.add(f"assignment:{assignment_id}")
+    final_review_visible = isinstance(ui_runtime.get("final_review"), dict)
+    organizer_visible = isinstance(ui_runtime.get("organizer"), dict)
+    current_step = str(status.get("current_step") or "").strip()
+    if not final_review_visible:
+        final_review_visible = "终审" in current_step or any(
+            "终审" in str(event.get("message") or "")
+            for event in runtime_events
+        )
+    if not organizer_visible:
+        organizer_visible = (
+            "汇总" in current_step
+            or "收束" in current_step
+            or organizer_markdown_available
+        )
+    failure_summary = _summarize_runtime_failures(runtime_events)
+    blocking_reason = failure_summary["blocking_reason"]
+    if not blocking_reason and provider_preflight and provider_preflight.get("ok") is False:
+        blocking_reason = "missing_provider_env"
+    last_failure_message = failure_summary["last_failure_message"]
+    if not last_failure_message and provider_preflight and provider_preflight.get("ok") is False:
+        last_failure_message = str(provider_preflight.get("detail") or "").strip() or None
+
+    return {
+        "pipeline_mode": "assignment_final_review",
+        "runtime_pipeline_mode": str(status.get("pipeline_mode") or "").strip() or None,
+        "assignment_count": assignment_count,
+        "visible_worker_card_count": len(visible_worker_keys),
+        "worker_card_not_exceed_assignment_count": len(visible_worker_keys) <= assignment_count,
+        "final_review_visible": final_review_visible,
+        "organizer_visible": organizer_visible,
+        "organizer_markdown_output": organizer_markdown_available,
+        "grounded_final_issue_count": _count_grounded_final_issues(runtime_results),
+        "marked_report_generated": str(runtime_report.get("mode") or "").strip().lower() == "marked",
+        "anchors_json_path": runtime_report.get("anchors_json_path"),
+        "provider_preflight_ok": provider_preflight.get("ok") if provider_preflight else None,
+        "blocking_reason": blocking_reason,
+        "failed_runner_event_count": failure_summary["failed_runner_event_count"],
+        "last_failure_message": last_failure_message,
     }
 
 
@@ -515,7 +687,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable-evidence-planner", action="store_true", help="Mark evidence planner enabled for this run")
     parser.add_argument("--enable-feedback-runtime", action="store_true", help="Mark feedback runtime injection enabled for this run")
     parser.add_argument("--provider-mode", choices=["api", "openrouter"], help="Per-audit provider mode to request")
-    parser.add_argument("--run-mode", choices=list(RUN_MODES), default="legacy", help="Audit run mode: legacy, chief_review, or shadow_compare")
+    parser.add_argument(
+        "--run-mode",
+        choices=list(RUN_MODES),
+        default="legacy",
+        help="Audit run mode: legacy, chief_review, shadow_compare, or assignment_final_review",
+    )
     return parser.parse_args()
 
 
@@ -552,6 +729,7 @@ def _run_single_check(
     report: Dict[str, Any] = {
         "project_id": args.project_id,
         "run_mode": effective_run_mode,
+        "pipeline_mode": effective_run_mode,
         "checked_at": datetime.now().isoformat(),
         "inputs": {
             "start_audit": args.start_audit,
@@ -573,6 +751,7 @@ def _run_single_check(
     client = None
     db_path = None
     env_context = None
+    local_db_module = None
     try:
         if args.base_url:
             client = HTTPAPIClient(args.base_url, args.request_timeout)
@@ -587,6 +766,7 @@ def _run_single_check(
             }
         else:
             run_mode_env = _run_mode_env(effective_run_mode)
+            provider_env = _local_provider_env_overrides(args.provider_mode)
             sys.path.insert(0, str(backend_dir))
             env_context = temporary_env(
                 {
@@ -594,13 +774,36 @@ def _run_single_check(
                     "AUDIT_EVIDENCE_PLANNER_ENABLED": "1" if args.enable_evidence_planner else None,
                     "AUDIT_FEEDBACK_RUNTIME_ENABLED": "1" if args.enable_feedback_runtime else None,
                     **run_mode_env,
+                    **provider_env,
                 }
             )
             env_context.__enter__()
+            provider_preflight = _provider_preflight(args.provider_mode)
+            report["checks"]["provider_preflight"] = {
+                "mode": "local",
+                **provider_preflight,
+            }
+            if provider_preflight.get("ok") is False:
+                if effective_run_mode == "assignment_final_review":
+                    report["checks"]["assignment_final_review"] = build_assignment_final_review_summary(
+                        {
+                            "status": {},
+                            "runtime_tasks": [],
+                            "runtime_results": [],
+                            "runtime_events": [],
+                            "runtime_report": {},
+                            "organizer_markdown_available": False,
+                            "provider_preflight": provider_preflight,
+                        }
+                    )
+                save_report(output_path, report)
+                print(f"[ERROR] provider preflight failed, report saved: {output_path}")
+                return 4, report, output_path
             import database  # noqa: WPS433
             database.init_db()
             from main import app  # noqa: WPS433
 
+            local_db_module = database
             client = LocalAPIClient(TestClient(app))
             db_path = detect_db_path(backend_dir, args.db_path)
             report["checks"]["runtime_switches"] = {
@@ -617,6 +820,7 @@ def _run_single_check(
                     "AUDIT_LEGACY_PIPELINE_ALLOWED": run_mode_env["AUDIT_LEGACY_PIPELINE_ALLOWED"],
                     "AUDIT_FORCE_PIPELINE_MODE": run_mode_env["AUDIT_FORCE_PIPELINE_MODE"],
                     "AUDIT_SHADOW_RUN_MODE": run_mode_env["AUDIT_SHADOW_RUN_MODE"],
+                    "KIMI_PROVIDER": provider_env.get("KIMI_PROVIDER"),
                 },
             }
 
@@ -767,7 +971,7 @@ def _run_single_check(
                         runtime_status=runtime_status,
                     )
                     status_value = str(runtime_status.get("status") or "").strip().lower()
-                    completed_within_window = status_value in {"completed", "failed"}
+                    completed_within_window = status_value in {"done", "completed", "failed"}
                     last_progress_gap_seconds = runner_metrics.get("last_progress_gap_seconds")
                     running_with_recent_progress = (
                         status_value == "running"
@@ -794,6 +998,54 @@ def _run_single_check(
                     report["artifacts"]["runtime_tasks"] = runtime_tasks
                     report["artifacts"]["runtime_results"] = runtime_results
                     report["artifacts"]["runtime_events"] = runtime_events
+                    organizer_markdown_available = any(
+                        bool(
+                            (
+                                _safe_json_loads(item.get("evidence_json"))
+                                .get("finding", {})
+                                .get("organizer_markdown_block")
+                            )
+                        )
+                        for item in runtime_results
+                    )
+                    report["artifacts"]["organizer_markdown_available"] = organizer_markdown_available
+                    runtime_report: Dict[str, Any] = {}
+                    if local_db_module is not None and completed_within_window:
+                        try:
+                            from models import AuditResult, Project  # noqa: WPS433
+                            from services.report_service import generate_pdf  # noqa: WPS433
+
+                            db = local_db_module.SessionLocal()
+                            try:
+                                project = db.query(Project).filter(Project.id == args.project_id).first()
+                                runtime_db_results = (
+                                    db.query(AuditResult)
+                                    .filter(
+                                        AuditResult.project_id == args.project_id,
+                                        AuditResult.audit_version == runtime_version,
+                                    )
+                                    .all()
+                                )
+                                if project is not None and runtime_db_results:
+                                    runtime_report = generate_pdf(project, runtime_db_results, runtime_version, db=db, mode="marked")
+                            finally:
+                                db.close()
+                        except Exception as exc:  # noqa: BLE001
+                            runtime_report = {"mode": "error", "error": str(exc)}
+                    if runtime_report:
+                        report["artifacts"]["runtime_report"] = runtime_report
+                    if effective_run_mode == "assignment_final_review":
+                        report["checks"]["assignment_final_review"] = build_assignment_final_review_summary(
+                            {
+                                "status": runtime_status,
+                                "runtime_tasks": runtime_tasks,
+                                "runtime_results": runtime_results,
+                                "runtime_events": runtime_events,
+                                "runtime_report": runtime_report,
+                                "organizer_markdown_available": organizer_markdown_available,
+                                "provider_preflight": report["checks"].get("provider_preflight"),
+                            }
+                        )
 
         save_report(output_path, report)
         print(f"[INFO] report saved: {output_path}")

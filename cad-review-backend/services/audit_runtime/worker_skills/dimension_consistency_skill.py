@@ -12,7 +12,11 @@ from services.audit_runtime.cross_sheet_index import build_cross_sheet_index
 from services.audit_runtime.cross_sheet_locator import locate_across_sheets
 from services.audit_runtime.evidence_prefetch_service import prefetch_regions
 from services.audit_runtime.runtime_prompt_assembler import assemble_worker_runtime_prompt
-from services.audit_runtime.worker_skill_contract import build_worker_skill_result, extract_anchors_from_issue_results
+from services.audit_runtime.worker_skill_contract import (
+    build_task_event_meta,
+    build_worker_skill_result,
+    extract_anchors_from_issue_results,
+)
 from services.audit_runtime.worker_skill_loader import WorkerSkillBundle, load_worker_skill
 
 
@@ -187,7 +191,12 @@ async def _prepare_cross_sheet_prefetch(task) -> dict[str, Any]:
     }
 
 
-def _build_sheet_prompt_bundle(worker_kind: str, job: dict, stage_key: str):
+def _build_sheet_prompt_bundle(
+    worker_kind: str,
+    job: dict,
+    stage_key: str,
+    event_meta: dict[str, Any] | None = None,
+):
     analysis_mode = {
         "dimension_single_sheet": "single_sheet_semantic",
         "dimension_visual_only": "visual_grounding",
@@ -200,11 +209,16 @@ def _build_sheet_prompt_bundle(worker_kind: str, job: dict, stage_key: str):
             "sheet_name": job.get("sheet_name") or "",
             "visual_only": bool(job.get("visual_only")),
         },
+        extra_meta=event_meta,
         user_prompt_override=job["prompt"],
     )
 
 
-def _build_pair_prompt_bundle(worker_kind: str, job: dict):
+def _build_pair_prompt_bundle(
+    worker_kind: str,
+    job: dict,
+    event_meta: dict[str, Any] | None = None,
+):
     return assemble_worker_runtime_prompt(
         worker_kind=worker_kind,
         task_context={
@@ -214,6 +228,7 @@ def _build_pair_prompt_bundle(worker_kind: str, job: dict):
             "source_sheet_name": job["a_sheet_name"],
             "target_sheet_name": job["b_sheet_name"],
         },
+        extra_meta=event_meta,
         user_prompt_override=build_pair_compare_prompt(
             a_sheet_no=job["a_sheet_no"],
             a_sheet_name=job["a_sheet_name"],
@@ -233,6 +248,7 @@ async def run_dimension_consistency_skill(
 ):
     skill = skill_bundle or load_worker_skill(str(task.worker_kind or "").strip())
     task_context = dict(task.context or {})
+    event_meta = build_task_event_meta(task)
     project_id = str(task_context.get("project_id") or "").strip()
     audit_version = int(task_context.get("audit_version") or 0)
     prefetch_meta = {
@@ -256,8 +272,17 @@ async def run_dimension_consistency_skill(
         audit_version,
         db,
         pair_filters=pair_filters or None,
-        sheet_prompt_bundle_builder=lambda job, stage_key: _build_sheet_prompt_bundle(skill.worker_kind, job, stage_key),
-        pair_prompt_bundle_builder=lambda job: _build_pair_prompt_bundle(skill.worker_kind, job),
+        sheet_prompt_bundle_builder=lambda job, stage_key: _build_sheet_prompt_bundle(
+            skill.worker_kind,
+            job,
+            stage_key,
+            event_meta,
+        ),
+        pair_prompt_bundle_builder=lambda job: _build_pair_prompt_bundle(
+            skill.worker_kind,
+            job,
+            event_meta,
+        ),
     )
     if not issues:
         return build_worker_skill_result(

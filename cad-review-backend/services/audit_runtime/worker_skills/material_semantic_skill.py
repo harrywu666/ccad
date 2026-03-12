@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 
 from services.audit import material_audit
-from services.audit_runtime.worker_skill_contract import build_worker_skill_result, extract_anchors_from_issue_results
+from services.audit_runtime.worker_skill_contract import (
+    build_task_event_meta,
+    build_worker_skill_result,
+    extract_anchors_from_issue_results,
+)
 from services.audit_runtime.worker_skill_loader import WorkerSkillBundle, load_worker_skill
 from services.audit_runtime.runtime_prompt_assembler import assemble_worker_runtime_prompt
 from services.feedback_runtime_service import load_feedback_runtime_profile
@@ -19,6 +23,7 @@ async def run_material_semantic_skill(
     skill_bundle: WorkerSkillBundle | None = None,
 ):
     skill = skill_bundle or load_worker_skill("material_semantic_consistency")
+    event_meta = build_task_event_meta(task)
     project_id = str(task.context.get("project_id") or "").strip()
     audit_version = int(task.context.get("audit_version") or 0)
     skill_profile = load_runtime_skill_profile(
@@ -53,6 +58,7 @@ async def run_material_semantic_skill(
                             "material_table": kwargs["material_table"],
                             "material_used": kwargs["material_used"],
                         },
+                        extra_meta=event_meta,
                         user_prompt_override=material_audit.build_material_review_prompt(
                             kwargs["sheet_no"],
                             material_audit.compact_material_rows(kwargs["material_table"]),

@@ -769,6 +769,7 @@ async def _discover_group(
                     temperature=0.0,
                     max_tokens=max_tokens,
                     meta={
+                        **dict(prompt_bundle.meta or {}),
                         "mode": "legacy_group",
                         "sheet_count": len(group_sheets),
                         "prompt_source": prompt_bundle.meta.get("prompt_source"),
@@ -800,6 +801,7 @@ async def _discover_group(
                     temperature=0.0,
                     max_tokens=max_tokens,
                     meta={
+                        **dict(prompt_bundle.meta or {}),
                         "mode": "legacy_group",
                         "sheet_count": len(group_sheets),
                         "prompt_source": prompt_bundle.meta.get("prompt_source"),
@@ -922,6 +924,7 @@ async def _discover_relationship_task_v2(
                     temperature=0.0,
                     max_tokens=_env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192),
                     meta={
+                        **dict(resolved_prompt_bundle.meta or {}),
                         "candidate_source_sheet_no": source_sheet["sheet_no"],
                         "candidate_target_sheet_no": target_sheet["sheet_no"],
                         "pack_type": plan_item.pack_type.value,
@@ -956,6 +959,7 @@ async def _discover_relationship_task_v2(
                     temperature=0.0,
                     max_tokens=_env_int("AUDIT_RELATIONSHIP_DISCOVERY_MAX_TOKENS", 8192),
                     meta={
+                        **dict(resolved_prompt_bundle.meta or {}),
                         "candidate_source_sheet_no": source_sheet["sheet_no"],
                         "candidate_target_sheet_no": target_sheet["sheet_no"],
                         "pack_type": plan_item.pack_type.value,

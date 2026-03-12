@@ -606,6 +606,38 @@ marked report 不再依赖模糊位置描述兜底。
 - 任一最终问题都能回溯到具体图纸和具体锚点。
 - marked report 能稳定圈出最终问题。
 
+## 14.1 正式验收路径
+
+从 2026-03-12 起，这套架构的正式验收入口不再是只看 `chief_review` 是否能跑完，而是跑 `assignment_final_review`。
+
+推荐命令：
+
+```bash
+cd /Users/harry/@dev/ccad/cad-review-backend
+./venv/bin/python utils/manual_check_ai_review_flow.py \
+  --project-id proj_20260309231506_001af8d5 \
+  --start-audit \
+  --run-mode assignment_final_review \
+  --provider-mode api \
+  --wait-seconds 180
+```
+
+验收时必须同时满足：
+
+- `visible_worker_card_count <= assignment_count`
+- 运行态出现独立 `final_review` 阶段
+- organizer 有 Markdown 输出
+- 最终 `FinalIssue` 带 grounded anchors
+- marked report 由最终 issue 的 anchors 驱动，而不是退回只靠文字位置描述
+
+如果只有 `sheet_no` 或 `evidence_pack_id`，没有 `global_pct` 或 `highlight_region.bbox_pct`，该问题不能算最终通过。
+
+## 14.2 迁移落地说明
+
+- `chief_review` 继续作为默认主运行外壳保留。
+- `assignment_final_review` 是新的正式验收模式，用来验证“派单对象、前台对象、终审对象、汇总对象、grounding 对象”已经全部切到新链路。
+- `shadow_compare` 继续服务于旧链路和主链路的业务级对比，不替代 `assignment_final_review` 的结果验收。
+
 ## 15. 最终结论
 
 当前系统的问题不是单点 bug，而是“对象层级、任务粒度、证据链、结果裁决”四个地方同时错位。

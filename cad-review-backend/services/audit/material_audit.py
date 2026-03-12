@@ -435,6 +435,7 @@ async def _run_material_ai_review(
                 images=images or [],
                 temperature=0.0,
                 meta={
+                    **dict(prompt_bundle.meta or {}),
                     "sheet_no": sheet_no,
                     "material_rows": len(material_table),
                     "used_rows": len(material_used),
@@ -458,6 +459,7 @@ async def _run_material_ai_review(
                 images=images or [],
                 temperature=0.0,
                 meta={
+                    **dict(prompt_bundle.meta or {}),
                     "sheet_no": sheet_no,
                     "material_rows": len(material_table),
                     "used_rows": len(material_used),

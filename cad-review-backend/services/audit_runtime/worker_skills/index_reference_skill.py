@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from services.audit import index_audit
-from services.audit_runtime.worker_skill_contract import build_worker_skill_result, extract_anchors_from_issue_results
+from services.audit_runtime.worker_skill_contract import (
+    build_task_event_meta,
+    build_worker_skill_result,
+    extract_anchors_from_issue_results,
+)
 from services.audit_runtime.worker_skill_loader import WorkerSkillBundle, load_worker_skill
 from services.audit_runtime.runtime_prompt_assembler import assemble_worker_runtime_prompt
 from services.feedback_runtime_service import load_feedback_runtime_profile
@@ -30,6 +34,7 @@ async def run_index_reference_skill(
     skill_bundle: WorkerSkillBundle | None = None,
 ):
     skill = skill_bundle or load_worker_skill("index_reference")
+    event_meta = build_task_event_meta(task)
     project_id = str(task.context.get("project_id") or "").strip()
     audit_version = int(task.context.get("audit_version") or 0)
     alias_map = index_audit.build_index_alias_map(index_audit.load_active_skill_rules(db, skill_type="index"))
@@ -85,6 +90,7 @@ async def run_index_reference_skill(
                         "issue_kind": candidate["review_kind"],
                         "issue_description": candidate["issue"].description,
                     },
+                    extra_meta=event_meta,
                     user_prompt_override=_build_index_review_user_prompt(candidate),
                 ),
             )

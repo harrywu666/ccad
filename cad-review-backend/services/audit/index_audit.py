@@ -484,6 +484,7 @@ async def _run_index_ai_review(
                 temperature=0.0,
                 max_tokens=1200,
                 meta={
+                    **dict(prompts.meta or {}),
                     "source_sheet_no": candidate["source_sheet_no"],
                     "target_sheet_no": candidate.get("target_sheet_no"),
                     "index_no": candidate["index_no"],
@@ -508,6 +509,7 @@ async def _run_index_ai_review(
                 temperature=0.0,
                 max_tokens=1200,
                 meta={
+                    **dict(prompts.meta or {}),
                     "source_sheet_no": candidate["source_sheet_no"],
                     "target_sheet_no": candidate.get("target_sheet_no"),
                     "index_no": candidate["index_no"],

@@ -854,6 +854,7 @@ async def _execute_sheet_jobs(
                     images=images,
                     temperature=0.0,
                     meta={
+                        **dict(prompt_bundle.meta or {}),
                         "mode": "sheet_semantic",
                         "sheet_no": job["sheet_no"],
                         "visual_only": bool(job.get("visual_only")),
@@ -883,6 +884,7 @@ async def _execute_sheet_jobs(
                     images=images,
                     temperature=0.0,
                     meta={
+                        **dict(prompt_bundle.meta or {}),
                         "prompt_source": prompt_bundle.meta.get("prompt_source"),
                         "subsession_key": f"sheet_semantic:{job['sheet_key']}",
                     },
@@ -1122,6 +1124,7 @@ async def _execute_pair_jobs(
                     images=pair_images if pair_images else [],
                     temperature=0.0,
                     meta={
+                        **dict(prompt_bundle.meta or {}),
                         "mode": "pair_compare",
                         "source_sheet_no": job["a_sheet_no"],
                         "target_sheet_no": job["b_sheet_no"],
@@ -1150,6 +1153,7 @@ async def _execute_pair_jobs(
                     images=pair_images if pair_images else [],
                     temperature=0.0,
                     meta={
+                        **dict(prompt_bundle.meta or {}),
                         "prompt_source": prompt_bundle.meta.get("prompt_source"),
                         "subsession_key": f"pair_compare:{job['a_key']}:{job['b_key']}",
                     },

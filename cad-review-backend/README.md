@@ -90,6 +90,39 @@ cd cad-review-backend
   - `shadow_compare` 现在输出的是业务级对比信号，而不只是框架接通。
   - 本地 `manual_check_ai_review_flow.py` 的“计划预览”仍然会触发较重的关系发现；做真实人工验收时建议显式加更长的 `--wait-seconds`。
 
+## Assignment Final Review 正式验收
+- 从 2026-03-12 起，`assignment_final_review` 是“主审派单 -> 副审单卡执行 -> 终审复核 -> 汇总整理 -> 最终 grounded 报告”的正式验收路径。
+- 推荐命令：
+
+```bash
+cd cad-review-backend
+./venv/bin/python utils/manual_check_ai_review_flow.py \
+  --project-id proj_20260309231506_001af8d5 \
+  --start-audit \
+  --run-mode assignment_final_review \
+  --provider-mode api \
+  --wait-seconds 180
+```
+
+- 通过标准：
+  - `visible_worker_card_count <= assignment_count`
+  - 运行态里能看到独立 `final_review` 阶段
+  - 运行态或最终结果里能确认 `organizer` 产出了 Markdown
+  - `grounded_final_issue_count > 0` 时才允许认为最终报告具备可落图证据
+  - `runtime_report.mode == marked`，且 marked report 使用的是最终 issue 的 anchors，不是只靠文字位置兜底
+
+- 验收脚本会额外输出 `checks.assignment_final_review`，重点看：
+  - `worker_card_not_exceed_assignment_count`
+  - `final_review_visible`
+  - `organizer_markdown_output`
+  - `grounded_final_issue_count`
+  - `marked_report_generated`
+
+- 注意：
+  - 只有 `sheet_no` 或 `evidence_pack_id` 不算真正通过，最终问题必须带 grounded anchors。
+  - 当前 marked report 会优先吃 `highlight_region.bbox_pct`，其次才是 `global_pct`。
+  - 如果 `--provider-mode api` 缺少可用密钥，脚本会失败并把原因写进 `.artifacts/manual-checks/*.json`。
+
 ## Chief Review Worker Skills
 - 当前已 skill 化的副审能力：`index_reference`、`material_semantic_consistency`、`node_host_binding`、`elevation_consistency`、`spatial_consistency`
 - skill 资源目录：`agents/review_worker/skills/*/SKILL.md`

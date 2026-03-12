@@ -160,6 +160,56 @@ def test_node_host_binding_skill_prefetches_cross_sheet_evidence(monkeypatch):
     assert result.meta["cross_sheet_prefetch_status"] == "ready"
 
 
+def test_node_host_binding_skill_passes_assignment_meta_into_runtime_prompt(monkeypatch):
+    node_skill = importlib.import_module("services.audit_runtime.worker_skills.node_host_binding_skill")
+    review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(node_skill, "load_runtime_skill_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(node_skill, "load_feedback_runtime_profile", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        node_skill,
+        "_load_ready_sheets",
+        lambda project_id, db, sheet_filters=None: [
+            {"sheet_no": "A1-01", "sheet_name": "首层平面图", "pdf_path": "/tmp/a.pdf", "page_index": 0},
+            {"sheet_no": "A4-01", "sheet_name": "节点详图", "pdf_path": "/tmp/b.pdf", "page_index": 0},
+        ],
+    )
+    monkeypatch.setattr(node_skill, "get_evidence_service", lambda: "fake-evidence-service")
+    monkeypatch.setattr(node_skill, "_validate_and_normalize", lambda rels, valid_sheet_nos: rels)
+
+    async def fake_discover_relationship_task_v2(**kwargs):  # noqa: ANN001
+        prompt_bundle = kwargs["prompt_bundle"]
+        captured["assignment_id"] = prompt_bundle.meta.get("assignment_id")
+        captured["visible_session_key"] = prompt_bundle.meta.get("visible_session_key")
+        return []
+
+    monkeypatch.setattr(node_skill, "_discover_relationship_task_v2", fake_discover_relationship_task_v2)
+
+    asyncio.run(
+        node_skill.run_node_host_binding_skill(
+            task=review_task_schema.WorkerTaskCard(
+                id="task-node-assignment-meta",
+                hypothesis_id="hyp-node-assignment-meta",
+                worker_kind="node_host_binding",
+                objective="确认节点归属",
+                source_sheet_no="A1.01",
+                target_sheet_nos=["A4.01"],
+                context={
+                    "project_id": "proj-node-assignment-meta",
+                    "audit_version": 1,
+                    "assignment_id": "asg-node-1",
+                },
+            ),
+            db="db-session",
+        )
+    )
+
+    assert captured["assignment_id"] == "asg-node-1"
+    assert captured["visible_session_key"] == "assignment:asg-node-1"
+
+
 def test_node_host_binding_skill_returns_markdown_conclusion_and_evidence_bundle(monkeypatch):
     node_skill = importlib.import_module("services.audit_runtime.worker_skills.node_host_binding_skill")
     review_task_schema = importlib.import_module("services.audit_runtime.review_task_schema")

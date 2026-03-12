@@ -21,6 +21,21 @@ class WorkerSkillExecutor:
     execute: WorkerSkillCallable
 
 
+def build_task_event_meta(task: WorkerTaskCard) -> dict[str, Any]:
+    context = dict(task.context or {})
+    assignment_id = str(context.get("assignment_id") or "").strip()
+    visible_session_key = str(context.get("visible_session_key") or "").strip()
+    if assignment_id and not visible_session_key:
+        visible_session_key = f"assignment:{assignment_id}"
+
+    payload: dict[str, Any] = {}
+    if assignment_id:
+        payload["assignment_id"] = assignment_id
+    if visible_session_key:
+        payload["visible_session_key"] = visible_session_key
+    return payload
+
+
 def build_worker_skill_result(
     *,
     task: WorkerTaskCard,
@@ -168,6 +183,7 @@ def _has_grounding(anchor: dict[str, Any]) -> bool:
 __all__ = [
     "WorkerSkillCallable",
     "WorkerSkillExecutor",
+    "build_task_event_meta",
     "build_worker_skill_result",
     "extract_anchors_from_issue_results",
 ]

@@ -1,21 +1,44 @@
-# React + Vite
+# CAD Review Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## 本地开发
+- 启动开发环境：
 
-Currently, two official plugins are available:
+```bash
+npm install
+npm run dev
+```
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- 常用命令：
+  - `npm run build`
+  - `npm run test`
+  - `npm run lint`
 
-## React Compiler
+## 运行态展示约定
+- 截至 2026-03-12，前端默认面向 `chief_review` 主路径，不再围绕 legacy 阶段式流水线组织文案。
+- 审图进度弹窗现在固定展示 4 段：
+  - 主审派单
+  - 副审执行
+  - 终审复核
+  - 汇总整理
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- `assignment_final_review` 验收路径下，前端需要满足：
+  - 1 张 assignment 只显示 1 张可见副审卡
+  - 底层 skill / runner 事件只能作为卡内动作流，不能重新膨胀成新卡
+  - `final_review` 和 `organizer` 必须有独立状态区，不再混在“主审汇总”里
 
-## Expanding the ESLint configuration
+## 验收相关测试
+- 运行态视图相关测试：
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+./node_modules/.bin/vitest run \
+  src/pages/ProjectDetail/components/__tests__/useAuditProgressViewModel.test.ts \
+  src/pages/ProjectDetail/components/__tests__/AuditProgressDialog.test.tsx \
+  src/pages/ProjectDetail/components/__tests__/ProjectDetail.auditState.test.ts \
+  --environment jsdom
+```
 
-## Chief Review 状态
-- 截至 2026-03-12，`chief_review` 已是默认主路径，前端当前聚焦的是主审/副审运行态展示，不单独承载 `shadow_compare` 报表页。
-- `shadow_compare` 的业务级 cutover gate 以 `cad-review-backend/README.md` 中定义的 overlap / diff / duration 指标为准。
-- 前端运行态文案已按主审 / 副审 / Skill 体系组织，不再把 legacy stage 语言作为主展示模型。
+- 如果后端已经切到 `assignment_final_review`，前端验收时重点看：
+  - 副审卡数不超过 assignment 数
+  - 有独立“终审复核”卡
+  - 有独立“汇总整理”卡
+  - 汇总区文案反映 Markdown-first 输出，而不是旧的直接 findings 合成

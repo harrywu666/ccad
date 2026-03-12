@@ -23,6 +23,7 @@ def assemble_agent_runtime_prompt(
     task_context: dict[str, Any] | None = None,
     memory_override: str | None = None,
     extra_sections: list[str] | None = None,
+    extra_meta: dict[str, Any] | None = None,
     prompt_source: str = "agent_runtime",
     user_prompt_override: str | None = None,
 ) -> RuntimePromptBundle:
@@ -43,6 +44,7 @@ def assemble_agent_runtime_prompt(
             "agent_id": agent_id,
             "compatibility_only": False,
             "runtime_scope": "agent_runtime",
+            **dict(extra_meta or {}),
         },
     )
 
@@ -54,6 +56,7 @@ def assemble_worker_runtime_prompt(
     agent_id: str = "review_worker",
     memory_override: str | None = None,
     extra_sections: list[str] | None = None,
+    extra_meta: dict[str, Any] | None = None,
     user_prompt_override: str | None = None,
 ) -> RuntimePromptBundle:
     skill_bundle = load_worker_skill(worker_kind)
@@ -62,6 +65,7 @@ def assemble_worker_runtime_prompt(
         task_context=task_context,
         memory_override=memory_override,
         extra_sections=[skill_bundle.skill_markdown, *(extra_sections or [])],
+        extra_meta=extra_meta,
         prompt_source="agent_skill",
         user_prompt_override=user_prompt_override,
     )
