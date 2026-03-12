@@ -285,3 +285,48 @@ def test_stop_audit_force_cleans_current_version_records_and_artifacts(monkeypat
     assert not (reports_dir / "report_v4_marked.pdf").exists()
     assert not (reports_dir / "report_v4_anchors.json").exists()
     assert not annotated_dir.exists()
+
+
+def test_stop_audit_schedules_background_cleanup_when_worker_not_stopped(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    audit_router = importlib.import_module("routers.audit")
+    runtime_service = importlib.import_module("services.audit_runtime_service")
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-stop-async", name="Stop Async Project", status="auditing"))
+        db.add(models.AuditRun(project_id="proj-stop-async", audit_version=8, status="running"))
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setattr(runtime_service, "wait_for_project_stop", lambda project_id, timeout_seconds=20.0: False)
+
+    scheduled: list[tuple[str, int]] = []
+
+    def _fake_schedule(project_id: str, audit_version: int) -> bool:
+        scheduled.append((project_id, audit_version))
+        return True
+
+    monkeypatch.setattr(audit_router, "_schedule_stopped_audit_version_cleanup", _fake_schedule)
+
+    with TestClient(app) as client:
+        response = client.post("/api/projects/proj-stop-async/audit/stop")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["audit_version"] == 8
+    assert payload["stopped"] is False
+    assert payload["cleanup_scheduled"] is True
+    assert scheduled == [("proj-stop-async", 8)]
+
+    db = session_local()
+    try:
+        run = db.query(models.AuditRun).filter(models.AuditRun.project_id == "proj-stop-async").first()
+        assert run is not None
+        assert run.status == "stopping"
+        assert run.current_step == "正在中断（用户请求）"
+        assert run.error == "用户手动停止"
+    finally:
+        db.close()

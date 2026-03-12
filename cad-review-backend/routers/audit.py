@@ -5,7 +5,9 @@
 
 from typing import Any, Dict, List, Literal, Optional
 from datetime import datetime
+import logging
 import os
+import threading
 import time
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -31,6 +33,9 @@ from services.audit_runtime.result_view import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+_STOP_CLEANUP_LOCK = threading.Lock()
+_STOP_CLEANUP_JOBS: set[tuple[str, int]] = set()
 
 AuditFeedbackStatus = Literal["none", "incorrect"]
 
@@ -1236,15 +1241,13 @@ def stop_audit(project_id: str, db: Session = Depends(get_db)):
 
     from services.audit_runtime.cancel_registry import request_cancel
     from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
-    from services.audit_runtime_service import _clear_running, wait_for_project_stop
-    from services.cache_service import (
-        recalculate_project_status,
-        increment_cache_version,
-    )
 
     audit_version = running_run.audit_version
     request_cancel(project_id)
+    running_run.status = "stopping"
     running_run.current_step = "正在中断（用户请求）"
+    running_run.error = "用户手动停止"
+    running_run.updated_at = datetime.now()
     db.commit()
 
     runner = ProjectAuditAgentRunner.get_existing(
@@ -1255,33 +1258,154 @@ def stop_audit(project_id: str, db: Session = Depends(get_db)):
         try:
             runner.cancel_active_turns()
         except Exception:
-            pass
+            logger.exception("停止审核时取消活跃 Runner 调用失败: project=%s version=%s", project_id, audit_version)
 
-    stopped = wait_for_project_stop(project_id, timeout_seconds=20.0)
-    if not stopped:
-        _clear_running(project_id)
+    sync_result = _finalize_stopped_audit_version_cleanup(
+        project_id,
+        audit_version,
+        wait_timeout_seconds=0.5,
+    )
+    if sync_result is not None:
+        return sync_result
 
-    db.expire_all()
-
-    deleted = _delete_audit_version_records(project_id, audit_version, db)
-    cache_files_deleted = _clear_audit_version_cache(project, audit_version, db)
-    report_files_deleted = _clear_audit_version_report_files(project, audit_version)
-    recalculate_project_status(project_id, db)
-    db.commit()
-    increment_cache_version(project_id, db)
-    ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
-
+    _schedule_stopped_audit_version_cleanup(project_id, audit_version)
     return {
         "success": True,
-        "message": "当前审核已终止并清理完成" if stopped else "当前审核已强制清理，后台任务会继续收尾",
+        "message": "停止请求已受理，后台会在安全点完成清理",
         "audit_version": audit_version,
-        "stopped": stopped,
+        "stopped": False,
+        "cleanup_scheduled": True,
+        "deleted": {
+            "results": 0,
+            "runs": 0,
+            "tasks": 0,
+            "events": 0,
+            "feedback_samples": 0,
+            "issue_drawings": 0,
+            "annotations": 0,
+        },
+        "artifacts": {
+            "cache_files": 0,
+            "report_files": 0,
+        },
+    }
+
+
+def _finalize_stopped_audit_version_cleanup(
+    project_id: str,
+    audit_version: int,
+    *,
+    wait_timeout_seconds: float,
+) -> Optional[Dict[str, object]]:
+    from services.audit_runtime.cancel_registry import clear_cancel_request
+    from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+    from services.audit_runtime_service import _clear_running, wait_for_project_stop
+    from services.cache_service import (
+        recalculate_project_status,
+        increment_cache_version,
+    )
+
+    stopped = wait_for_project_stop(project_id, timeout_seconds=wait_timeout_seconds)
+    if not stopped:
+        return None
+
+    db = SessionLocal()
+    try:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if project is None:
+            _clear_running(project_id)
+            clear_cancel_request(project_id)
+            ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
+            return {
+                "success": True,
+                "message": "审核已停止，但项目已不存在",
+                "audit_version": audit_version,
+                "stopped": True,
+                "deleted": {
+                    "results": 0,
+                    "runs": 0,
+                    "tasks": 0,
+                    "events": 0,
+                    "feedback_samples": 0,
+                    "issue_drawings": 0,
+                    "annotations": 0,
+                },
+                "artifacts": {
+                    "cache_files": 0,
+                    "report_files": 0,
+                },
+            }
+
+        deleted = _delete_audit_version_records(project_id, audit_version, db)
+        cache_files_deleted = _clear_audit_version_cache(project, audit_version, db)
+        report_files_deleted = _clear_audit_version_report_files(project, audit_version)
+        recalculate_project_status(project_id, db)
+        db.commit()
+        increment_cache_version(project_id, db)
+    finally:
+        db.close()
+
+    _clear_running(project_id)
+    clear_cancel_request(project_id)
+    ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
+    return {
+        "success": True,
+        "message": "当前审核已终止并清理完成",
+        "audit_version": audit_version,
+        "stopped": True,
         "deleted": deleted,
         "artifacts": {
             "cache_files": cache_files_deleted,
             "report_files": report_files_deleted,
         },
     }
+
+
+def _run_stopped_audit_version_cleanup(project_id: str, audit_version: int) -> None:
+    try:
+        result = _finalize_stopped_audit_version_cleanup(
+            project_id,
+            audit_version,
+            wait_timeout_seconds=20.0,
+        )
+        if result is None:
+            from services.audit_runtime.cancel_registry import clear_cancel_request
+            from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
+            from services.audit_runtime_service import _clear_running
+
+            logger.warning(
+                "停止审核后台收尾超时，强制清理运行态: project=%s version=%s",
+                project_id,
+                audit_version,
+            )
+            _clear_running(project_id)
+            clear_cancel_request(project_id)
+            ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
+    except Exception:
+        logger.exception(
+            "停止审核后台收尾失败: project=%s version=%s",
+            project_id,
+            audit_version,
+        )
+    finally:
+        with _STOP_CLEANUP_LOCK:
+            _STOP_CLEANUP_JOBS.discard((project_id, int(audit_version)))
+
+
+def _schedule_stopped_audit_version_cleanup(project_id: str, audit_version: int) -> bool:
+    key = (project_id, int(audit_version))
+    with _STOP_CLEANUP_LOCK:
+        if key in _STOP_CLEANUP_JOBS:
+            return False
+        _STOP_CLEANUP_JOBS.add(key)
+
+    worker = threading.Thread(
+        target=_run_stopped_audit_version_cleanup,
+        args=(project_id, int(audit_version)),
+        daemon=True,
+    )
+    worker.start()
+    return True
 
 
 def _clear_audit_version_cache(project, version: int, db) -> int:
