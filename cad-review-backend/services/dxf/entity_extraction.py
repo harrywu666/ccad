@@ -30,18 +30,17 @@ logger = logging.getLogger(__name__)
 _DIMENSION_QUERIES = ("DIMENSION", "ARC_DIMENSION")
 
 
-def _resolve_dimension_values(display_text: str, actual_value: float) -> Tuple[float, str]:
-    raw_text = str(display_text or "")
-    if raw_text in {"", "<>"}:
-        normalized_actual = round(_safe_float(actual_value), 3)
-        return _safe_float(actual_value), str(normalized_actual).rstrip("0").rstrip(".")
-
+def _resolve_dimension_values(display_text: str, actual_value: float) -> Tuple[float, str, str]:
+    raw_text = str(display_text or "").strip()
     parsed_display_value = _parse_numeric_text(raw_text)
-    if parsed_display_value is not None:
-        return parsed_display_value, raw_text
+    if raw_text and raw_text != "<>" and parsed_display_value is not None:
+        return parsed_display_value, raw_text, "display_text"
 
-    normalized_actual = round(_safe_float(actual_value), 3)
-    return _safe_float(actual_value), str(normalized_actual).rstrip("0").rstrip(".")
+    normalized_display_value = round(_safe_float(actual_value), 3)
+    normalized_display_text = str(normalized_display_value).rstrip("0").rstrip(".")
+    if raw_text and raw_text != "<>":
+        return normalized_display_value, raw_text, "display_text_non_numeric_fallback"
+    return normalized_display_value, normalized_display_text, "display_generated"
 
 
 def _z_bounds(*points: Any) -> tuple[float, float, bool]:
@@ -260,16 +259,16 @@ def _extract_dimensions(
         ):
             return None
 
-        actual_value = getattr(dim.dxf, "actual_measurement", None)
-        if actual_value is None:
+        measurement_for_fallback = getattr(dim.dxf, "actual_measurement", None)
+        if measurement_for_fallback is None:
             try:
-                actual_value = dim.get_measurement()
+                measurement_for_fallback = dim.get_measurement()
             except Exception:  # noqa: BLE001
-                actual_value = 0.0
+                measurement_for_fallback = 0.0
 
-        value, display_text = _resolve_dimension_values(
+        value, display_text, value_source = _resolve_dimension_values(
             getattr(dim.dxf, "text", ""),
-            _safe_float(actual_value),
+            _safe_float(measurement_for_fallback),
         )
         z_min, z_max, z_ambiguous = _z_bounds(raw_defpoint, raw_defpoint2, raw_text_mid)
         elevation_band, z_band_ambiguous = _classify_elevation_band(z_min, z_max, layer_name=layer)
@@ -277,8 +276,10 @@ def _extract_dimensions(
         return {
             "id": handle,
             "value": round(_safe_float(value), 6),
-            "actual_value": round(_safe_float(actual_value), 6),
             "display_text": display_text,
+            "value_source": value_source,
+            "truth_role": "display_value_authoritative",
+            "unit": "mm",
             "layer": layer,
             "source": source,
             "defpoint": defpoint,
@@ -347,16 +348,16 @@ def _collect_nested_dimensions(
             if not _point_in_any_range(text_pos, model_ranges, fallback_range=model_range, padding=200.0):
                 continue
 
-            actual_value = getattr(entity.dxf, "actual_measurement", None)
-            if actual_value is None:
+            measurement_for_fallback = getattr(entity.dxf, "actual_measurement", None)
+            if measurement_for_fallback is None:
                 try:
-                    actual_value = entity.get_measurement()
+                    measurement_for_fallback = entity.get_measurement()
                 except Exception:  # noqa: BLE001
-                    actual_value = 0.0
+                    measurement_for_fallback = 0.0
 
-            value, display_text = _resolve_dimension_values(
+            value, display_text, value_source = _resolve_dimension_values(
                 getattr(entity.dxf, "text", ""),
-                _safe_float(actual_value),
+                _safe_float(measurement_for_fallback),
             )
             raw_defpoint = getattr(entity.dxf, "defpoint", None)
             raw_defpoint2 = getattr(entity.dxf, "defpoint2", None)
@@ -367,8 +368,10 @@ def _collect_nested_dimensions(
             items.append({
                 "id": handle,
                 "value": round(_safe_float(value), 6),
-                "actual_value": round(_safe_float(actual_value), 6),
                 "display_text": display_text,
+                "value_source": value_source,
+                "truth_role": "display_value_authoritative",
+                "unit": "mm",
                 "layer": elayer,
                 "source": source,
                 "defpoint": _point_xy(raw_defpoint),

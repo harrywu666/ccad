@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-import fitz
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -66,30 +65,27 @@ def _create_dummy_png(tmp_path: Path, name: str = "dummy.png") -> str:
     return str(path)
 
 
-def _create_pdf_with_index_title(tmp_path: Path, name: str = "dummy.pdf") -> str:
-    path = tmp_path / name
-    doc = fitz.open()
-    page = doc.new_page(width=1000, height=800)
-    page.insert_text((760, 430), "3", fontsize=12)
-    page.insert_text((780, 430), "MW.01 -5", fontsize=12)
-    page.insert_text((755, 448), "A6.02a", fontsize=10)
-    page.insert_text((850, 448), "Scale 1:2", fontsize=10)
-    doc.save(path)
-    doc.close()
-    return str(path)
-
-
-def _seed_source_drawing(session_local, models, *, drawing_id: str, data_version: int, png_path: str) -> None:
+def _seed_source_drawing(
+    session_local,
+    models,
+    *,
+    drawing_id: str,
+    data_version: int,
+    png_path: str,
+    sheet_no: str = "A6.00",
+    sheet_name: str = "酒柜详图",
+    page_index: int = 0,
+) -> None:
     db = session_local()
     try:
         db.add(
             models.Drawing(
                 id=drawing_id,
                 project_id="proj-preview",
-                sheet_no="A6.00",
-                sheet_name="酒柜详图",
+                sheet_no=sheet_no,
+                sheet_name=sheet_name,
                 png_path=png_path,
-                page_index=0,
+                page_index=page_index,
                 data_version=data_version,
                 status="matched",
             )
@@ -197,6 +193,81 @@ def test_issue_preview_returns_source_drawing_anchor_when_target_drawing_missing
     assert payload["source"]["anchor_status"] == "layout_fallback"
     assert payload["target"] is None
     assert payload["missing_reason"] == "missing_target_drawing"
+
+
+def test_issue_preview_supports_layout_point_only_anchor(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    _seed_project(session_local, models)
+    _seed_source_drawing(
+        session_local,
+        models,
+        drawing_id="drawing-a700-v1",
+        data_version=1,
+        png_path=_create_dummy_png(tmp_path, "source-a700-v1.png"),
+        sheet_no="A7.00",
+        sheet_name="样板房平面",
+        page_index=0,
+    )
+
+    db = session_local()
+    try:
+        db.add(
+            models.AuditResult(
+                id="issue-preview-layout-point-only",
+                project_id="proj-preview",
+                audit_version=3,
+                type="dimension",
+                severity="warning",
+                sheet_no_a="A7.00",
+                sheet_no_b=None,
+                location="A7.00 / 样板房平面",
+                description="该问题只有布局坐标，没有全图百分比。",
+                evidence_json=json.dumps(
+                    {
+                        "anchors": [
+                            {
+                                "role": "source",
+                                "sheet_no": "A7.00",
+                                "layout_point": {"x": 420.5, "y": 297.0},
+                                "origin": "review_kernel",
+                                "confidence": 0.88,
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        db.add(
+            models.DrawingLayoutRegistration(
+                id="reg-a700-v1",
+                project_id="proj-preview",
+                drawing_id="drawing-a700-v1",
+                drawing_data_version=1,
+                sheet_no="A7.00",
+                layout_name="A7.00 样板房平面",
+                pdf_page_index=0,
+                layout_page_range_json=json.dumps({"min": [0.0, 0.0], "max": [841.0, 594.0]}, ensure_ascii=False),
+                pdf_page_size_json=json.dumps({"width": 1000, "height": 800}, ensure_ascii=False),
+                transform_json=json.dumps({"type": "direct_layout_page"}, ensure_ascii=False),
+                registration_method="layout_page_direct",
+                registration_confidence=1.0,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.get("/api/projects/proj-preview/audit/results/issue-preview-layout-point-only/preview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"]["drawing_id"] == "drawing-a700-v1"
+    assert payload["source"]["layout_anchor"]["layout_point"] == {"x": 420.5, "y": 297.0}
+    assert payload["source"]["pdf_anchor"]["global_pct"] == {"x": 50.0, "y": 50.0}
+    assert payload["source"]["anchor"]["global_pct"] == {"x": 50.0, "y": 50.0}
+    assert payload["source"]["anchor_status"] == "pdf_ready"
 
 
 def test_issue_preview_allows_target_drawing_without_anchor(monkeypatch, tmp_path):
@@ -797,11 +868,10 @@ def test_issue_preview_downgrades_pdf_anchor_when_local_image_region_is_blank(mo
     assert payload["source"]["pdf_anchor"]["confidence"] == 0.35
 
 
-def test_issue_preview_uses_pdf_text_fallback_when_dwg_anchor_mismatches(monkeypatch, tmp_path):
+def test_issue_preview_keeps_visual_mismatch_without_pdf_text_fallback(monkeypatch, tmp_path):
     app, session_local, models = _load_test_app(monkeypatch, tmp_path)
     _seed_project(session_local, models)
     png_path = _create_dummy_png(tmp_path, "source-a602a-v1.png")
-    _create_pdf_with_index_title(tmp_path, "source-a602a-v1.pdf")
     _seed_source_drawing(
         session_local,
         models,
@@ -893,10 +963,9 @@ def test_issue_preview_uses_pdf_text_fallback_when_dwg_anchor_mismatches(monkeyp
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["source"]["anchor_status"] == "pdf_text_fallback"
-    assert payload["source"]["pdf_anchor"]["origin"] == "pdf_text"
-    assert payload["source"]["pdf_anchor"]["confidence"] == 0.82
-    assert payload["source"]["pdf_anchor"]["global_pct"] == {"x": 79.4, "y": 54.3}
+    assert payload["source"]["anchor_status"] == "pdf_visual_mismatch"
+    assert payload["source"]["pdf_anchor"]["origin"] != "pdf_text"
+    assert payload["source"]["pdf_anchor"]["confidence"] == 0.35
 
 
 def test_issue_preview_refreshes_stale_corner_anchor_from_json(monkeypatch, tmp_path):

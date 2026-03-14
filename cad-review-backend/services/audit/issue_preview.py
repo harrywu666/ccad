@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from domain.sheet_normalization import normalize_index_no
@@ -33,194 +32,49 @@ def _parse_json(text: Optional[str]) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _normalize_search_text(value: Optional[str]) -> str:
-    return re.sub(r"\s+", "", str(value or "")).upper()
-
-
-def _bbox_center_from_tuple(bbox: tuple[float, float, float, float]) -> tuple[float, float]:
-    x0, y0, x1, y1 = bbox
-    return ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
-
-
-def _union_bboxes(boxes: List[tuple[float, float, float, float]]) -> tuple[float, float, float, float]:
-    return (
-        min(box[0] for box in boxes),
-        min(box[1] for box in boxes),
-        max(box[2] for box in boxes),
-        max(box[3] for box in boxes),
-    )
-
-
-def _build_cloud_highlight_region_from_pct_bbox(
-    *,
-    x0_pct: float,
-    y0_pct: float,
-    x1_pct: float,
-    y1_pct: float,
-    origin: str,
-) -> Dict[str, Any]:
-    x_min = min(x0_pct, x1_pct)
-    y_min = min(y0_pct, y1_pct)
-    raw_width = abs(x1_pct - x0_pct)
-    raw_height = abs(y1_pct - y0_pct)
-    base = max(raw_width, raw_height, 3.0)
-    side = base * 1.35
-    center_x = x_min + raw_width / 2.0
-    center_y = y_min + raw_height / 2.0
-    return {
-        "shape": "cloud_rect",
-        "bbox_pct": {
-            "x": round(max(0.0, center_x - side / 2.0), 1),
-            "y": round(max(0.0, center_y - side / 2.0), 1),
-            "width": round(min(100.0, side), 1),
-            "height": round(min(100.0, side), 1),
-        },
-        "origin": origin,
-    }
-
-
-def _find_pdf_in_png_dir(png_path: Optional[str]) -> Optional[Path]:
-    if not png_path:
-        return None
-    folder = Path(png_path).expanduser().resolve().parent
-    if not folder.exists():
-        return None
-    for candidate in sorted(folder.glob("*.pdf")):
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _resolve_pdf_text_fallback_anchor(
-    *,
-    drawing: Drawing,
-    sheet_no: Optional[str],
-    index_no: Optional[str],
-) -> Optional[Dict[str, Any]]:
-    if not drawing.png_path or drawing.page_index is None or not sheet_no or not index_no:
-        return None
-
-    pdf_path = _find_pdf_in_png_dir(drawing.png_path)
-    if pdf_path is None:
-        return None
-
-    try:
-        import fitz
-
-        doc = fitz.open(pdf_path)
-        try:
-            page = doc.load_page(int(drawing.page_index))
-            page_width = float(page.rect.width)
-            page_height = float(page.rect.height)
-            if page_width <= 0 or page_height <= 0:
-                return None
-
-            sheet_norm = _normalize_search_text(sheet_no)
-            index_norm = _normalize_search_text(index_no)
-            candidates: List[tuple[float, Dict[str, Any]]] = []
-
-            all_lines: List[Dict[str, Any]] = []
-            text_dict = page.get_text("dict")
-            for block in text_dict.get("blocks", []):
-                if int(block.get("type", 0)) != 0:
-                    continue
-                for line in block.get("lines", []):
-                    spans = line.get("spans", [])
-                    text = "".join(str(span.get("text") or "") for span in spans).strip()
-                    if not text:
-                        continue
-                    bbox = tuple(float(v) for v in line.get("bbox", (0, 0, 0, 0)))
-                    all_lines.append(
-                        {
-                            "text": text,
-                            "normalized": _normalize_search_text(text),
-                            "bbox": bbox,
-                        }
-                    )
-
-            index_lines = [line for line in all_lines if line["normalized"] == index_norm]
-            sheet_lines = [line for line in all_lines if line["normalized"] == sheet_norm]
-            title_lines = [
-                line
-                for line in all_lines
-                if line not in index_lines
-                and line not in sheet_lines
-                and "SCALE" not in line["normalized"]
-            ]
-
-            for index_line in index_lines:
-                index_center = _bbox_center_from_tuple(index_line["bbox"])
-                for sheet_line in sheet_lines:
-                    sheet_center = _bbox_center_from_tuple(sheet_line["bbox"])
-                    if abs(index_center[0] - sheet_center[0]) > 120.0:
-                        continue
-                    if abs(index_center[1] - sheet_center[1]) > 60.0:
-                        continue
-
-                    related_boxes = [index_line["bbox"], sheet_line["bbox"]]
-                    related_texts = [index_line["text"], sheet_line["text"]]
-                    nearest_title = None
-                    nearest_title_distance = 1e9
-                    for title_line in title_lines:
-                        title_center = _bbox_center_from_tuple(title_line["bbox"])
-                        if abs(title_center[1] - index_center[1]) > 40.0:
-                            continue
-                        distance = abs(title_center[0] - index_center[0])
-                        if distance < nearest_title_distance:
-                            nearest_title_distance = distance
-                            nearest_title = title_line
-                    if nearest_title is not None and nearest_title_distance <= 180.0:
-                        related_boxes.append(nearest_title["bbox"])
-                        related_texts.append(nearest_title["text"])
-
-                    union_bbox = _union_bboxes(related_boxes)
-                    center_x, center_y = _bbox_center_from_tuple(union_bbox)
-                    anchor = build_anchor(
-                        role="source",
-                        sheet_no=sheet_no,
-                        grid="",
-                        global_pct={
-                            "x": round(center_x / page_width * 100.0, 1),
-                            "y": round(center_y / page_height * 100.0, 1),
-                        },
-                        confidence=0.82,
-                        origin="pdf_text",
-                    )
-                    if not isinstance(anchor, dict):
-                        continue
-                    anchor["pdf_text_bbox"] = {
-                        "x0": round(union_bbox[0], 2),
-                        "y0": round(union_bbox[1], 2),
-                        "x1": round(union_bbox[2], 2),
-                        "y1": round(union_bbox[3], 2),
-                    }
-                    anchor["pdf_text_lines"] = related_texts
-                    anchor["highlight_region"] = _build_cloud_highlight_region_from_pct_bbox(
-                        x0_pct=union_bbox[0] / page_width * 100.0,
-                        y0_pct=union_bbox[1] / page_height * 100.0,
-                        x1_pct=union_bbox[2] / page_width * 100.0,
-                        y1_pct=union_bbox[3] / page_height * 100.0,
-                        origin="pdf_text_bbox",
-                    )
-                    candidates.append((union_bbox[1], anchor))
-
-            if not candidates:
-                return None
-
-            candidates.sort(key=lambda item: item[0])
-            return candidates[-1][1]
-        finally:
-            doc.close()
-    except Exception:
-        return None
-
-
 def extract_issue_index_no(result: AuditResult) -> Optional[str]:
     location = (result.location or "").strip()
     if not location:
         return None
     match = INDEX_RE.search(location)
     return match.group(1).strip() if match else None
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_layout_point(value: Any) -> Optional[Dict[str, float]]:
+    if isinstance(value, dict):
+        x = _safe_float(value.get("x"))
+        y = _safe_float(value.get("y"))
+    elif isinstance(value, (list, tuple)) and len(value) >= 2:
+        x = _safe_float(value[0])
+        y = _safe_float(value[1])
+    else:
+        return None
+    if x is None or y is None:
+        return None
+    return {"x": round(x, 3), "y": round(y, 3)}
+
+
+def _normalize_layout_bbox(value: Any) -> Optional[List[float]]:
+    if not isinstance(value, (list, tuple)) or len(value) < 4:
+        return None
+    x1 = _safe_float(value[0])
+    y1 = _safe_float(value[1])
+    x2 = _safe_float(value[2])
+    y2 = _safe_float(value[3])
+    if x1 is None or y1 is None or x2 is None or y2 is None:
+        return None
+    left, right = sorted((x1, x2))
+    bottom, top = sorted((y1, y2))
+    if right <= left or top <= bottom:
+        return None
+    return [round(left, 3), round(bottom, 3), round(right, 3), round(top, 3)]
 
 
 def parse_issue_anchors(result: AuditResult) -> List[Dict[str, Any]]:
@@ -232,21 +86,59 @@ def parse_issue_anchors(result: AuditResult) -> List[Dict[str, Any]]:
     for anchor in anchors:
         if not isinstance(anchor, dict):
             continue
+        role = str(anchor.get("role") or "single").strip() or "single"
+        sheet_no = str(anchor.get("sheet_no") or "").strip() or None
+        if not sheet_no:
+            continue
+        layout_point = _normalize_layout_point(anchor.get("layout_point"))
+        layout_bbox = _normalize_layout_bbox(anchor.get("layout_bbox"))
+        extra_meta = {
+            key: value
+            for key, value in anchor.items()
+            if key
+            not in {
+                "role",
+                "sheet_no",
+                "grid",
+                "global_pct",
+                "confidence",
+                "origin",
+                "highlight_region",
+                "layout_point",
+                "layout_bbox",
+            }
+            and value is not None
+        }
+        if layout_point is not None:
+            extra_meta["layout_point"] = layout_point
+        if layout_bbox is not None:
+            extra_meta["layout_bbox"] = layout_bbox
         normalized = build_anchor(
-            role=str(anchor.get("role") or "single").strip() or "single",
-            sheet_no=str(anchor.get("sheet_no") or "").strip() or None,
+            role=role,
+            sheet_no=sheet_no,
             grid=str(anchor.get("grid") or "").strip() or None,
             global_pct=anchor.get("global_pct") if isinstance(anchor.get("global_pct"), dict) else None,
             confidence=anchor.get("confidence"),
             origin=str(anchor.get("origin") or "stored").strip() or "stored",
             highlight_region=anchor.get("highlight_region") if isinstance(anchor.get("highlight_region"), dict) else None,
-            meta={
-                key: value
-                for key, value in anchor.items()
-                if key
-                not in {"role", "sheet_no", "grid", "global_pct", "confidence", "origin", "highlight_region"}
-            },
+            meta=extra_meta,
         )
+        if normalized is None and layout_point is not None:
+            normalized = {
+                "role": role,
+                "sheet_no": sheet_no,
+                "grid": str(anchor.get("grid") or "").strip(),
+                "origin": str(anchor.get("origin") or "stored").strip() or "stored",
+                "layout_point": layout_point,
+            }
+            confidence = _safe_float(anchor.get("confidence"))
+            if confidence is not None:
+                normalized["confidence"] = round(max(0.0, min(1.0, confidence)), 3)
+            if isinstance(anchor.get("highlight_region"), dict):
+                normalized["highlight_region"] = anchor.get("highlight_region")
+            for key, value in extra_meta.items():
+                if key not in normalized and value is not None:
+                    normalized[key] = value
         if not normalized:
             continue
         result_anchors.append(normalized)
@@ -660,15 +552,6 @@ def get_issue_preview(result: AuditResult, db) -> Dict[str, Any]:
             pdf_anchor=source_pdf_anchor,
             registration=source_registration,
         )
-        if source_anchor_status == "pdf_visual_mismatch" and result.type == "index":
-            fallback_anchor = _resolve_pdf_text_fallback_anchor(
-                drawing=source_drawing,
-                sheet_no=source.sheet_no or result.sheet_no_a,
-                index_no=source.index_no or extract_issue_index_no(result),
-            )
-            if fallback_anchor:
-                source_pdf_anchor = fallback_anchor
-                source_anchor_status = "pdf_text_fallback"
         source_payload = {
             "drawing_id": source_drawing.id,
             "drawing_data_version": source.drawing_data_version,

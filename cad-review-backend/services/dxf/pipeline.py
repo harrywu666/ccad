@@ -300,6 +300,8 @@ def extract_layout(doc, layout_name: str, dwg_filename: str) -> Optional[Dict[st
     )
 
     payload: Dict[str, Any] = {
+        "schema_name": "dwg_layout_semantic_payload",
+        "schema_version": "1.2.0",
         "source_dwg": dwg_filename,
         "layout_name": layout_name,
         "sheet_no": sheet_no,

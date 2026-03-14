@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import os
 import re
 from typing import Any, Awaitable, Callable
 
-from services.ai_service import call_kimi
+from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_exponential
 from services.review_kernel.llm_boundary import (
     LLM_STAGE_DISAMBIGUATION,
     LLM_STAGE_REPORT_WRITING,
@@ -17,11 +18,16 @@ from services.review_kernel.llm_boundary import (
     check_llm_boundary,
     confidence_upper_bound_from_slice,
 )
+from services.review_kernel.model_gateway import InferenceRequest, ModelGateway, build_model_gateway
+from services.review_kernel.policy import ProjectPolicy, load_project_policy
 from services.review_kernel.prompt_assets import load_review_kernel_prompt_bundle
+from services.runtime_env import ensure_local_env_loaded
 
 LlmCall = Callable[[str, str, int], dict[str, Any] | list[dict[str, Any]]]
 _CLOSE_SCORE_GAP_THRESHOLD = 0.2
 _HIGH_CONFIDENCE_LOCK_THRESHOLD = 0.8
+_GATEWAY_CACHE: dict[str, ModelGateway] = {}
+logger = logging.getLogger(__name__)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -32,6 +38,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _stage_enabled(stage: str) -> bool:
+    ensure_local_env_loaded()
     if not _env_bool("REVIEW_KERNEL_LLM_ENABLED", False):
         return False
     env_name = {
@@ -42,6 +49,52 @@ def _stage_enabled(stage: str) -> bool:
     if not env_name:
         return False
     return _env_bool(env_name, True)
+
+
+def _load_policy() -> ProjectPolicy:
+    return load_project_policy()
+
+
+def _retryable_exception(exc: BaseException) -> bool:
+    text = str(exc or "").strip().lower()
+    if any(token in text for token in ("429", "rate limit", "timeout", "temporarily", "unavailable")):
+        return True
+    return isinstance(exc, (TimeoutError, ConnectionError))
+
+
+def _gateway_for_policy(policy: ProjectPolicy) -> ModelGateway:
+    key = str(policy.llm_provider or "").strip().lower()
+    cached = _GATEWAY_CACHE.get(key)
+    if cached is not None:
+        return cached
+    gateway = build_model_gateway(policy)
+    _GATEWAY_CACHE[key] = gateway
+    return gateway
+
+
+async def call_with_backoff(fn, policy: ProjectPolicy):  # noqa: ANN001
+    async for attempt in AsyncRetrying(
+        retry=retry_if_exception(_retryable_exception),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        stop=stop_after_attempt(max(1, int(policy.rate_limit_retry_max))),
+        reraise=True,
+    ):
+        with attempt:
+            return await fn()
+
+
+def get_llm_stage_switch_snapshot() -> dict[str, Any]:
+    ensure_local_env_loaded()
+    policy = _load_policy()
+    global_enabled = _env_bool("REVIEW_KERNEL_LLM_ENABLED", False)
+    return {
+        "global_enabled": global_enabled,
+        "provider": policy.llm_provider,
+        "policy": policy.to_snapshot(),
+        "weak_assist_enabled": bool(global_enabled and _stage_enabled(LLM_STAGE_WEAK_ASSIST)),
+        "disambiguation_enabled": bool(global_enabled and _stage_enabled(LLM_STAGE_DISAMBIGUATION)),
+        "report_writing_enabled": bool(global_enabled and _stage_enabled(LLM_STAGE_REPORT_WRITING)),
+    }
 
 
 def _run_async(coro: Awaitable[Any]) -> Any:
@@ -71,14 +124,26 @@ def _run_async(coro: Awaitable[Any]) -> Any:
 
 
 def _default_llm_call(system_prompt: str, user_prompt: str, max_tokens: int) -> Any:
-    return _run_async(
-        call_kimi(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=0.0,
-            max_tokens=max_tokens,
-        )
+    policy = _load_policy()
+    gateway = _gateway_for_policy(policy)
+    request = InferenceRequest(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.0,
+        max_tokens=max_tokens,
+        agent_type="review_kernel",
+        images=[],
     )
+
+    async def _invoke():
+        response = await gateway.multimodal_infer(request)
+        return response.content
+
+    try:
+        return _run_async(call_with_backoff(_invoke, policy))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("review_kernel 默认 LLM 调用失败: %s", exc)
+        raise
 
 
 def _call_llm_json(
@@ -140,6 +205,22 @@ def _has_evidence(issue: dict[str, Any]) -> bool:
         return True
     refs = issue.get("evidence_refs")
     return isinstance(refs, list) and bool(refs)
+
+
+def _coerce_response_list(response: Any, *, candidate_keys: tuple[str, ...]) -> list[Any] | None:
+    if isinstance(response, list):
+        return response
+    if not isinstance(response, dict):
+        return None
+
+    for key in candidate_keys:
+        value = response.get(key)
+        if isinstance(value, list):
+            return value
+    result = response.get("result")
+    if isinstance(result, list):
+        return result
+    return None
 
 
 def _build_page_classifier_system_prompt() -> str:
@@ -346,14 +427,18 @@ def disambiguate_reference_bindings(
     llm_used = False
     if decision.allowed and _stage_enabled(LLM_STAGE_DISAMBIGUATION) and ambiguous_relations:
         try:
-            response = _call_llm_json(
+            raw_response = _call_llm_json(
                 system_prompt=_build_semantic_augmentor_system_prompt(),
                 user_prompt=json.dumps({"relations": ambiguous_relations}, ensure_ascii=False),
                 max_tokens=1200,
                 llm_call=llm_call,
             )
-            llm_used = True
-            if isinstance(response, list):
+            response = _coerce_response_list(
+                raw_response,
+                candidate_keys=("relations", "disambiguations", "choices", "items"),
+            )
+            llm_used = response is not None
+            if response:
                 for item in response:
                     if not isinstance(item, dict):
                         continue
@@ -426,16 +511,17 @@ def polish_issue_writing(
     *,
     llm_call: LlmCall | None = None,
 ) -> dict[str, Any]:
+    policy = _load_policy()
     decision = check_llm_boundary(stage=LLM_STAGE_REPORT_WRITING, context_slice=context_slice)
     if not decision.allowed or not _stage_enabled(LLM_STAGE_REPORT_WRITING):
         return {"llm_used": False, "allowed": decision.allowed, "reason": decision.reason, "updated": 0}
 
     try:
-        response = _call_llm_json(
+        raw_response = _call_llm_json(
             system_prompt=_build_review_reporter_system_prompt(),
             user_prompt=json.dumps(
                 {
-                    "audience": "designer",
+                    "audience": policy.default_audience,
                     "issues": issues[:20],
                     "output_contract": [
                         {
@@ -452,6 +538,10 @@ def polish_issue_writing(
             ),
             max_tokens=1800,
             llm_call=llm_call,
+        )
+        response = _coerce_response_list(
+            raw_response,
+            candidate_keys=("issues", "results", "items", "rewrites"),
         )
         if not isinstance(response, list):
             return {"llm_used": False, "allowed": True, "reason": "invalid_response", "updated": 0}

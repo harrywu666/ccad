@@ -384,8 +384,9 @@ def test_extract_layout_fragments_prefer_dimension_display_override_value():
 
     extracted_dim = fragment["dimensions"][0]
     assert extracted_dim["value"] == 800.0
-    assert extracted_dim["actual_value"] == 1000.0
     assert extracted_dim["display_text"] == "800"
+    assert extracted_dim["value_source"] == "display_text"
+    assert "actual_value" not in extracted_dim
 
 
 def test_extract_layout_fragments_assign_layout_pseudo_texts_to_fragment():

@@ -23,6 +23,16 @@
 - `CCAD_DB_BASE_DIR`: 数据库根目录（默认 `~/cad-review`）
 - `CCAD_DB_PATH`: 数据库文件绝对路径（优先级高于 `CCAD_DB_BASE_DIR`）
 
+## Review Kernel 策略开关（新增）
+- `REVIEW_KERNEL_LLM_PROVIDER`: `openrouter` 或 `kimi_sdk`（审图内核只支持这两种）
+- `REVIEW_KERNEL_DIMENSION_TRUTH_POLICY`: 默认 `display_value_only`（尺寸判定只认标注显示值）
+- `REVIEW_KERNEL_XREF_CHECK_ENABLED`: 默认 `0`（XREF 检查默认关闭）
+- `REVIEW_KERNEL_LOW_CONFIDENCE_GATE_ENABLED`: 默认 `1`
+- `REVIEW_KERNEL_REPORT_SCOPE`: `spaces_with_candidate_issues_only` 或 `all_spaces`
+- `REVIEW_KERNEL_MAX_CONCURRENT_WORKERS`: 默认 `20`
+- `REVIEW_KERNEL_RATE_LIMIT_RETRY_MAX`: 默认 `5`
+- `REVIEW_KERNEL_DEFAULT_AUDIENCE`: `designer` / `client` / `supervisor`
+
 ## LLM 接口切换
 - `OpenRouter`：
   - `KIMI_PROVIDER=openrouter`
@@ -55,6 +65,7 @@
 
 ## Runtime（当前）
 - 当前默认且唯一生产链路：`review_kernel_v1`。
+- 审图内核 LLM 网关仅允许：`kimi_sdk`、`openrouter`。
 - 旧 `chief_review / review_worker / runtime_guardian` 资产与设置入口已下线，不再作为运行时来源。
 - 审图内核资产统一放在：`agents/review_kernel/*`。
 

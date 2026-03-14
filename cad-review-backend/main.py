@@ -3,15 +3,14 @@ FastAPI 主入口文件
 包含应用实例创建、CORS配置、路由注册和启动事件
 """
 
-import os
 import logging
 from importlib import import_module
-from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
 from services.feedback_review_queue_service import start_feedback_review_worker, stop_feedback_review_worker
+from services.runtime_env import ensure_local_env_loaded
 
 audit = import_module("routers.audit")
 catalog = import_module("routers.catalog")
@@ -32,24 +31,7 @@ logging.getLogger("ezdxf").setLevel(logging.ERROR)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
-def load_local_env():
-    """加载本地 .env（仅填充当前进程未设置的环境变量）"""
-    env_path = Path(__file__).resolve().parent / ".env"
-    if not env_path.exists():
-        return
-
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
-
-
-load_local_env()
+ensure_local_env_loaded()
 
 
 @asynccontextmanager

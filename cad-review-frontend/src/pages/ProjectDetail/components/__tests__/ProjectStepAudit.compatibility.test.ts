@@ -3,9 +3,8 @@ import { normalizeIssueType, parseLocationText } from '../project-detail/Project
 
 describe('ProjectStepAudit compatibility helpers', () => {
   it('normalizes review-kernel issue types to legacy buckets', () => {
-    expect(normalizeIssueType('dimension_conflict')).toBe('dimension');
-    expect(normalizeIssueType('reference_broken')).toBe('index');
     expect(normalizeIssueType('annotation_missing')).toBe('dimension');
+    expect(normalizeIssueType('reference_broken')).toBe('index');
     expect(normalizeIssueType('material')).toBe('material');
   });
 

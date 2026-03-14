@@ -680,6 +680,7 @@ def compile_layout_ir(
     dimension_evidence: list[dict[str, Any]] = []
     normalized_entities: list[dict[str, Any]] = []
     degradation_notices: list[dict[str, Any]] = []
+    skipped_non_numeric_dimensions = 0
 
     for item in raw_dimensions:
         if not isinstance(item, dict):
@@ -689,16 +690,13 @@ def compile_layout_ir(
             sheet_no,
             json.dumps(item, ensure_ascii=False, sort_keys=True),
         )
-        measured = _as_float(item.get("value"))
         display_raw = item.get("display_text")
-        display_value = _parse_numeric_text(display_raw)
-        if display_value is None and measured is not None:
-            display_value = measured
-        conflict_delta = (
-            abs(display_value - measured)
-            if display_value is not None and measured is not None
-            else 0.0
-        )
+        display_value = _as_float(item.get("value"))
+        if display_value is None:
+            display_value = _parse_numeric_text(display_raw)
+        if display_value is None:
+            skipped_non_numeric_dimensions += 1
+            continue
         bbox_from_pct = _bbox_from_global_pct(item.get("global_pct"), layout_bbox, radius=8.0)
         text_position = item.get("text_position")
         bbox = (
@@ -715,17 +713,16 @@ def compile_layout_ir(
             "dimension_type": "aligned",
             "display_text_raw": str(display_raw or ""),
             "display_value": display_value,
-            "measured_value": measured,
-            "computed_value": measured,
+            "value_source": str(item.get("value_source") or "display_preferred"),
             "unit": "mm",
-            "is_override": bool(
-                display_value is not None and measured is not None and conflict_delta > 1e-6
-            ),
-            "truth_role": "design_intent",
-            "conflict_status": "conflict" if conflict_delta > 1.0 else "consistent",
+            "truth_role": "display_value_authoritative",
             "owner_review_view_id": review_view_id,
             "linked_geometry_entity_ids": [],
-            "confidence": 0.95 if conflict_delta <= 1.0 else 0.88,
+            "confidence": (
+                0.96
+                if str(item.get("value_source") or "") == "display_text"
+                else (0.9 if str(item.get("value_source") or "") == "display_generated" else 0.82)
+            ),
             "bbox_canonical": bbox,
             "location_basis": location_basis,
         }
@@ -749,13 +746,24 @@ def compile_layout_ir(
             }
         )
 
+    if skipped_non_numeric_dimensions:
+        degradation_notices.append(
+            {
+                "id": _stable_id("DG", source_path, "dimension_non_numeric_display_value"),
+                "reason": "dimension_non_numeric_display_value",
+                "severity": "low",
+                "impacted_rules": ["annotation_missing", "clearance_violation"],
+                "count": skipped_non_numeric_dimensions,
+            }
+        )
+
     if not dimension_evidence:
         degradation_notices.append(
             {
                 "id": _stable_id("DG", source_path, "missing_dimension"),
                 "reason": "missing_dimension_evidence",
                 "severity": "medium",
-                "impacted_rules": ["dimension_conflict", "clearance_violation"],
+                "impacted_rules": ["annotation_missing", "clearance_violation"],
             }
         )
 
@@ -964,7 +972,7 @@ def compile_layout_ir(
                     "id": _stable_id("DG", source_insert_id, "dynamic_block_not_resolved"),
                     "reason": "dynamic_block_not_resolved",
                     "severity": "medium",
-                    "impacted_rules": ["schedule_mismatch", "dimension_conflict"],
+                    "impacted_rules": ["schedule_mismatch", "clearance_violation"],
                 }
             )
         inferred_type = str(insert.get("inferred_type") or "unknown_insert")
@@ -1056,7 +1064,7 @@ def compile_layout_ir(
         "normalized_entities": normalized_entities,
         "tolerance_registry": {
             "geom_merge_mm": 2.0,
-            "dimension_conflict_mm": 1.0,
+            "dimension_value_mm": 1.0,
             "snap_grid_mm": 0.01,
             "micro_segment_mm": 0.01,
         },

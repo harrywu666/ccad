@@ -49,10 +49,17 @@ def test_review_kernel_pipeline_persists_results(monkeypatch, tmp_path):
                 "dimensions": [
                     {
                         "id": "DIM-PIPE",
-                        "value": 800,
+                        "value": 1000,
                         "display_text": "1000",
                         "source": "paper_space",
                         "text_position": [100, 100],
+                    }
+                ],
+                "indexes": [
+                    {
+                        "id": "IDX-PIPE",
+                        "index_no": "01",
+                        "target_sheet": "A9.99",
                     }
                 ],
             },
@@ -116,8 +123,21 @@ def test_review_kernel_pipeline_persists_results(monkeypatch, tmp_path):
     assert run.total_issues >= 1
     assert len(results) >= 1
     first = results[0]
-    assert first.type == "dimension"
-    assert first.finding_type == "dimension_conflict"
+    evidence_payload = json.loads(first.evidence_json or "{}")
+    anchors = evidence_payload.get("anchors")
+    assert first.type == "index"
+    assert first.finding_type == "reference_broken"
     assert first.finding_status == "needs_review"
-    assert first.location == "A1.01 / 平面布置图"
+    assert first.location == "A1.01 / 平面布置图 -> A9.99"
+    assert isinstance(anchors, list) and anchors
+    source_anchor = next((item for item in anchors if item.get("role") == "source"), None)
+    assert isinstance(source_anchor, dict)
+    assert source_anchor.get("sheet_no") == "A1.01"
+    assert isinstance(source_anchor.get("layout_point"), dict) or isinstance(source_anchor.get("global_pct"), dict)
     assert json_file.with_suffix(".ir.json").exists()
+    upgraded_payload = json.loads(json_file.read_text(encoding="utf-8"))
+    assert upgraded_payload["schema_version"] == "1.2.0"
+    assert isinstance(upgraded_payload.get("layer_state_snapshot"), dict)
+    assert isinstance(upgraded_payload.get("text_encoding_evidence"), list)
+    assert isinstance(upgraded_payload.get("z_range_summary"), dict)
+    assert isinstance(upgraded_payload.get("drawing_register_entry"), dict)

@@ -6,11 +6,29 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
-from services.audit_runtime.providers.kimi_cli_provider import KimiCliProvider
-from services.audit_runtime.providers.kimi_sdk_provider import KimiSdkProvider
 from services.ai_service import call_kimi as default_call_kimi
 from services.ai_service import call_kimi_stream as default_call_kimi_stream
+
+
+def _build_api_provider(*, run_once_func=None, run_stream_func=None):  # noqa: ANN001
+    from services.audit_runtime.providers.kimi_api_provider import KimiApiProvider
+
+    return KimiApiProvider(
+        run_once_func=run_once_func,
+        run_stream_func=run_stream_func,
+    )
+
+
+def _build_cli_provider(*, cli_binary: str):
+    from services.audit_runtime.providers.kimi_cli_provider import KimiCliProvider
+
+    return KimiCliProvider(binary=cli_binary)
+
+
+def _build_sdk_provider(*, work_dir: str | Path | None = None):
+    from services.audit_runtime.providers.kimi_sdk_provider import KimiSdkProvider
+
+    return KimiSdkProvider(work_dir=Path(work_dir).expanduser() if work_dir else None)
 
 
 def normalize_provider_mode(raw: Optional[str]) -> str:
@@ -59,16 +77,26 @@ def build_runner_provider(
     mode = _provider_mode(requested_mode)
     explicit_mode = requested_mode is not None
 
-    cli_provider = KimiCliProvider(binary=cli_binary or os.getenv("KIMI_CLI_BINARY", "kimi"))
-    sdk_provider = KimiSdkProvider(work_dir=Path(work_dir).expanduser() if work_dir else None)
+    cli_provider = _build_cli_provider(cli_binary=cli_binary or os.getenv("KIMI_CLI_BINARY", "kimi"))
+
+    def _new_sdk_provider():
+        return _build_sdk_provider(work_dir=work_dir)
+
+    sdk_provider = None
+
+    def _ensure_sdk_provider():
+        nonlocal sdk_provider
+        if sdk_provider is None:
+            sdk_provider = _new_sdk_provider()
+        return sdk_provider
 
     if explicit_mode:
         if mode in {"kimi_sdk", "sdk"}:
-            return sdk_provider
+            return _ensure_sdk_provider()
         if mode == "cli":
             return cli_provider
         if mode == "api":
-            return KimiApiProvider(
+            return _build_api_provider(
                 run_once_func=run_once_func,
                 run_stream_func=run_stream_func,
             )
@@ -77,25 +105,29 @@ def build_runner_provider(
         run_once_func=run_once_func,
         run_stream_func=run_stream_func,
     ):
-        return KimiApiProvider(
+        return _build_api_provider(
             run_once_func=run_once_func,
             run_stream_func=run_stream_func,
         )
 
     if mode == "kimi_sdk":
-        return sdk_provider
+        return _ensure_sdk_provider()
     if mode == "sdk":
-        return sdk_provider
+        return _ensure_sdk_provider()
     if mode == "cli":
         return cli_provider
     if mode == "auto":
-        if sdk_provider.is_available():
-            return sdk_provider
+        try:
+            candidate = _ensure_sdk_provider()
+        except Exception:
+            candidate = None
+        if candidate is not None and candidate.is_available():
+            return candidate
         if cli_provider.is_available():
             return cli_provider
     if run_once_func is None and run_stream_func is None:
-        return KimiApiProvider()
-    return KimiApiProvider(
+        return _build_api_provider()
+    return _build_api_provider(
         run_once_func=run_once_func,
         run_stream_func=run_stream_func,
     )

@@ -29,18 +29,14 @@ def _estimate_tokens(payload: dict[str, Any]) -> int:
     return max(1, int(len(json.dumps(payload, ensure_ascii=False)) / 4))
 
 
-def _has_dimension_triple(payload: dict[str, Any]) -> bool:
+def _has_dimension_value(payload: dict[str, Any]) -> bool:
     evidence = payload.get("dimension_evidence")
     if not isinstance(evidence, list) or not evidence:
         return False
     for item in evidence:
         if not isinstance(item, dict):
             continue
-        if (
-            item.get("display_value") is not None
-            and item.get("measured_value") is not None
-            and item.get("computed_value") is not None
-        ):
+        if item.get("display_value") is not None:
             return True
     return False
 
@@ -138,7 +134,7 @@ def check_llm_boundary(
             return LlmBoundaryDecision(stage=normalized_stage, allowed=False, reason="candidate_relations_missing")
         if not _has_relation_ambiguity(payload):
             return LlmBoundaryDecision(stage=normalized_stage, allowed=False, reason="relation_ambiguity_not_found")
-        if not _has_dimension_triple(payload):
+        if not _has_dimension_value(payload):
             return LlmBoundaryDecision(stage=normalized_stage, allowed=False, reason="dimension_truth_not_ready")
         return LlmBoundaryDecision(stage=normalized_stage, allowed=True, reason="ok")
 

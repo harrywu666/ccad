@@ -34,8 +34,6 @@ def _valid_slice() -> dict:
             "dimension_evidence": [
                 {
                     "display_value": 1000,
-                    "measured_value": 998,
-                    "computed_value": 998,
                 }
             ],
         },

@@ -20,7 +20,7 @@ def test_compile_layout_ir_builds_four_layers_and_dimension_evidence():
         "dimensions": [
             {
                 "id": "D-1",
-                "value": 800,
+                "value": 1000,
                 "display_text": "1000",
                 "source": "paper_space",
                 "text_position": [120, 90],
@@ -50,8 +50,9 @@ def test_compile_layout_ir_builds_four_layers_and_dimension_evidence():
 
     dimensions = ir["evidence_layer"]["dimension_evidence"]
     assert len(dimensions) == 1
-    assert dimensions[0]["conflict_status"] == "conflict"
-    assert dimensions[0]["is_override"] is True
+    assert dimensions[0]["display_value"] == 1000
+    assert dimensions[0]["truth_role"] == "display_value_authoritative"
+    assert dimensions[0]["value_source"] == "display_preferred"
 
     refs = ir["semantic_layer"]["references"]
     assert len(refs) == 1

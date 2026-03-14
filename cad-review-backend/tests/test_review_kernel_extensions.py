@@ -169,7 +169,7 @@ def test_compile_layout_ir_contains_extension_structures():
     assert ir["project"]["project_id"] == "proj-ext-1"
     assert len(ir["drawing_register"]["entries"]) >= 1
     assert ir["company_parsing_profile"]["company_profile_id"]
-    assert ir["normalized_layer"]["tolerance_registry"]["dimension_conflict_mm"] == 1.0
+    assert ir["normalized_layer"]["tolerance_registry"]["dimension_value_mm"] == 1.0
     assert ir["normalized_layer"]["layer_state_snapshots"]
     assert ir["semantic_layer"]["block_semantic_profiles"]
     assert ir["semantic_layer"]["clear_height_chains"]

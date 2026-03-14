@@ -17,23 +17,14 @@ from domain.match_scoring import pick_catalog_candidate
 from models import Catalog, JsonData
 from services.cache_service import increment_cache_version, recalculate_project_status
 from services.drawing_ingest.layout_units import expand_layout_json_units
+from services.review_kernel.layout_contract import ensure_layout_json_contract
 from services.storage_path_service import resolve_project_dir
 
 logger = logging.getLogger(__name__)
 
 
-def _cleanup_temp_files(dwg_file_infos: List[Dict[str, str]], dxf_dir: Path) -> None:
-    """删除原始 DWG 文件和持久化 DXF 目录（均为临时中间产物）。"""
-    # 删除上传的原始 DWG 文件
-    for item in dwg_file_infos:
-        dwg_path = Path(item.get("path", ""))
-        if dwg_path.exists():
-            try:
-                dwg_path.unlink()
-                logger.info("已清理 DWG 文件: %s", dwg_path.name)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("清理 DWG 文件失败: %s (%s)", dwg_path.name, exc)
-
+def _cleanup_temp_files(dxf_dir: Path) -> None:
+    """仅删除 DXF 临时目录，保留 DWG 原件用于后续质量回放与重建。"""
     # 删除持久化 DXF 目录（渲染缩略图后不再需要）
     if dxf_dir.exists():
         try:
@@ -252,12 +243,14 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
                     source_payload = json.loads(source_json_path.read_text(encoding="utf-8"))
                     if payload:
                         source_payload.update(payload)
+                    source_payload, _, _ = ensure_layout_json_contract(source_payload)
                     compiled_payload = source_payload
                     versioned_json_path.write_text(
                         json.dumps(source_payload, ensure_ascii=False, indent=2),
                         encoding="utf-8",
                     )
                 elif payload:
+                    payload, _, _ = ensure_layout_json_contract(payload)
                     compiled_payload = payload
                     versioned_json_path.write_text(
                         json.dumps(payload, ensure_ascii=False, indent=2),
@@ -388,6 +381,7 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
                 "layers": [],
                 "is_placeholder": True,
             }
+            placeholder_payload, _, _ = ensure_layout_json_contract(placeholder_payload)
             placeholder_path.write_text(
                 json.dumps(placeholder_payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -428,8 +422,8 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
     recalculate_project_status(project_id, db)
     db.commit()
 
-    # 清理临时文件：DXF（中间产物）和原始 DWG（已提取完 JSON，不再需要）
-    _cleanup_temp_files(dwg_file_infos, dxf_dir)
+    # 清理临时文件：仅清理 DXF（中间产物），保留 DWG 原件用于可追溯重建
+    _cleanup_temp_files(dxf_dir)
 
     increment_cache_version(project_id, db)
     set_progress(project_id, "done", 100, "处理完成", success=True)

@@ -14,6 +14,7 @@ import inspect
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from services.audit_runtime.cancel_registry import AuditCancellationRequested
+from services.runtime_env import ensure_local_env_loaded
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,12 @@ def _http_timeout_config():
     )
 
 
-def _provider() -> str:
-    raw = (os.getenv("KIMI_PROVIDER", "official") or "official").strip().lower()
+def _provider(provider_override: Optional[str] = None) -> str:
+    ensure_local_env_loaded()
+    if provider_override is not None:
+        raw = str(provider_override).strip().lower()
+    else:
+        raw = (os.getenv("KIMI_PROVIDER", "official") or "official").strip().lower()
     if raw in {"official", "moonshot", "openai"}:
         return "official"
     if raw in {"openrouter", "open_router"}:
@@ -72,8 +77,8 @@ def _provider() -> str:
     return "code"
 
 
-def _resolve_api_key() -> str:
-    provider = _provider()
+def _resolve_api_key(provider_override: Optional[str] = None) -> str:
+    provider = _provider(provider_override)
     if provider == "openrouter":
         key = os.getenv("OPENROUTER_API_KEY", "").strip()
         if not key:
@@ -94,10 +99,10 @@ def _resolve_api_key() -> str:
     return key
 
 
-def _headers() -> dict:
+def _headers(provider_override: Optional[str] = None) -> dict:
     """构建API请求头"""
-    key = _resolve_api_key()
-    provider = _provider()
+    key = _resolve_api_key(provider_override)
+    provider = _provider(provider_override)
     if provider in {"official", "openrouter"}:
         headers = {
             "Content-Type": "application/json",
@@ -178,8 +183,9 @@ def _build_kimi_request(
     max_tokens: int,
     *,
     stream: bool = False,
+    provider_override: Optional[str] = None,
 ) -> tuple[str, dict[str, Any], str]:
-    provider = _provider()
+    provider = _provider(provider_override)
     if provider in {"official", "openrouter"}:
         content: List[dict[str, Any]] = []
         for img in (images or []):
@@ -360,6 +366,7 @@ async def call_kimi(
     images: List[bytes] = None,
     temperature: float = 0.1,
     max_tokens: int = 65536,
+    provider_override: Optional[str] = None,
 ) -> Union[dict, list]:
     """
     统一 Kimi 调用入口（支持纯文本和多图混合）
@@ -382,6 +389,7 @@ async def call_kimi(
         images,
         temperature,
         max_tokens,
+        provider_override=provider_override,
     )
     
     async with httpx.AsyncClient(timeout=_http_timeout_config(), trust_env=False) as client:
@@ -389,7 +397,7 @@ async def call_kimi(
             try:
                 resp = await client.post(
                     endpoint,
-                    headers=_headers(),
+                    headers=_headers(provider_override),
                     json=payload,
                 )
             except httpx.TimeoutException as exc:
@@ -445,6 +453,7 @@ async def call_kimi_stream(
     on_delta: Optional[Callable[[str], Optional[Awaitable[None]]]] = None,
     on_retry: Optional[Callable[[Dict[str, Any]], Optional[Awaitable[None]]]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
+    provider_override: Optional[str] = None,
 ) -> Union[dict, list]:
     import httpx
 
@@ -457,6 +466,7 @@ async def call_kimi_stream(
         temperature,
         max_tokens,
         stream=True,
+        provider_override=provider_override,
     )
 
     async def _read_stream_error_text(resp) -> str:  # noqa: ANN001
@@ -502,7 +512,7 @@ async def call_kimi_stream(
                 async with client.stream(
                     "POST",
                     endpoint,
-                    headers=_headers(),
+                    headers=_headers(provider_override),
                     json=payload,
                 ) as resp:
                     if resp.status_code != 200:

@@ -32,7 +32,6 @@ const TYPE_LABEL_MAP: Record<string, string> = {
   index: '索引',
   dimension: '尺寸',
   material: '材料',
-  dimension_conflict: '尺寸',
   reference_broken: '索引',
   annotation_missing: '尺寸',
 };

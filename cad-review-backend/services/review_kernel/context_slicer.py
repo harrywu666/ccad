@@ -173,7 +173,13 @@ def build_context_slices(
             "elevation_views": elevation_views,
             "elevation_zones": elevation_zones,
             "elevation_elements": elevation_elements,
-            "rule_scope": ["dimension_conflict", "reference_broken", "annotation_missing"],
+            "rule_scope": [
+                "reference_broken",
+                "cross_sheet_inconsistency",
+                "material_missing",
+                "material_mismatch",
+                "annotation_missing",
+            ],
         }
         payload = _trim_to_budget(payload, max_slice_tokens)
         token_estimate = _estimate_tokens(payload)
@@ -183,7 +189,16 @@ def build_context_slices(
                 "slice_type": "space_review",
                 "target_space_id": space_id,
                 "target_space_name": str(space.get("name") or ""),
-                "applicable_rule_ids": ["R-DIM-001", "R-REF-001", "R-ANN-001"],
+                "applicable_rule_ids": [
+                    "R-REF-001",
+                    "R-REF-002",
+                    "R-REF-003",
+                    "R-MAT-001",
+                    "R-MAT-002",
+                    "R-MAT-003",
+                    "R-MAT-004",
+                    "R-ANN-001",
+                ],
                 "token_estimate": token_estimate,
                 "payload": payload,
             }

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, Tuple
 
 from services.audit_runtime.cancel_registry import AuditCancellationRequested
+from services.runtime_env import ensure_local_env_loaded
 
 
 def _first_env(names: Iterable[str]) -> str | None:
@@ -52,6 +53,7 @@ def _read_int_env(name: str, default: int) -> int:
 
 
 def _api_backend_key() -> str:
+    ensure_local_env_loaded()
     raw = str(os.getenv("KIMI_PROVIDER", "official") or "official").strip().lower()
     if raw in {"openrouter", "open_router"}:
         return "openrouter"
