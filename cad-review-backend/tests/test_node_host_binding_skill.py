@@ -269,3 +269,4 @@ def test_node_host_binding_skill_returns_markdown_conclusion_and_evidence_bundle
     assert result.markdown_conclusion.startswith("## 任务结论")
     assert result.evidence_bundle["grounding_status"] == "grounded"
     assert result.evidence_bundle["anchors"][0]["sheet_no"] == "A1.01"
+    assert result.evidence_bundle["result_kind"] == "relationship_signal"

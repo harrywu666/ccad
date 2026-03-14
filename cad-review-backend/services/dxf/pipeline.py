@@ -39,6 +39,93 @@ from services.dxf.viewport import (
 logger = logging.getLogger(__name__)
 
 
+def _build_layer_state_snapshot(
+    *,
+    layout_name: str,
+    layers: List[Dict[str, Any]],
+    viewports: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    visibility = [
+        {
+            "layer_name": str(item.get("name") or ""),
+            "visible": bool(item.get("visible")),
+        }
+        for item in layers
+        if str(item.get("name") or "")
+    ]
+    overrides: list[dict[str, Any]] = []
+    for vp in viewports:
+        vp_id = str(vp.get("id") or "")
+        for item in vp.get("layer_overrides") or []:
+            if not isinstance(item, dict):
+                continue
+            overrides.append(
+                {
+                    "viewport_id": vp_id or None,
+                    "layer_name": str(item.get("layer_name") or ""),
+                    "visible": bool(item.get("visible")),
+                    "override_type": str(item.get("override_type") or "vp_freeze"),
+                }
+            )
+    return {
+        "layer_state_id": f"LST-{layout_name}",
+        "owner_layout_name": layout_name,
+        "name": f"{layout_name}_STATE",
+        "layer_visibility": visibility,
+        "viewport_overrides": overrides,
+        "source": "viewport_overrides" if overrides else "layout_embedded_state",
+        "confidence": 0.95 if visibility else 0.6,
+    }
+
+
+def _build_z_range_summary(*groups: List[Dict[str, Any]]) -> Dict[str, Any]:
+    z_min = None
+    z_max = None
+    ambiguous_count = 0
+    sample_count = 0
+    for group in groups:
+        for item in group or []:
+            if not isinstance(item, dict):
+                continue
+            low = item.get("z_min")
+            high = item.get("z_max")
+            if isinstance(low, (int, float)) and isinstance(high, (int, float)):
+                sample_count += 1
+                z_min = low if z_min is None else min(z_min, low)
+                z_max = high if z_max is None else max(z_max, high)
+            if bool(item.get("z_ambiguous")):
+                ambiguous_count += 1
+    return {
+        "z_min": round(float(z_min), 3) if z_min is not None else 0.0,
+        "z_max": round(float(z_max), 3) if z_max is not None else 0.0,
+        "ambiguous_count": ambiguous_count,
+        "sample_count": sample_count,
+    }
+
+
+def _collect_text_encoding_evidence(pseudo_texts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    for item in pseudo_texts:
+        if not isinstance(item, dict):
+            continue
+        encoding = item.get("encoding")
+        if not isinstance(encoding, dict):
+            continue
+        evidence.append(
+            {
+                "source_entity_id": str(item.get("id") or ""),
+                "encoding_detected": encoding.get("encoding_detected"),
+                "encoding_confidence": encoding.get("encoding_confidence"),
+                "font_name": encoding.get("font_name"),
+                "font_substitution": encoding.get("font_substitution"),
+                "font_substitution_reason": encoding.get("font_substitution_reason"),
+                "ocr_triggered": bool(encoding.get("ocr_triggered")),
+                "ocr_fallback": encoding.get("ocr_fallback"),
+            }
+        )
+    return evidence
+
+
 def render_layout_thumbnail(
     doc,
     layout_name: str,
@@ -166,15 +253,24 @@ def extract_layout(doc, layout_name: str, dwg_filename: str) -> Optional[Dict[st
 
     dimensions = _extract_dimensions(doc, layout, model_range, visible_layers, model_ranges=model_ranges)
     pseudo_texts = _extract_pseudo_texts(doc, layout, model_range, visible_layers, model_ranges=model_ranges)
+    insert_entities: List[Dict[str, Any]] = []
     indexes, title_blocks, detail_titles, title_sheet_no, title_sheet_name = _extract_insert_info(
         doc, layout, model_range,
-        model_ranges=model_ranges, visible_layers=visible_layers,
+        model_ranges=model_ranges,
+        visible_layers=visible_layers,
+        capture_inserts=insert_entities,
     )
     materials = _extract_materials(doc, layout, model_range, visible_layers, model_ranges=model_ranges)
     material_table = _extract_material_table(layout)
     layers = _collect_layer_states(doc)
+    layer_state_snapshot = _build_layer_state_snapshot(
+        layout_name=layout_name,
+        layers=layers,
+        viewports=viewports,
+    )
     layout_page_range = _extract_layout_page_range(layout)
     text_entities = _collect_text_entities(layout)
+    text_encoding_evidence = _collect_text_encoding_evidence(pseudo_texts)
 
     title_no = (title_sheet_no or "").strip()
     layout_no = _extract_sheet_no_from_text(layout_name)
@@ -219,12 +315,28 @@ def extract_layout(doc, layout_name: str, dwg_filename: str) -> Optional[Dict[st
         "viewports": viewports,
         "dimensions": dimensions,
         "pseudo_texts": pseudo_texts,
+        "insert_entities": insert_entities,
         "indexes": indexes,
         "title_blocks": title_blocks,
         "detail_titles": detail_titles,
         "materials": materials,
         "material_table": material_table,
         "layers": layers,
+        "layer_state_snapshot": layer_state_snapshot,
+        "text_encoding_evidence": text_encoding_evidence,
+        "z_range_summary": _build_z_range_summary(
+            dimensions,
+            pseudo_texts,
+            indexes,
+            title_blocks,
+            insert_entities,
+        ),
+        "drawing_register_entry": {
+            "sheet_number": sheet_no,
+            "title": sheet_name,
+            "layout_name": layout_name,
+            "sheet_type": "unknown",
+        },
     }
 
     return enrich_json_with_coordinates(payload)

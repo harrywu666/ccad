@@ -183,8 +183,10 @@ def _load_requested_provider_mode(project_id: str, audit_version: int) -> Option
             .order_by(AuditRun.created_at.desc())
             .first()
         )
-        value = normalize_provider_mode(getattr(run, "provider_mode", None))
-        return value or None
+        raw_mode = str(getattr(run, "provider_mode", "") or "").strip() if run else ""
+        if not raw_mode:
+            return None
+        return normalize_provider_mode(raw_mode) or None
     finally:
         db.close()
 

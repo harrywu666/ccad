@@ -93,6 +93,73 @@ def _pick_main_viewport(layout) -> Optional[Any]:  # noqa: ANN001
     return best_vp
 
 
+def _rect_polygon_from_bbox(bbox: list[float]) -> list[list[float]]:
+    if len(bbox) < 4:
+        return []
+    x0, y0, x1, y1 = [_safe_float(value) for value in bbox[:4]]
+    return [
+        [round(x0, 3), round(y0, 3)],
+        [round(x1, 3), round(y0, 3)],
+        [round(x1, 3), round(y1, 3)],
+        [round(x0, 3), round(y1, 3)],
+        [round(x0, 3), round(y0, 3)],
+    ]
+
+
+def _paper_bbox_from_viewport(vp) -> list[float]:  # noqa: ANN001
+    center = _point_xy(getattr(vp.dxf, "center", None))
+    width = _safe_float(getattr(vp.dxf, "width", 0.0), 0.0)
+    height = _safe_float(getattr(vp.dxf, "height", 0.0), 0.0)
+    half_w = width / 2.0
+    half_h = height / 2.0
+    return [
+        round(center[0] - half_w, 3),
+        round(center[1] - half_h, 3),
+        round(center[0] + half_w, 3),
+        round(center[1] + half_h, 3),
+    ]
+
+
+def _extract_clip_boundary(vp, standard_bbox: list[float]) -> Dict[str, Any]:  # noqa: ANN001
+    polygon = _rect_polygon_from_bbox(standard_bbox)
+    source_entity_id = str(
+        getattr(vp.dxf, "non_rect_clip_entity_handle", None)
+        or getattr(vp.dxf, "clipping_boundary_handle", None)
+        or ""
+    ).strip()
+    clip_enabled = bool(source_entity_id)
+    clip_type = "polygonal" if clip_enabled else "rectangular"
+    degraded_reason = None
+
+    if clip_enabled:
+        points: list[list[float]] = []
+        getter = getattr(vp, "get_clip_boundary_path", None)
+        if callable(getter):
+            try:
+                raw_points = getter()
+                for item in list(raw_points or []):
+                    if hasattr(item, "x") and hasattr(item, "y"):
+                        points.append([round(_safe_float(item.x), 3), round(_safe_float(item.y), 3)])
+                    elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                        points.append([round(_safe_float(item[0]), 3), round(_safe_float(item[1]), 3)])
+            except Exception:  # noqa: BLE001
+                points = []
+        if len(points) >= 3:
+            if points[0] != points[-1]:
+                points.append(list(points[0]))
+            polygon = points
+        else:
+            degraded_reason = "clip_boundary_geometry_unavailable"
+
+    return {
+        "enabled": clip_enabled,
+        "clip_type": clip_type if polygon else "none",
+        "boundary_polygon": polygon,
+        "source_entity_id": source_entity_id or None,
+        "degraded_reason": degraded_reason,
+    }
+
+
 def _collect_viewports(doc, layout, model_range: Dict[str, List[float]], active_layer: str) -> List[Dict[str, Any]]:  # noqa: ANN001
     items: List[Dict[str, Any]] = []
     all_layer_names = {str(getattr(layer.dxf, "name", "") or "") for layer in doc.layers}
@@ -105,9 +172,19 @@ def _collect_viewports(doc, layout, model_range: Dict[str, List[float]], active_
         center = _point_xy(getattr(vp.dxf, "center", None))
         scale = _safe_float(getattr(vp.dxf, "scale", 0.0), 0.0)
         vp_model_range = calc_model_range(vp)
+        standard_bbox = _paper_bbox_from_viewport(vp)
+        clip_boundary = _extract_clip_boundary(vp, standard_bbox)
 
         visible = get_visible_layers(doc, vp)
         frozen_in_vp = sorted(all_layer_names - visible) if visible else []
+        layer_overrides = [
+            {
+                "layer_name": name,
+                "visible": False,
+                "override_type": "vp_freeze",
+            }
+            for name in frozen_in_vp
+        ]
 
         items.append(
             {
@@ -120,7 +197,18 @@ def _collect_viewports(doc, layout, model_range: Dict[str, List[float]], active_
                 "layer": str(getattr(vp.dxf, "layer", "") or ""),
                 "active_layer": active_layer,
                 "frozen_layers": frozen_in_vp,
+                "layer_overrides": layer_overrides,
                 "model_range": vp_model_range if vp_model_range.get("max") != vp_model_range.get("min") else model_range,
+                "standard_bbox": standard_bbox,
+                "clip_boundary": clip_boundary,
+                "effective_model_region": {
+                    "bbox_in_model_space": (
+                        vp_model_range.get("min", [0.0, 0.0]) + vp_model_range.get("max", [0.0, 0.0])
+                    ),
+                    "polygon_in_model_space": _rect_polygon_from_bbox(
+                        vp_model_range.get("min", [0.0, 0.0]) + vp_model_range.get("max", [0.0, 0.0])
+                    ),
+                },
             }
         )
     return items

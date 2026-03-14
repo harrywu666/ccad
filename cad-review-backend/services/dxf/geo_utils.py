@@ -25,6 +25,49 @@ def _point_xy(point: Any) -> List[float]:
     return [0.0, 0.0]
 
 
+def _point_xyz(point: Any) -> List[float]:
+    if point is None:
+        return [0.0, 0.0, 0.0]
+
+    if hasattr(point, "x") and hasattr(point, "y"):
+        z = getattr(point, "z", 0.0)
+        return [
+            round(_safe_float(point.x), 3),
+            round(_safe_float(point.y), 3),
+            round(_safe_float(z), 3),
+        ]
+
+    if isinstance(point, Sequence) and len(point) >= 2:
+        z = point[2] if len(point) >= 3 else 0.0
+        return [
+            round(_safe_float(point[0]), 3),
+            round(_safe_float(point[1]), 3),
+            round(_safe_float(z), 3),
+        ]
+
+    return [0.0, 0.0, 0.0]
+
+
+def _classify_elevation_band(
+    z_min: float,
+    z_max: float,
+    *,
+    layer_name: str = "",
+) -> tuple[str, bool]:
+    normalized_layer = str(layer_name or "").upper()
+    if z_max <= 50 and z_min >= -100:
+        if any(token in normalized_layer for token in ("WALL", "DOOR", "MEN", "门", "窗", "WINDOW")):
+            return "human_accessible", False
+        if not normalized_layer:
+            return "human_accessible", True
+        return "floor_level", False
+    if z_max <= 2400:
+        return "human_accessible", False
+    if z_max <= 3000:
+        return "overhead", False
+    return "structural", False
+
+
 def _point_in_range(point: Sequence[float], model_range: Dict[str, List[float]], padding: float = 0.0) -> bool:
     if len(point) < 2:
         return False

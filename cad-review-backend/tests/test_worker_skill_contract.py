@@ -49,3 +49,4 @@ def test_worker_skill_contract_returns_markdown_conclusion_and_evidence_bundle()
     assert result.markdown_conclusion.startswith("## 任务结论")
     assert result.evidence_bundle["grounding_status"] in {"grounded", "weak", "missing"}
     assert result.evidence_bundle["assignment_id"] == "asg-1"
+    assert result.evidence_bundle["result_kind"] == "issue"

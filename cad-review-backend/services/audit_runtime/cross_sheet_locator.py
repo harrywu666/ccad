@@ -1,4 +1,4 @@
-"""LLM-first 跨图定位服务。"""
+"""Program-first 跨图定位服务（LLM 仅用于候选排序）。"""
 
 from __future__ import annotations
 
@@ -78,7 +78,8 @@ def locate_across_sheets(
         "anchor_hint": dict(anchor_hint or {}),
         "candidate_pairs": candidate_pairs,
     }
-    raw_pairs = llm_runner(payload) if llm_runner else candidate_pairs
+    # 先由程序生成候选，再允许 LLM 在候选集合内做排序/重排。
+    raw_pairs = llm_runner(payload) if llm_runner and candidate_pairs else candidate_pairs
     pairs = [
         AnchorPair(
             source_sheet_no=str(item.get("source_sheet_no") or source_sheet_no).strip(),

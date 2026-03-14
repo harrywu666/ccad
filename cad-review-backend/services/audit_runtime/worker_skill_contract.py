@@ -50,6 +50,7 @@ def build_worker_skill_result(
     raw_skill_outputs: list[dict[str, Any]] | None = None,
     markdown_conclusion: str | None = None,
     evidence_bundle: dict[str, Any] | None = None,
+    result_kind: str | None = None,
     escalate_to_chief: bool = False,
     meta: dict[str, Any] | None = None,
 ) -> WorkerResultCard:
@@ -74,6 +75,9 @@ def build_worker_skill_result(
         merged_meta["visible_session_key"] = f"assignment:{assignment_id}"
     if meta:
         merged_meta.update(meta)
+    normalized_result_kind = str(result_kind or "").strip().lower()
+    if normalized_result_kind not in {"issue", "non_issue", "relationship_signal"}:
+        normalized_result_kind = "issue" if str(status or "").strip().lower() == "confirmed" else "non_issue"
     anchor_payloads = list(anchors or [])
     normalized_evidence = list(evidence or [])
     normalized_raw_outputs = list(raw_skill_outputs or [])
@@ -83,6 +87,7 @@ def build_worker_skill_result(
             summary=summary,
             status=status,
             confidence=confidence,
+            result_kind=normalized_result_kind,
         ),
         evidence_bundle={
             "assignment_id": assignment_id,
@@ -92,6 +97,7 @@ def build_worker_skill_result(
             "evidence_pack_id": evidence_pack_id,
             "review_round": int(merged_meta.get("review_round") or 1),
             "summary": summary,
+            "result_kind": normalized_result_kind,
             "grounding_status": _resolve_grounding_status(anchor_payloads),
             "anchors": anchor_payloads,
             "evidence": normalized_evidence,
@@ -138,13 +144,21 @@ def _render_worker_markdown(
     summary: str,
     status: str,
     confidence: float,
+    result_kind: str | None = None,
 ) -> str:
     target_text = "、".join([item for item in task.target_sheet_nos if str(item or "").strip()]) or "单图复核"
+    kind = str(result_kind or "").strip().lower()
+    kind_label = {
+        "issue": "正式问题候选",
+        "non_issue": "未发现明确问题",
+        "relationship_signal": "关系线索",
+    }.get(kind, "未分类")
     return "\n".join(
         [
             "## 任务结论",
             f"- 任务：{task.objective}",
             f"- 范围：{task.source_sheet_no} -> {target_text}",
+            f"- 结论类型：{kind_label}",
             f"- 状态：{status}",
             f"- 置信度：{confidence:.2f}",
             f"- 结论：{summary}",

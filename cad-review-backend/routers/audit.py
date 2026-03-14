@@ -146,8 +146,28 @@ class AuditUiRuntimeChiefResponse(BaseModel):
     updated_at: Optional[str] = None
 
 
+class AuditUiRuntimeFinalReviewResponse(BaseModel):
+    current_assignment_title: Optional[str] = None
+    current_action: str
+    summary: str
+    accepted_count: int = 0
+    needs_more_evidence_count: int = 0
+    redispatch_count: int = 0
+    updated_at: Optional[str] = None
+
+
+class AuditUiRuntimeOrganizerResponse(BaseModel):
+    current_action: str
+    summary: str
+    accepted_issue_count: int = 0
+    current_section: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class AuditUiRuntimeResponse(BaseModel):
     chief: AuditUiRuntimeChiefResponse
+    final_review: Optional[AuditUiRuntimeFinalReviewResponse] = None
+    organizer: Optional[AuditUiRuntimeOrganizerResponse] = None
     worker_sessions: List[AuditUiRuntimeWorkerResponse] = Field(default_factory=list)
     recent_completed: List[AuditUiRuntimeWorkerResponse] = Field(default_factory=list)
 
@@ -1328,8 +1348,28 @@ def plan_audit_tasks(
     audit_version = (
         version if version is not None else get_next_audit_version(project_id, db)
     )
-    if resolve_runtime_pipeline_mode() == "chief_review":
+    runtime_mode = resolve_runtime_pipeline_mode()
+    if runtime_mode == "chief_review":
         return _plan_tasks_with_chief_review_preview(project_id, audit_version, db)
+    if runtime_mode == "review_kernel_v1":
+        return {
+            "success": True,
+            "audit_version": audit_version,
+            "context_summary": {
+                "mode": "review_kernel_v1",
+                "message": "新审图内核按运行时动态切片，不再预生成 AuditTask 图",
+            },
+            "relationship_summary": {
+                "discovered": 0,
+                "source": "review_kernel_runtime",
+            },
+            "task_summary": {
+                "total": 0,
+                "index_tasks": 0,
+                "material_tasks": 0,
+                "dimension_tasks": 0,
+            },
+        }
 
     from services.audit.relationship_discovery import (
         discover_relationships,

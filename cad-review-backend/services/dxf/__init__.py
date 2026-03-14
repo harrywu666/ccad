@@ -2,7 +2,8 @@
 
 __all__ = [
     # geo_utils
-    "_safe_float", "_point_xy", "_point_in_range", "_point_in_any_range",
+    "_safe_float", "_point_xy", "_point_xyz", "_classify_elevation_band",
+    "_point_in_range", "_point_in_any_range",
     "_distance", "_point_distance_to_insert", "_collect_virtual_entity_points",
     "_bbox_center", "_bbox_range", "_bbox_contains_point", "_expand_bbox",
     "_bbox_area", "_bbox_size", "_bbox_almost_equal", "_is_axis_aligned_rect",
@@ -62,6 +63,7 @@ from services.dxf.geo_utils import (  # noqa: F401
     _bbox_contains_point,
     _bbox_range,
     _bbox_size,
+    _classify_elevation_band,
     _collect_virtual_entity_points,
     _distance,
     _expand_bbox,
@@ -70,6 +72,7 @@ from services.dxf.geo_utils import (  # noqa: F401
     _point_in_any_range,
     _point_in_range,
     _point_xy,
+    _point_xyz,
     _safe_float,
 )
 from services.dxf.layout_detection import (  # noqa: F401

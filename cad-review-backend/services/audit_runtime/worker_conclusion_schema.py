@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 GroundingStatus = Literal["grounded", "weak", "missing"]
+ResultKind = Literal["issue", "non_issue", "relationship_signal"]
 
 
 class WorkerEvidenceBundle(BaseModel):
@@ -20,6 +21,7 @@ class WorkerEvidenceBundle(BaseModel):
     evidence_pack_id: str | None = None
     review_round: int | None = None
     summary: str = ""
+    result_kind: ResultKind = "issue"
     grounding_status: GroundingStatus
     anchors: list[dict[str, Any]] = Field(default_factory=list)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
@@ -33,4 +35,4 @@ class WorkerConclusion(BaseModel):
     evidence_bundle: WorkerEvidenceBundle
 
 
-__all__ = ["GroundingStatus", "WorkerEvidenceBundle", "WorkerConclusion"]
+__all__ = ["GroundingStatus", "ResultKind", "WorkerEvidenceBundle", "WorkerConclusion"]

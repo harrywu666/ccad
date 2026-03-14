@@ -200,9 +200,9 @@ def _resolve_event_defaults(step_key: Optional[str]) -> Dict[str, object]:
 
 
 def _resolve_pipeline_mode() -> str:
-    from services.audit_runtime.orchestrator import resolve_pipeline_mode
+    from services.audit_runtime_service import resolve_runtime_pipeline_mode
 
-    return resolve_pipeline_mode()
+    return resolve_runtime_pipeline_mode()
 
 
 def _infer_task_stage(
@@ -280,14 +280,24 @@ def _normalize_runtime_message(
     if not text:
         return text
 
-    replacements = {
-        "总控规划Agent": identity["agent_name"],
-        "关系审查Agent": identity["agent_name"],
-        "索引审查Agent": identity["agent_name"],
-        "尺寸审查Agent": identity["agent_name"],
-        "材料审查Agent": identity["agent_name"],
-        "Runner观察Agent": "运行时观察器",
-    }
+    event_kind = str(meta.get("event_kind") or "").strip()
+    source = str(meta.get("source") or "").strip()
+    preserve_source_agent_name = (
+        event_kind == "runner_broadcast"
+        and source == "agent_status_report"
+    )
+
+    replacements = {"Runner观察Agent": "运行时观察器"}
+    if not preserve_source_agent_name:
+        replacements.update(
+            {
+                "总控规划Agent": identity["agent_name"],
+                "关系审查Agent": identity["agent_name"],
+                "索引审查Agent": identity["agent_name"],
+                "尺寸审查Agent": identity["agent_name"],
+                "材料审查Agent": identity["agent_name"],
+            }
+        )
     for before, after in replacements.items():
         text = text.replace(before, after)
 
@@ -495,7 +505,7 @@ def append_run_event(
 
 def _build_grouped_result_snapshot(
     db, project_id: str, audit_version: int  # noqa: ANN001
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     rows = (
         db.query(AuditResult)
         .filter(
@@ -509,10 +519,15 @@ def _build_grouped_result_snapshot(
     grouped_items = group_results_for_view(raw_items)
     counts = summarize_grouped_counts(grouped_items)
     issue_to_row: Dict[str, Dict[str, Any]] = {}
+    issue_to_raw: Dict[str, Dict[str, Any]] = {}
+    for raw_item in raw_items:
+        issue_id = str(raw_item.get("id") or "").strip()
+        if issue_id:
+            issue_to_raw[issue_id] = raw_item
     for row in grouped_items:
         for issue_id in row.get("issue_ids") or []:
             issue_to_row[str(issue_id)] = row
-    return grouped_items, counts, issue_to_row
+    return grouped_items, counts, issue_to_row, issue_to_raw
 
 
 def append_result_upsert_events(
@@ -527,7 +542,11 @@ def append_result_upsert_events(
 
     db = SessionLocal()
     try:
-        _, counts, issue_to_row = _build_grouped_result_snapshot(db, project_id, audit_version)
+        _, counts, issue_to_row, issue_to_raw = _build_grouped_result_snapshot(
+            db,
+            project_id,
+            audit_version,
+        )
     finally:
         db.close()
 
@@ -554,6 +573,11 @@ def append_result_upsert_events(
                 "delta_kind": "upsert",
                 "view": "grouped",
                 "row": row,
+                "raw_rows": [
+                    issue_to_raw[str(item)]
+                    for item in (row.get("issue_ids") or [issue_id])
+                    if issue_to_raw.get(str(item))
+                ],
                 "counts": counts,
                 "source_issue_ids": row.get("issue_ids") or [issue_id],
             },
@@ -564,7 +588,7 @@ def append_result_upsert_events(
 def append_result_summary_event(project_id: str, audit_version: int) -> None:
     db = SessionLocal()
     try:
-        _, counts, _ = _build_grouped_result_snapshot(db, project_id, audit_version)
+        _, counts, _, _ = _build_grouped_result_snapshot(db, project_id, audit_version)
     finally:
         db.close()
 

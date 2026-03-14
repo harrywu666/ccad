@@ -60,6 +60,19 @@ logger = logging.getLogger(__name__)
 from services.audit_runtime.final_review_agent import run_final_review_agent
 
 
+def _json_compatible(value):  # noqa: ANN001
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except Exception:
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        if isinstance(value, list):
+            return [_json_compatible(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): _json_compatible(item) for key, item in value.items()}
+        return str(value)
+
+
 class AuditCancelledError(RuntimeError):
     """用户手动中断审核。"""
 
@@ -143,6 +156,49 @@ def _append_worker_event(
     )
 
 
+def _append_final_review_decision_event(
+    project_id: str,
+    audit_version: int,
+    *,
+    assignment_id: str,
+    assignment=None,  # noqa: ANN001
+    worker_result,
+    final_review_decision,
+) -> None:
+    decision = str(getattr(final_review_decision, "decision", "") or "").strip()
+    decision_source = str(getattr(final_review_decision, "decision_source", "") or "").strip() or "rule_fallback"
+    level = "info"
+    if decision == "accepted":
+        level = "success"
+    elif decision in {"needs_more_evidence", "redispatch"}:
+        level = "warning"
+    _append_master_event(
+        project_id,
+        audit_version,
+        level=level,
+        step_key="chief_review",
+        event_kind="final_review_decision",
+        progress_hint=90,
+        message=f"终审完成 {assignment_id or 'unknown-assignment'}：{decision}（{decision_source}）",
+        meta={
+            "assignment_id": assignment_id,
+            "task_title": str(getattr(assignment, "task_title", "") or "").strip() or None,
+            "review_intent": str(getattr(assignment, "review_intent", "") or "").strip() or None,
+            "decision": decision,
+            "decision_source": decision_source,
+            "rationale": str(getattr(final_review_decision, "rationale", "") or "").strip(),
+            "requires_grounding": bool(getattr(final_review_decision, "requires_grounding", True)),
+            "worker_summary": str(getattr(worker_result, "summary", "") or "").strip(),
+            "worker_confidence": float(getattr(worker_result, "confidence", 0.0) or 0.0),
+            "worker_markdown_conclusion": str(getattr(worker_result, "markdown_conclusion", "") or "").strip(),
+            "worker_evidence_bundle": _json_compatible(getattr(worker_result, "evidence_bundle", {}) or {}),
+            "task_id": str(getattr(worker_result, "task_id", "") or "").strip(),
+            "hypothesis_id": str(getattr(worker_result, "hypothesis_id", "") or "").strip(),
+            "task_stage": "chief_recheck",
+        },
+    )
+
+
 def _worker_step_key(worker_kind: str) -> str:
     mapping = {
         "node_host_binding": "relationship_discovery",
@@ -181,13 +237,19 @@ def _append_assignment_completed_event(
         message=summary or "副审任务已完成，等待主审继续处理",
         meta={
             "assignment_id": assignment_id,
+            "task_title": str(getattr(worker_task, "objective", "") or "").strip() or None,
             "visible_session_key": visible_session_key,
             "session_key": str((worker_result.meta or {}).get("session_key") or getattr(worker_task, "session_key", "") or "").strip() or None,
             "skill_id": worker_kind,
             "worker_kind": worker_kind,
             "worker_result_status": status,
+            "summary": summary,
+            "confidence": float(getattr(worker_result, "confidence", 0.0) or 0.0),
+            "markdown_conclusion": str(getattr(worker_result, "markdown_conclusion", "") or "").strip(),
+            "evidence_bundle": _json_compatible(getattr(worker_result, "evidence_bundle", {}) or {}),
             "source_sheet_no": getattr(worker_task, "source_sheet_no", None),
             "target_sheet_no": targets[0] if targets else None,
+            "target_sheet_nos": targets,
             "task_stage": "worker_skill_execution",
         },
     )
@@ -827,6 +889,7 @@ async def _dispatch_review_assignments_incrementally(
     chief_session,
     assignments: list,
     worker_runner=None,  # noqa: ANN001
+    on_assignment_completed=None,  # noqa: ANN001
 ):
     from services.audit_runtime.chief_dispatch_policy import evaluate_dispatch_state
     from services.audit_runtime.review_worker_pool import ReviewWorkerPool
@@ -863,6 +926,12 @@ async def _dispatch_review_assignments_incrementally(
                 worker_task=worker_task,
                 worker_result=item,
             )
+            if callable(on_assignment_completed):
+                on_assignment_completed(
+                    assignment=next_assignment,
+                    worker_task=worker_task,
+                    worker_result=item,
+                )
         worker_results.extend(batch_results)
 
     return worker_results
@@ -884,22 +953,20 @@ def _build_redispatch_hypothesis(assignment, rationale: str) -> dict:  # noqa: A
     }
 
 
-def _route_worker_results_through_final_review(
+def _route_worker_results_back_to_chief_review(
     *,
     assignments: list,
     worker_results: list[WorkerResultCard],
-    chief_session=None,  # noqa: ANN001
-    memory: dict | None = None,
 ):
     assignment_by_id = {
         str(getattr(item, "assignment_id", "") or "").strip(): item
         for item in list(assignments or [])
         if str(getattr(item, "assignment_id", "") or "").strip()
     }
-    accepted: list[WorkerResultCard] = []
-    escalations: list[dict] = []
+    approved_issue_candidates: list[dict] = []
+    chief_recheck_queue: list[dict] = []
+    chief_rejections: list[dict] = []
     decisions: list[dict] = []
-    redispatch_assignments: list = []
 
     for result in worker_results:
         assignment_id = str(
@@ -910,17 +977,96 @@ def _route_worker_results_through_final_review(
         ).strip()
         assignment = assignment_by_id.get(assignment_id)
         if assignment is None:
-            accepted.append(result)
+            chief_rationale = "副审结果缺少主审派单上下文，不能直接进终审，必须回主审补齐。"
+            record = {
+                "assignment_id": assignment_id,
+                "assignment": None,
+                "worker_result": result,
+                "chief_decision": "recheck_missing_assignment",
+                "chief_rationale": chief_rationale,
+            }
+            decisions.append(record)
+            chief_recheck_queue.append(record)
+            continue
+
+        evidence_bundle = dict(result.evidence_bundle or {})
+        result_kind = str(evidence_bundle.get("result_kind") or "").strip().lower()
+        status = str(result.status or "").strip().lower()
+
+        chief_decision = "recheck"
+        chief_rationale = "副审返回内容还需要主审继续判断。"
+        if result_kind == "relationship_signal":
+            chief_decision = "reject_as_signal"
+            chief_rationale = "副审返回的是关系线索，只能作为主审参考，不能直接当成问题提交。"
+        elif result_kind == "non_issue" or status in {"rejected", "dismissed"}:
+            chief_decision = "reject_as_non_issue"
+            chief_rationale = "副审已明确未发现问题，这条不进入最终问题通道。"
+        elif status in {"needs_review", "conflict"} or bool(result.escalate_to_chief):
+            chief_decision = "recheck"
+            chief_rationale = "副审结论还不稳定，主审需要继续复核或补派。"
+        elif result_kind == "issue" and status == "confirmed":
+            chief_decision = "submit_to_final_review"
+            chief_rationale = "主审认可这是一条正式问题候选，提交终审做程序入库前校验。"
+
+        record = {
+            "assignment_id": assignment_id,
+            "assignment": assignment,
+            "worker_result": result,
+            "chief_decision": chief_decision,
+            "chief_rationale": chief_rationale,
+        }
+        decisions.append(record)
+        if chief_decision == "submit_to_final_review":
+            approved_issue_candidates.append(record)
+        elif chief_decision == "recheck":
+            chief_recheck_queue.append(record)
+        else:
+            chief_rejections.append(record)
+
+    return approved_issue_candidates, chief_recheck_queue, chief_rejections, decisions
+
+
+def _route_worker_results_through_final_review(
+    *,
+    chief_review_records: list[dict],
+    project_id: str | None = None,
+    audit_version: int | None = None,
+    chief_session=None,  # noqa: ANN001
+    memory: dict | None = None,
+):
+    accepted: list[WorkerResultCard] = []
+    escalations: list[dict] = []
+    decisions: list[dict] = []
+    redispatch_assignments: list = []
+
+    for chief_review_record in chief_review_records:
+        assignment_id = str(chief_review_record.get("assignment_id") or "").strip()
+        assignment = chief_review_record.get("assignment")
+        result = chief_review_record.get("worker_result")
+        if assignment is None:
+            if result is not None:
+                accepted.append(result)
             continue
         decision = run_final_review_agent(
             assignment=assignment,
             worker_result=result,
         )
+        if project_id and audit_version is not None:
+            _append_final_review_decision_event(
+                project_id,
+                int(audit_version),
+                assignment_id=assignment_id,
+                assignment=assignment,
+                worker_result=result,
+                final_review_decision=decision,
+            )
         decisions.append(
             {
                 "assignment_id": assignment_id,
                 "assignment": assignment,
                 "worker_result": result,
+                "chief_decision": chief_review_record.get("chief_decision"),
+                "chief_rationale": chief_review_record.get("chief_rationale"),
                 "final_review_decision": decision,
             }
         )
@@ -984,7 +1130,11 @@ def _persist_chief_findings(project_id: str, audit_version: int, findings: list)
         db.close()
 
 
-def _final_issue_to_audit_result(final_issue) -> AuditResult:  # noqa: ANN001
+def _final_issue_to_audit_result(
+    final_issue,
+    *,
+    final_review_meta_by_assignment: dict[str, dict] | None = None,
+) -> AuditResult:  # noqa: ANN001
     finding_type = str(getattr(final_issue, "finding_type", "") or "").strip()
     issue_type = _chief_finding_issue_type(finding_type)
     target_sheet_nos = list(getattr(final_issue, "target_sheet_nos", []) or [])
@@ -999,6 +1149,12 @@ def _final_issue_to_audit_result(final_issue) -> AuditResult:  # noqa: ANN001
             "grounding": grounding,
             "evidence_pack_id": getattr(final_issue, "evidence_pack_id", ""),
             "finding": final_issue.model_dump(),
+            "final_review": dict(
+                (final_review_meta_by_assignment or {}).get(
+                    str(getattr(final_issue, "source_assignment_id", "") or "").strip(),
+                    {},
+                )
+            ),
         },
         ensure_ascii=False,
     )
@@ -1028,12 +1184,21 @@ def _final_issue_to_audit_result(final_issue) -> AuditResult:  # noqa: ANN001
     )
 
 
-def _persist_final_issues(project_id: str, audit_version: int, final_issues: list) -> None:  # noqa: ANN001
+def _persist_final_issues(
+    project_id: str,
+    audit_version: int,
+    final_issues: list,
+    *,
+    final_review_meta_by_assignment: dict[str, dict] | None = None,
+) -> None:  # noqa: ANN001
     if not final_issues:
         return
     rows = []
     for issue in final_issues:
-        row = _final_issue_to_audit_result(issue)
+        row = _final_issue_to_audit_result(
+            issue,
+            final_review_meta_by_assignment=final_review_meta_by_assignment,
+        )
         row.project_id = project_id
         row.audit_version = audit_version
         rows.append(row)
@@ -1339,27 +1504,106 @@ def execute_pipeline_chief_review(
         )
 
         worker_results = []
+        chief_approved_issue_candidates: list[dict] = []
+        chief_recheck_records: list[dict] = []
+        chief_rejected_records: list[dict] = []
+        chief_review_decisions: list[dict] = []
+        accepted_worker_results: list = []
+        final_review_escalations: list[dict] = []
+        final_review_decisions: list[dict] = []
+        redispatch_assignments: list = []
+
+        def _handle_worker_result_incrementally(*, assignment, worker_task, worker_result):  # noqa: ANN001
+            single_approved, single_recheck, single_rejected, single_decisions = (
+                _route_worker_results_back_to_chief_review(
+                    assignments=assignments,
+                    worker_results=[worker_result],
+                )
+            )
+            chief_approved_issue_candidates.extend(single_approved)
+            chief_recheck_records.extend(single_recheck)
+            chief_rejected_records.extend(single_rejected)
+            chief_review_decisions.extend(single_decisions)
+
+            latest_decision = single_decisions[0] if single_decisions else {}
+            assignment_id = str(latest_decision.get("assignment_id") or getattr(assignment, "assignment_id", "") or "").strip()
+            chief_decision = str(latest_decision.get("chief_decision") or "recheck").strip()
+            processed_count = len(chief_review_decisions)
+            total_count = max(len(assignments), 1)
+            progress_hint = min(88, 60 + int((processed_count / total_count) * 28))
+            _append_master_event(
+                project_id,
+                audit_version,
+                level="info",
+                step_key="chief_review",
+                event_kind="phase_progress",
+                progress_hint=progress_hint,
+                message=(
+                    f"主审 Agent 已收回副审任务 {processed_count}/{len(assignments)}："
+                    f"{assignment_id or getattr(worker_task, 'id', 'unknown-assignment')}（{chief_decision}）"
+                ),
+                meta={
+                    "assignment_id": assignment_id or getattr(worker_task, "id", None),
+                    "chief_decision": chief_decision,
+                    "chief_rationale": str(latest_decision.get("chief_rationale") or "").strip() or None,
+                    "task_stage": "chief_recheck",
+                },
+            )
+            update_run_progress(
+                project_id,
+                audit_version,
+                current_step="主审复核副审分歧",
+                progress=progress_hint,
+            )
+
+            if not single_approved:
+                return
+
+            accepted, escalations, decisions, redispatches = _route_worker_results_through_final_review(
+                chief_review_records=single_approved,
+                project_id=project_id,
+                audit_version=audit_version,
+                chief_session=chief_session,
+                memory=memory,
+            )
+            accepted_worker_results.extend(accepted)
+            final_review_escalations.extend(escalations)
+            final_review_decisions.extend(decisions)
+            redispatch_assignments.extend(redispatches)
+
         if assignments:
             worker_results = asyncio.run(
                 _dispatch_review_assignments_incrementally(
                     chief_session=chief_session,
                     assignments=assignments,
+                    on_assignment_completed=_handle_worker_result_incrementally,
                 )
             ) or []
-
-        accepted_worker_results, final_review_escalations, final_review_decisions, redispatch_assignments = (
-            _route_worker_results_through_final_review(
-                assignments=assignments,
-                worker_results=worker_results,
-                chief_session=chief_session,
-                memory=memory,
-            )
-        )
+        final_review_source_counts: dict[str, int] = defaultdict(int)
+        for item in final_review_decisions:
+            source = str(
+                getattr(item.get("final_review_decision"), "decision_source", "") or ""
+            ).strip() or "rule_fallback"
+            final_review_source_counts[source] += 1
         accepted_decision_records = [
             item
             for item in final_review_decisions
             if str(getattr(item.get("final_review_decision"), "decision", "") or "").strip() == "accepted"
         ]
+        final_review_meta_by_assignment = {
+            str(item.get("assignment_id") or "").strip(): {
+                "decision": str(getattr(item.get("final_review_decision"), "decision", "") or "").strip(),
+                "decision_source": str(
+                    getattr(item.get("final_review_decision"), "decision_source", "") or ""
+                ).strip() or "rule_fallback",
+                "rationale": str(getattr(item.get("final_review_decision"), "rationale", "") or "").strip(),
+                "requires_grounding": bool(
+                    getattr(item.get("final_review_decision"), "requires_grounding", True)
+                ),
+            }
+            for item in final_review_decisions
+            if str(item.get("assignment_id") or "").strip()
+        }
         handled_assignment_ids = {
             str(item.get("assignment_id") or "").strip()
             for item in accepted_decision_records
@@ -1389,7 +1633,19 @@ def execute_pipeline_chief_review(
             )
 
         findings, worker_escalations = synthesize_findings(worker_results=compatibility_worker_results)
-        escalations = [*final_review_escalations, *worker_escalations]
+        chief_review_escalations = [
+            {
+                "hypothesis_id": item["worker_result"].hypothesis_id,
+                "task_id": item["worker_result"].task_id,
+                "assignment_id": item["assignment_id"],
+                "escalate_to_chief": True,
+                "reasons": ["chief_recheck"],
+                "rationale": str(item.get("chief_rationale") or "").strip() or "主审要求继续复核",
+            }
+            for item in chief_recheck_records
+            if item.get("worker_result") is not None
+        ]
+        escalations = [*chief_review_escalations, *final_review_escalations, *worker_escalations]
         resolved_refs = [
             SimpleNamespace(triggered_by=str(item["worker_result"].hypothesis_id or "").strip())
             for item in accepted_decision_records
@@ -1409,7 +1665,14 @@ def execute_pipeline_chief_review(
                         "chief_dispatch_meta": {
                             **dict(memory.get("chief_dispatch_meta") or {}),
                             "completed_assignment_count": len(worker_results),
+                            "chief_review_decision_count": len(chief_review_decisions),
+                            "chief_review_recheck_count": len(chief_recheck_records),
+                            "chief_review_rejected_count": len(chief_rejected_records),
                             "final_review_decision_count": len(final_review_decisions),
+                            "final_review_llm_decision_count": int(final_review_source_counts.get("llm", 0)),
+                            "final_review_rule_fallback_count": int(
+                                final_review_source_counts.get("rule_fallback", 0)
+                            ),
                             "redispatch_assignment_count": len(redispatch_assignments),
                             "accepted_final_issue_count": len(final_issues),
                         },
@@ -1421,7 +1684,12 @@ def execute_pipeline_chief_review(
             )
         finally:
             db.close()
-        _persist_final_issues(project_id, audit_version, final_issues)
+        _persist_final_issues(
+            project_id,
+            audit_version,
+            final_issues,
+            final_review_meta_by_assignment=final_review_meta_by_assignment,
+        )
         _persist_chief_findings(project_id, audit_version, findings)
 
         if escalations:

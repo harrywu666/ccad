@@ -175,6 +175,52 @@ def test_enrich_json_projects_model_space_items_through_fragment_viewport():
     assert dim_item["grid"] == "G5"
 
 
+def test_enrich_json_projects_model_space_pseudo_texts_and_inserts():
+    layout_json = {
+        "layout_page_range": {
+            "min": [0.0, 0.0],
+            "max": [1000.0, 1000.0],
+        },
+        "fragment_bbox": {
+            "min": [100.0, 100.0],
+            "max": [300.0, 300.0],
+        },
+        "viewports": [
+            {
+                "viewport_id": 2,
+                "position": [200.0, 200.0],
+                "width": 200.0,
+                "height": 200.0,
+                "model_range": {
+                    "min": [0.0, 0.0],
+                    "max": [100.0, 100.0],
+                },
+            }
+        ],
+        "pseudo_texts": [
+            {
+                "position": [25.0, 75.0],
+                "source": "model_space",
+            }
+        ],
+        "insert_entities": [
+            {
+                "position": [25.0, 75.0],
+                "source": "model_space",
+            }
+        ],
+    }
+
+    enriched = enrich_json_with_coordinates(layout_json)
+    text_item = enriched["pseudo_texts"][0]
+    insert_item = enriched["insert_entities"][0]
+
+    assert text_item["global_pct"] == {"x": 25.0, "y": 25.0}
+    assert text_item["grid"] == "G5"
+    assert insert_item["global_pct"] == {"x": 25.0, "y": 25.0}
+    assert insert_item["grid"] == "G5"
+
+
 def _scaled_layout_case(
     scale_x: float,
     scale_y: float,

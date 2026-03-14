@@ -236,6 +236,8 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
 
                 versioned_json_path = json_dir / f"{normalized_base}_v{next_version}.json"
 
+            compiled_payload: Dict[str, Any] | None = None
+            ir_json_path = ""
             try:
                 payload = json_info.get("data") or {}
                 if payload:
@@ -250,17 +252,30 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
                     source_payload = json.loads(source_json_path.read_text(encoding="utf-8"))
                     if payload:
                         source_payload.update(payload)
+                    compiled_payload = source_payload
                     versioned_json_path.write_text(
                         json.dumps(source_payload, ensure_ascii=False, indent=2),
                         encoding="utf-8",
                     )
                 elif payload:
+                    compiled_payload = payload
                     versioned_json_path.write_text(
                         json.dumps(payload, ensure_ascii=False, indent=2),
                         encoding="utf-8",
                     )
                 if versioned_json_path.exists():
                     json_path = str(versioned_json_path)
+
+                if json_path and compiled_payload:
+                    from services.review_kernel.ir_compiler import compile_layout_ir, persist_layout_ir
+
+                    ir_package = compile_layout_ir(
+                        compiled_payload,
+                        source_json_path=json_path,
+                        project_id=project_id,
+                    )
+                    ir_json_path = persist_layout_ir(ir_package, source_json_path=json_path)
+                    summary = f"{summary} IR:{Path(ir_json_path).name}"
             except Exception as exc:  # noqa: BLE001
                 logger.warning("JSON版本化落盘失败，保留原路径: %s (%s)", json_path, str(exc))
 
@@ -318,6 +333,7 @@ async def ingest_dwg_upload(project_id: str, project, files: List[UploadFile], d
                     "match_score": match_score,
                     "json_id": new_json.id,
                     "json_path": json_path,
+                    "ir_json_path": ir_json_path or None,
                     "data_version": next_version,
                 }
             )

@@ -243,6 +243,7 @@ async def run_node_host_binding_skill(
             summary=f"原生节点归属副审未发现 {task.source_sheet_no} 与目标图之间的明确挂接问题",
             rule_id="relationship_visual_review",
             evidence_pack_id="paired_overview_pack",
+            result_kind="non_issue",
             meta={"prompt_source": "agent_skill", "issue_count": 0, **prefetch_meta},
         )
 
@@ -281,6 +282,7 @@ async def run_node_host_binding_skill(
         summary=first["description"] or f"原生节点归属副审返回 {len(relationships)} 处跨图挂接问题",
         rule_id=str(first["rule_id"]),
         evidence_pack_id=str(first["evidence_pack_id"]),
+        result_kind="relationship_signal",
         evidence=evidence,
         anchors=anchors,
         raw_skill_outputs=[

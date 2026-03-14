@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import logging
 import re
+import hashlib
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from services.dxf.geo_utils import _point_in_any_range, _point_xy, _safe_float
+from services.dxf.geo_utils import (
+    _classify_elevation_band,
+    _point_in_any_range,
+    _point_xy,
+    _point_xyz,
+    _safe_float,
+)
 from services.dxf.text_utils import (
     INDEX_KEYWORDS,
     TITLE_KEYWORDS,
@@ -37,6 +44,184 @@ def _resolve_dimension_values(display_text: str, actual_value: float) -> Tuple[f
     return _safe_float(actual_value), str(normalized_actual).rstrip("0").rstrip(".")
 
 
+def _z_bounds(*points: Any) -> tuple[float, float, bool]:
+    values: list[float] = []
+    ambiguous = False
+    for point in points:
+        xyz = _point_xyz(point)
+        values.append(_safe_float(xyz[2], 0.0))
+    if not values:
+        return 0.0, 0.0, True
+    z_min = min(values)
+    z_max = max(values)
+    if abs(z_min) < 1e-6 and abs(z_max) < 1e-6:
+        ambiguous = True
+    return round(z_min, 3), round(z_max, 3), ambiguous
+
+
+def _infer_encoding_meta(text: str, font_name: str = "") -> dict[str, Any]:
+    raw = str(text or "")
+    normalized_font = str(font_name or "").strip()
+    suspect_garbled = "�" in raw or raw.count("?") >= 2 or raw.count("¿") >= 1
+    encoding_detected = "GB18030" if any("\u4e00" <= ch <= "\u9fff" for ch in raw) else "UTF-8"
+    encoding_confidence = 0.55 if suspect_garbled else 0.97
+
+    font_substitution = None
+    font_substitution_reason = None
+    if normalized_font.lower().endswith(".shx"):
+        font_substitution = "Noto Sans CJK SC"
+        font_substitution_reason = "shx_not_renderable"
+
+    ocr_triggered = bool(suspect_garbled)
+    ocr_fallback = None
+    if ocr_triggered:
+        ocr_fallback = {
+            "triggered": True,
+            "trigger_reason": "suspected_encoding_loss",
+            "ocr_engine": "paddleocr",
+            "ocr_result": raw,
+            "ocr_confidence": 0.45,
+            "render_image_ref": None,
+        }
+
+    raw_bytes = raw.encode("utf-8", errors="replace")
+    return {
+        "raw_bytes_hex": raw_bytes.hex().upper(),
+        "encoding_detected": encoding_detected,
+        "encoding_confidence": round(encoding_confidence, 2),
+        "text_utf8": raw,
+        "font_name": normalized_font or None,
+        "font_substitution": font_substitution,
+        "font_substitution_reason": font_substitution_reason,
+        "ocr_fallback": ocr_fallback,
+        "ocr_triggered": ocr_triggered,
+    }
+
+
+def _infer_insert_type(block_name: str, attrs: dict[str, str]) -> tuple[str, float]:
+    upper_name = str(block_name or "").upper()
+    attr_keys = {str(key or "").upper() for key in attrs}
+    if any(token in upper_name for token in ("DOOR", "门")):
+        return "door", 0.9
+    if any(token in upper_name for token in ("WINDOW", "窗")):
+        return "window", 0.86
+    if any(token in attr_keys for token in ("_ACM-CALLOUTNUMBER", "_ACM-SHEETNUMBER", "SHEETNO")):
+        return "detail_callout", 0.88
+    if any(token in upper_name for token in ("TITLE", "图签", "BORDER")):
+        return "title_block", 0.82
+    return "unknown_insert", 0.55
+
+
+def _infer_attr_role(tag: str) -> str:
+    key = str(tag or "").upper()
+    if key in {"MARK", "DOOR_MARK", "编号"}:
+        return "door_mark"
+    if key in {"WIDTH", "W", "DOOR_WIDTH"}:
+        return "door_width"
+    if key in {"HEIGHT", "H", "DOOR_HEIGHT"}:
+        return "door_height"
+    if key in {"FIRE_RATING", "FIRE"}:
+        return "fire_rating"
+    if key in {"_ACM-CALLOUTNUMBER", "INDEX_NO", "NO", "DN"}:
+        return "detail_index"
+    if key in {"_ACM-SHEETNUMBER", "SHEETNO", "DRAWINGNO", "DRAWNO"}:
+        return "target_sheet"
+    if key in {"DRAWNAME", "SHEETNAME", "TITLE"}:
+        return "sheet_title"
+    return "generic_attribute"
+
+
+def _build_insert_snapshot(
+    insert,
+    *,
+    block_name: str,
+    layer: str,
+    attrs: dict[str, str],
+    position: list[float],
+    source: str,
+) -> dict[str, Any]:  # noqa: ANN001
+    insert_handle = str(getattr(insert.dxf, "handle", "") or "")
+    upper_name = str(block_name or "").upper()
+    inferred_type, inferred_conf = _infer_insert_type(block_name, attrs)
+    is_dynamic = upper_name.startswith("*U") or "DYN" in upper_name or "DYNAMIC" in upper_name
+
+    width_raw = attrs.get("WIDTH") or attrs.get("W") or attrs.get("DOOR_WIDTH") or ""
+    width_value = _parse_numeric_text(width_raw)
+    visibility_state = attrs.get("VISIBILITY") or attrs.get("STATE") or ""
+    dynamic_params = {
+        "width_stretch_mm": width_value,
+        "flip_horizontal": _safe_float(getattr(insert.dxf, "xscale", 1.0), 1.0) < 0,
+        "flip_vertical": _safe_float(getattr(insert.dxf, "yscale", 1.0), 1.0) < 0,
+        "visibility_state": visibility_state or None,
+        "lookup_value": attrs.get("LOOKUP") or attrs.get("TYPE") or None,
+        "rotation_deg": round(_safe_float(getattr(insert.dxf, "rotation", 0.0), 0.0), 3),
+    }
+
+    bbox_obj = _estimate_insert_visual_bbox(insert)
+    bbox_min = bbox_obj.get("min") or position
+    bbox_max = bbox_obj.get("max") or position
+    bbox = [
+        round(_safe_float(bbox_min[0]), 3),
+        round(_safe_float(bbox_min[1]), 3),
+        round(_safe_float(bbox_max[0]), 3),
+        round(_safe_float(bbox_max[1]), 3),
+    ]
+    resolved = not is_dynamic or bool(width_value is not None or visibility_state)
+    effective_geometry: dict[str, Any] = {
+        "resolved": resolved,
+        "bbox": bbox,
+    }
+    if not resolved:
+        effective_geometry.update(
+            {
+                "degraded_reason": "dynamic_block_not_resolved",
+                "fallback_geometry": "block_definition_default",
+                "impacted_attributes": ["width_mm", "rotation_effective"],
+            }
+        )
+
+    attr_payload: dict[str, dict[str, Any]] = {}
+    for key, value in attrs.items():
+        numeric_value = _parse_numeric_text(value)
+        payload = {
+            "raw_value": value,
+            "semantic_role": _infer_attr_role(key),
+        }
+        if numeric_value is not None:
+            payload["numeric_value"] = numeric_value
+            payload["unit"] = "mm"
+        attr_payload[key] = payload
+
+    insert_point = getattr(insert.dxf, "insert", None)
+    z_min, z_max, z_ambiguous = _z_bounds(insert_point)
+    elevation_band, layer_forced = _classify_elevation_band(z_min, z_max, layer_name=layer)
+    z_range_label = inferred_type if inferred_type in {"door", "window"} else elevation_band
+
+    return {
+        "id": insert_handle,
+        "block_name": block_name,
+        "source": source,
+        "layer": layer,
+        "position": position,
+        "z_min": z_min,
+        "z_max": z_max,
+        "z_range_label": z_range_label,
+        "elevation_band": elevation_band,
+        "z_ambiguous": bool(z_ambiguous and layer_forced),
+        "included_in_plan_extraction": True,
+        "inferred_type": inferred_type,
+        "inferred_type_confidence": inferred_conf,
+        "is_dynamic_block": is_dynamic,
+        "dynamic_params": dynamic_params,
+        "effective_geometry": effective_geometry,
+        "dynamic_resolution_source": "oda_sdk" if resolved else "degraded_default_geometry",
+        "attributes": attr_payload,
+        "attributes_hash": hashlib.sha1(
+            repr(sorted(attr_payload.items())).encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:16],
+    }
+
+
 def _extract_dimensions(
     doc,
     layout,
@@ -58,10 +243,13 @@ def _extract_dimensions(
         if visible_layers and layer and layer not in visible_layers:
             return None
 
-        defpoint = _point_xy(getattr(dim.dxf, "defpoint", None))
-        defpoint2 = _point_xy(getattr(dim.dxf, "defpoint2", None))
+        raw_defpoint = getattr(dim.dxf, "defpoint", None)
+        raw_defpoint2 = getattr(dim.dxf, "defpoint2", None)
+        raw_text_mid = getattr(dim.dxf, "text_midpoint", None) or raw_defpoint
+        defpoint = _point_xy(raw_defpoint)
+        defpoint2 = _point_xy(raw_defpoint2)
         text_pos = _point_xy(
-            getattr(dim.dxf, "text_midpoint", None) or getattr(dim.dxf, "defpoint", None)
+            raw_text_mid
         )
 
         if source == "model_space" and not _point_in_any_range(
@@ -83,6 +271,8 @@ def _extract_dimensions(
             getattr(dim.dxf, "text", ""),
             _safe_float(actual_value),
         )
+        z_min, z_max, z_ambiguous = _z_bounds(raw_defpoint, raw_defpoint2, raw_text_mid)
+        elevation_band, z_band_ambiguous = _classify_elevation_band(z_min, z_max, layer_name=layer)
 
         return {
             "id": handle,
@@ -94,6 +284,12 @@ def _extract_dimensions(
             "defpoint": defpoint,
             "defpoint2": defpoint2,
             "text_position": text_pos,
+            "z_min": z_min,
+            "z_max": z_max,
+            "z_range_label": "dimension_annotation",
+            "elevation_band": elevation_band,
+            "z_ambiguous": bool(z_ambiguous or z_band_ambiguous),
+            "included_in_plan_extraction": True,
         }
 
     for query in _DIMENSION_QUERIES:
@@ -162,6 +358,11 @@ def _collect_nested_dimensions(
                 getattr(entity.dxf, "text", ""),
                 _safe_float(actual_value),
             )
+            raw_defpoint = getattr(entity.dxf, "defpoint", None)
+            raw_defpoint2 = getattr(entity.dxf, "defpoint2", None)
+            raw_text_mid = getattr(entity.dxf, "text_midpoint", None) or raw_defpoint
+            z_min, z_max, z_ambiguous = _z_bounds(raw_defpoint, raw_defpoint2, raw_text_mid)
+            elevation_band, z_band_ambiguous = _classify_elevation_band(z_min, z_max, layer_name=elayer)
 
             items.append({
                 "id": handle,
@@ -170,9 +371,15 @@ def _collect_nested_dimensions(
                 "display_text": display_text,
                 "layer": elayer,
                 "source": source,
-                "defpoint": _point_xy(getattr(entity.dxf, "defpoint", None)),
-                "defpoint2": _point_xy(getattr(entity.dxf, "defpoint2", None)),
+                "defpoint": _point_xy(raw_defpoint),
+                "defpoint2": _point_xy(raw_defpoint2),
                 "text_position": text_pos,
+                "z_min": z_min,
+                "z_max": z_max,
+                "z_range_label": "dimension_annotation",
+                "elevation_band": elevation_band,
+                "z_ambiguous": bool(z_ambiguous or z_band_ambiguous),
+                "included_in_plan_extraction": True,
             })
 
 
@@ -195,10 +402,12 @@ def _extract_pseudo_texts(
 
             if etype == "TEXT":
                 raw_text = str(getattr(entity.dxf, "text", "") or "")
-                pos = _point_xy(getattr(entity.dxf, "insert", None))
+                raw_pos = getattr(entity.dxf, "insert", None)
+                pos = _point_xy(raw_pos)
             else:
                 raw_text = str(getattr(entity, "text", "") or "")
-                pos = _point_xy(getattr(entity.dxf, "insert", None))
+                raw_pos = getattr(entity.dxf, "insert", None)
+                pos = _point_xy(raw_pos)
 
             text = _normalize_plain_text(raw_text)
             if not _is_numeric_like_text(text):
@@ -213,6 +422,10 @@ def _extract_pseudo_texts(
                 continue
 
             numeric_value = _parse_numeric_text(text)
+            font_name = str(getattr(entity.dxf, "style", "") or "")
+            encoding_meta = _infer_encoding_meta(raw_text, font_name=font_name)
+            z_min, z_max, z_ambiguous = _z_bounds(raw_pos)
+            elevation_band, z_band_ambiguous = _classify_elevation_band(z_min, z_max, layer_name=layer)
             items.append(
                 {
                     "id": str(getattr(entity.dxf, "handle", "") or ""),
@@ -222,6 +435,14 @@ def _extract_pseudo_texts(
                     "position": pos,
                     "layer": layer,
                     "source": source,
+                    "encoding": encoding_meta,
+                    "font_name": font_name or None,
+                    "z_min": z_min,
+                    "z_max": z_max,
+                    "z_range_label": "annotation_text",
+                    "elevation_band": elevation_band,
+                    "z_ambiguous": bool(z_ambiguous or z_band_ambiguous),
+                    "included_in_plan_extraction": True,
                 }
             )
 
@@ -358,7 +579,9 @@ def _extract_insert_info(
     layout,
     model_range: Dict[str, List[float]],
     visible_layers: Set[str],
+    *,
     model_ranges: Optional[Sequence[Dict[str, List[float]]]] = None,
+    capture_inserts: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], str, str]:  # noqa: ANN001
     indexes: List[Dict[str, Any]] = []
     title_blocks: List[Dict[str, Any]] = []
@@ -388,6 +611,17 @@ def _extract_insert_info(
             text = str(getattr(attrib.dxf, "text", "") or "").strip()
             if tag:
                 attrs[tag] = text
+
+        insert_snapshot = _build_insert_snapshot(
+            insert,
+            block_name=block_name,
+            layer=layer,
+            attrs=attrs,
+            position=position,
+            source=source,
+        )
+        if capture_inserts is not None:
+            capture_inserts.append(insert_snapshot)
 
         index_no_keys = (
             "_ACM-CALLOUTNUMBER", "_ACM-SECTIONLABEL", "REF#",
@@ -483,6 +717,13 @@ def _extract_insert_info(
                     "symbol_bbox": symbol_bbox,
                     "layer": layer,
                     "attrs": _attr_list(attrs),
+                    "z_min": insert_snapshot.get("z_min"),
+                    "z_max": insert_snapshot.get("z_max"),
+                    "z_range_label": insert_snapshot.get("z_range_label"),
+                    "elevation_band": insert_snapshot.get("elevation_band"),
+                    "z_ambiguous": insert_snapshot.get("z_ambiguous"),
+                    "is_dynamic_block": insert_snapshot.get("is_dynamic_block"),
+                    "effective_geometry": insert_snapshot.get("effective_geometry"),
                 }
             )
 
@@ -505,6 +746,9 @@ def _extract_insert_info(
                     "source": source,
                     "layer": layer,
                     "attrs": _attr_list(attrs),
+                    "z_min": insert_snapshot.get("z_min"),
+                    "z_max": insert_snapshot.get("z_max"),
+                    "elevation_band": insert_snapshot.get("elevation_band"),
                 }
             )
 

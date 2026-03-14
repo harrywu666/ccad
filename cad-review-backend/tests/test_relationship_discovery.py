@@ -16,6 +16,7 @@ def _clear_backend_modules() -> None:
         "models",
         "services.ai_prompt_service",
         "services.skill_pack_service",
+        "services.audit_runtime.runtime_prompt_assembler",
         "services.audit.relationship_discovery",
     )
     for name in list(sys.modules):
@@ -30,6 +31,7 @@ def _load_modules(monkeypatch, tmp_path):
     database = importlib.import_module("database")
     models = importlib.import_module("models")
     relationship_discovery = importlib.import_module("services.audit.relationship_discovery")
+    importlib.import_module("services.audit_runtime.agent_runner").ProjectAuditAgentRunner.clear_registry()
     database.init_db()
     return database, models, relationship_discovery
 

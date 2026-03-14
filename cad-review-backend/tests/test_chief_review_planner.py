@@ -82,9 +82,12 @@ def test_chief_review_planner_requires_chief_review_assets(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="chief_review_rules_missing"):
-        plan_chief_review_hypotheses(
+        planner.plan_chief_review_hypotheses(
             project_id="proj-chief",
             audit_version=10,
             memory={},
-            sheet_graph=SimpleNamespace(sheet_types={}, linked_targets={}),
+            sheet_graph=SimpleNamespace(
+                sheet_types={"A1-01": "plan", "A4-01": "detail"},
+                linked_targets={"A1-01": ["A4-01"]},
+            ),
         )

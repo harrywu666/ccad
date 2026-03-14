@@ -106,13 +106,17 @@ const buildEvent = (overrides: Partial<AuditEvent> = {}): AuditEvent => ({
 describe('auditResultStream', () => {
   it('receives result_upsert and result_summary events', () => {
     const upserts: AuditResult[] = [];
+    const rawRowsCount: number[] = [];
     const summaries: number[] = [];
     const controller = createAuditResultStreamController({
       projectId: 'proj-1',
       version: 3,
       createEventSource: (url) => new FakeEventSource(url),
       pollEvents: vi.fn<() => Promise<AuditEventsResponse>>(),
-      onUpsert: ({ row }) => upserts.push(row),
+      onUpsert: ({ row, rawRows }) => {
+        upserts.push(row);
+        rawRowsCount.push(rawRows.length);
+      },
       onSummary: ({ counts }) => summaries.push(counts?.total ?? 0),
     });
 
@@ -120,7 +124,17 @@ describe('auditResultStream', () => {
     const source = FakeEventSource.instances.at(-1)!;
     source.emit(
       'result_upsert',
-      buildEvent({ id: 11 }),
+      buildEvent({
+        id: 11,
+        meta: {
+          delta_kind: 'upsert',
+          view: 'grouped',
+          row: buildRow(),
+          raw_rows: [buildRow({ id: 'issue_1', is_grouped: false, group_id: null, issue_ids: [] })],
+          counts: { total: 1, unresolved: { index: 1, dimension: 0, material: 0 } },
+          source_issue_ids: ['issue_1'],
+        },
+      }),
       '11',
     );
     source.emit(
@@ -135,6 +149,7 @@ describe('auditResultStream', () => {
 
     expect(upserts).toHaveLength(1);
     expect(upserts[0].id).toBe('group_1');
+    expect(rawRowsCount).toEqual([1]);
     expect(summaries).toEqual([2]);
     expect(controller.getLastEventId()).toBe(12);
   });
@@ -197,4 +212,3 @@ describe('auditResultStream', () => {
     vi.useRealTimers();
   });
 });
-

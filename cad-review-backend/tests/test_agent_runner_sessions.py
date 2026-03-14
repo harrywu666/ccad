@@ -179,6 +179,7 @@ def test_runner_serializes_openrouter_visual_turns_with_vision_gate(monkeypatch)
     clear_project_llm_gates()
     monkeypatch.setenv("KIMI_PROVIDER", "openrouter")
     monkeypatch.setenv("AUDIT_PROJECT_OPENROUTER_MAX_CONCURRENCY", "4")
+    monkeypatch.delenv("AUDIT_PROJECT_OPENROUTER_VISION_MAX_CONCURRENCY", raising=False)
 
     class _AsyncProvider:
         provider_name = "api"
@@ -228,3 +229,58 @@ def test_runner_serializes_openrouter_visual_turns_with_vision_gate(monkeypatch)
         assert provider.max_active == 1
 
     asyncio.run(_run())
+
+
+def test_runner_run_once_timeout_deferred_without_blocking_pipeline(monkeypatch):
+    clear_project_llm_gates()
+    monkeypatch.setenv("AUDIT_RUNNER_ONCE_TIMEOUT_SECONDS", "0.05")
+
+    captured_events: list[dict] = []
+
+    def _fake_append_run_event(project_id, audit_version, **kwargs):  # noqa: ANN001
+        captured_events.append(
+            {
+                "project_id": project_id,
+                "audit_version": audit_version,
+                **kwargs,
+            }
+        )
+
+    monkeypatch.setattr(
+        "services.audit_runtime.state_transitions.append_run_event",
+        _fake_append_run_event,
+    )
+
+    class _SlowProvider:
+        provider_name = "api"
+
+        async def run_once(self, request, subsession):  # noqa: ANN001
+            del request, subsession
+            await asyncio.sleep(0.2)
+            return type("Result", (), {"provider_name": "api", "output": {"ok": True}, "status": "ok"})()
+
+    async def _run():
+        runner = ProjectAuditAgentRunner(
+            project_id="proj-timeout",
+            audit_version=1,
+            provider=_SlowProvider(),
+            shared_context={"provider_mode": "api"},
+        )
+        result = await runner.run_once(
+            RunnerTurnRequest(
+                agent_key="dimension_review_agent",
+                agent_name="尺寸审查Agent",
+                turn_kind="dimension_pair_compare",
+                system_prompt="s",
+                user_prompt="u",
+                meta={"subsession_key": "timeout:A"},
+            )
+        )
+        assert result.status == "deferred"
+        assert "超时" in str(result.error or "")
+
+    asyncio.run(_run())
+
+    deferred_events = [item for item in captured_events if item.get("event_kind") == "runner_turn_deferred"]
+    assert len(deferred_events) == 1
+    assert deferred_events[0]["meta"]["reason"] == "once_timeout"

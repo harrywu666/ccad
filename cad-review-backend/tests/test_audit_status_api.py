@@ -96,8 +96,8 @@ def test_audit_status_infers_planning_state_from_recent_events_without_run(monke
     assert payload["current_step"] == "节点归属 Skill 整理候选关系"
     assert payload["progress"] == 14
     assert payload["provider_mode"] == "sdk"
-    assert payload["pipeline_mode"] == "chief_review"
-    assert payload["planner_source"] == "chief_agent"
+    assert payload["pipeline_mode"] == "review_kernel_v1"
+    assert payload["planner_source"] == "review_kernel"
     assert payload["task_stage"] == "worker_relationship_discovery"
     assert payload["prompt_source"] == "agent_skill"
     assert payload["skill_id"] == "node_host_binding"
@@ -151,8 +151,8 @@ def test_audit_status_uses_first_event_time_as_total_started_at(monkeypatch, tmp
     payload = response.json()
     assert payload["run_status"] == "running"
     assert payload["started_at"] == planning_started_at.isoformat()
-    assert payload["pipeline_mode"] == "chief_review"
-    assert payload["planner_source"] == "chief_agent"
+    assert payload["pipeline_mode"] == "review_kernel_v1"
+    assert payload["planner_source"] == "review_kernel"
 
 
 def test_audit_status_prefers_latest_worker_stage_title_over_old_run_step(monkeypatch, tmp_path):
@@ -401,6 +401,10 @@ def test_audit_status_includes_ui_runtime_snapshot(monkeypatch, tmp_path):
     assert ui_runtime["chief"]["blocked_worker_count"] == 1
     assert ui_runtime["chief"]["queued_task_count"] == 7
     assert ui_runtime["chief"]["issue_count"] == 4
+    assert ui_runtime["final_review"]["accepted_count"] == 0
+    assert ui_runtime["final_review"]["needs_more_evidence_count"] == 0
+    assert ui_runtime["final_review"]["redispatch_count"] == 0
+    assert ui_runtime["organizer"]["accepted_issue_count"] == 0
 
     worker_sessions = ui_runtime["worker_sessions"]
     assert len(worker_sessions) == 2
@@ -730,3 +734,115 @@ def test_status_api_moves_completed_assignment_into_recent_completed(monkeypatch
     assert len(ui_runtime["recent_completed"]) == 1
     assert ui_runtime["recent_completed"][0]["session_key"] == "assignment:asg-1"
     assert ui_runtime["recent_completed"][0]["status"] == "completed"
+
+
+def test_status_api_exposes_final_review_and_organizer_runtime(monkeypatch, tmp_path):
+    app, session_local, models = _load_test_app(monkeypatch, tmp_path)
+    now = datetime.now()
+
+    db = session_local()
+    try:
+        db.add(models.Project(id="proj-status-final-review", name="Final Review Runtime", status="auditing"))
+        db.add(
+            models.AuditRun(
+                project_id="proj-status-final-review",
+                audit_version=14,
+                status="running",
+                current_step="主审复核冲突结果",
+                progress=92,
+                total_issues=0,
+                provider_mode="sdk",
+                started_at=now - timedelta(minutes=8),
+            )
+        )
+        db.add_all(
+            [
+                models.AuditRunEvent(
+                    project_id="proj-status-final-review",
+                    audit_version=14,
+                    level="success",
+                    step_key="chief_review",
+                    agent_key="chief_review_agent",
+                    agent_name="主审 Agent",
+                    event_kind="final_review_decision",
+                    progress_hint=90,
+                    message="终审完成 asg-1：accepted（llm）",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "chief",
+                            "assignment_id": "asg-1",
+                            "task_title": "A1.06 -> A2.00",
+                            "decision": "accepted",
+                            "decision_source": "llm",
+                            "rationale": "证据充分",
+                            "requires_grounding": True,
+                            "task_stage": "chief_recheck",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=2),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-final-review",
+                    audit_version=14,
+                    level="warning",
+                    step_key="chief_review",
+                    agent_key="chief_review_agent",
+                    agent_name="主审 Agent",
+                    event_kind="final_review_decision",
+                    progress_hint=90,
+                    message="终审完成 asg-2：needs_more_evidence（rule_fallback）",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "chief",
+                            "assignment_id": "asg-2",
+                            "task_title": "A1.07 -> A2.01",
+                            "decision": "needs_more_evidence",
+                            "decision_source": "rule_fallback",
+                            "rationale": "锚点不完整",
+                            "requires_grounding": True,
+                            "task_stage": "chief_recheck",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=1, seconds=50),
+                ),
+                models.AuditRunEvent(
+                    project_id="proj-status-final-review",
+                    audit_version=14,
+                    level="success",
+                    step_key="done",
+                    agent_key="chief_review_agent",
+                    agent_name="主审 Agent",
+                    event_kind="phase_completed",
+                    progress_hint=100,
+                    message="主审 Agent 已整理完成审核报告，共汇总 1 处问题",
+                    meta_json=json.dumps(
+                        {
+                            "actor_role": "chief",
+                            "final_issues": 1,
+                            "organizer_markdown_length": 512,
+                            "task_stage": "organizer_converted",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now - timedelta(minutes=1),
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.get("/api/projects/proj-status-final-review/audit/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    final_review = payload["ui_runtime"]["final_review"]
+    organizer = payload["ui_runtime"]["organizer"]
+    assert final_review["accepted_count"] == 1
+    assert final_review["needs_more_evidence_count"] == 1
+    assert final_review["redispatch_count"] == 0
+    assert organizer["accepted_issue_count"] == 1
+    assert organizer["current_action"].startswith("主审 Agent 已整理完成审核报告")

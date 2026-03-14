@@ -887,7 +887,16 @@ export default function ProjectDetail() {
       />
 
       <div className="flex flex-col flex-1 pb-16 px-8 gap-6">
-        <AuditStepper currentStep={currentStep} project={project} onStepClick={setCurrentStep} />
+        <div className="flex items-center justify-between gap-3">
+          <AuditStepper currentStep={currentStep} project={project} onStepClick={setCurrentStep} />
+          <Button
+            variant="outline"
+            className="rounded-none h-9 shrink-0"
+            onClick={() => navigate(`/projects/${id}/audit-logs`)}
+          >
+            审图日志
+          </Button>
+        </div>
 
         {error && (
           <div className="bg-destructive/10 text-destructive border border-destructive/20 p-4 mb-6 text-sm flex items-center gap-2">

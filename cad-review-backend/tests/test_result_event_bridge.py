@@ -99,6 +99,7 @@ def test_append_result_upsert_events_emits_grouped_delta(monkeypatch, tmp_path):
     assert payload["view"] == "grouped"
     assert payload["row"]["id"].startswith("group_")
     assert sorted(payload["row"]["issue_ids"]) == sorted([issue_a_id, issue_b_id])
+    assert sorted(item["id"] for item in payload["raw_rows"]) == sorted([issue_a_id, issue_b_id])
     assert payload["counts"]["total"] == 1
     assert payload["counts"]["unresolved"]["index"] == 1
 

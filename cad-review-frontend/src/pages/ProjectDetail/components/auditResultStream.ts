@@ -21,6 +21,7 @@ export interface AuditResultCounts {
 
 export interface AuditResultUpsertPayload {
   row: AuditResult;
+  rawRows: AuditResult[];
   counts: AuditResultCounts | null;
   sourceIssueIds: string[];
 }
@@ -91,8 +92,12 @@ const parseUpsertPayload = (event: AuditEvent): AuditResultUpsertPayload | null 
   const sourceIssueIds = Array.isArray(meta.source_issue_ids)
     ? meta.source_issue_ids.map((item) => String(item))
     : [];
+  const rawRows = Array.isArray(meta.raw_rows)
+    ? meta.raw_rows.filter((item) => item && typeof item === 'object') as AuditResult[]
+    : [];
   return {
     row,
+    rawRows,
     counts: parseCounts(meta.counts),
     sourceIssueIds,
   };
@@ -238,4 +243,3 @@ export function createAuditResultStreamController(options: AuditResultStreamCont
     },
   };
 }
-

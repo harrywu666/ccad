@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/badge';
 
-type FindingStatus = 'confirmed' | 'suspected' | 'needs_review' | null | undefined;
+type FindingStatus = 'confirmed' | 'suspected' | 'needs_review' | 'open' | null | undefined;
 
 const STATUS_META: Record<Exclude<FindingStatus, null | undefined>, { label: string; className: string }> = {
   confirmed: {
@@ -12,6 +12,10 @@ const STATUS_META: Record<Exclude<FindingStatus, null | undefined>, { label: str
     className: 'rounded-none border-amber-300 bg-amber-50 text-amber-700',
   },
   needs_review: {
+    label: '待人工确认',
+    className: 'rounded-none border-destructive/30 bg-destructive/10 text-destructive',
+  },
+  open: {
     label: '待人工确认',
     className: 'rounded-none border-destructive/30 bg-destructive/10 text-destructive',
   },

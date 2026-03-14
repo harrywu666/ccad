@@ -107,13 +107,15 @@ def _default_min_interval_seconds(provider_key: str) -> float:
 
 def _gate_parallel_limit(provider_key: str) -> int:
     normalized = str(provider_key or "").strip().lower()
-    env_names = ["AUDIT_PROJECT_LLM_MAX_CONCURRENCY"]
     if normalized == "openrouter_vision":
-        env_names.insert(0, "AUDIT_PROJECT_OPENROUTER_VISION_MAX_CONCURRENCY")
-    elif normalized == "openrouter":
-        env_names.insert(0, "AUDIT_PROJECT_OPENROUTER_MAX_CONCURRENCY")
-    elif normalized == "kimi_sdk":
-        env_names.insert(0, "AUDIT_PROJECT_KIMI_SDK_MAX_CONCURRENCY")
+        # 视觉请求默认强制串行，不继承全局并发，避免把图像请求打爆。
+        env_names = ["AUDIT_PROJECT_OPENROUTER_VISION_MAX_CONCURRENCY"]
+    else:
+        env_names = ["AUDIT_PROJECT_LLM_MAX_CONCURRENCY"]
+        if normalized == "openrouter":
+            env_names.insert(0, "AUDIT_PROJECT_OPENROUTER_MAX_CONCURRENCY")
+        elif normalized == "kimi_sdk":
+            env_names.insert(0, "AUDIT_PROJECT_KIMI_SDK_MAX_CONCURRENCY")
 
     value = _read_first_int_env(
         env_names,

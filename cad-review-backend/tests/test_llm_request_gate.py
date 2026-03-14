@@ -48,6 +48,7 @@ def test_openrouter_gate_uses_dedicated_parallel_limit(monkeypatch):
 def test_openrouter_vision_gate_defaults_to_single_concurrency(monkeypatch):
     monkeypatch.setenv("KIMI_PROVIDER", "openrouter")
     monkeypatch.setenv("AUDIT_PROJECT_OPENROUTER_MAX_CONCURRENCY", "4")
+    monkeypatch.delenv("AUDIT_PROJECT_OPENROUTER_VISION_MAX_CONCURRENCY", raising=False)
 
     gate = get_project_llm_gate(
         project_id="proj-openrouter-vision",

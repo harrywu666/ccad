@@ -46,7 +46,15 @@ def test_dimension_pair_jobs_keep_partial_progress_when_one_job_crashes(monkeypa
     monkeypatch.setattr(dimension_audit, "_dimension_stream_enabled", lambda: True)
     monkeypatch.setattr(dimension_audit, "_save_cache_json", lambda *args, **kwargs: None)
     monkeypatch.setattr(dimension_audit, "append_agent_status_report", lambda *args, **kwargs: captured_reports.append(kwargs["report"]))
-    monkeypatch.setattr(dimension_audit, "resolve_stage_system_prompt_with_skills", lambda *args, **kwargs: "system")
+    monkeypatch.setattr(
+        dimension_audit,
+        "assemble_legacy_stage_prompt",
+        lambda *args, **kwargs: dimension_audit.RuntimePromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            meta={"prompt_source": "legacy_stage_template"},
+        ),
+    )
 
     results = asyncio.run(
         dimension_audit._execute_pair_jobs(  # type: ignore[attr-defined]
@@ -132,7 +140,15 @@ def test_dimension_sheet_jobs_keep_partial_progress_when_one_job_crashes(monkeyp
     monkeypatch.setattr(dimension_audit, "_dimension_v2_enabled", lambda: False)
     monkeypatch.setattr(dimension_audit, "_save_cache_json", lambda *args, **kwargs: None)
     monkeypatch.setattr(dimension_audit, "append_agent_status_report", lambda *args, **kwargs: captured_reports.append(kwargs["report"]))
-    monkeypatch.setattr(dimension_audit, "resolve_stage_system_prompt_with_skills", lambda *args, **kwargs: "system")
+    monkeypatch.setattr(
+        dimension_audit,
+        "assemble_legacy_stage_prompt",
+        lambda *args, **kwargs: dimension_audit.RuntimePromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            meta={"prompt_source": "legacy_stage_template"},
+        ),
+    )
 
     results = asyncio.run(
         dimension_audit._execute_sheet_jobs(  # type: ignore[attr-defined]

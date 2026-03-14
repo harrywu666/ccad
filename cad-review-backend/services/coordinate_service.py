@@ -104,6 +104,9 @@ def _collect_points(layout_json: Dict) -> List[Tuple[float, float]]:
     _append_from(layout_json.get("dimensions", []) or [], "text_position")
     _append_from(layout_json.get("indexes", []) or [], "position")
     _append_from(layout_json.get("materials", []) or [], "position")
+    _append_from(layout_json.get("pseudo_texts", []) or [], "position")
+    _append_from(layout_json.get("detail_titles", []) or [], "position")
+    _append_from(layout_json.get("insert_entities", []) or [], "position")
     return points
 
 
@@ -132,6 +135,15 @@ def _collect_layout_space_points(layout_json: Dict) -> List[Tuple[float, float]]
     for item in layout_json.get("dimensions", []) or []:
         if str(item.get("source") or "").strip() == "layout_space":
             _append_point(points, item.get("text_position"))
+    for item in layout_json.get("pseudo_texts", []) or []:
+        if str(item.get("source") or "").strip() == "layout_space":
+            _append_point(points, item.get("position"))
+    for item in layout_json.get("detail_titles", []) or []:
+        if str(item.get("source") or "").strip() == "layout_space":
+            _append_point(points, item.get("position"))
+    for item in layout_json.get("insert_entities", []) or []:
+        if str(item.get("source") or "").strip() == "layout_space":
+            _append_point(points, item.get("position"))
 
     viewports = layout_json.get("viewports", []) or []
     viewport_points: List[Tuple[float, float]] = []
@@ -462,5 +474,17 @@ def enrich_json_with_coordinates(layout_json: Dict) -> Dict:
     enriched["material_table"] = [
         enrich_item(item, "position")
         for item in layout_json.get("material_table", [])
+    ]
+    enriched["pseudo_texts"] = [
+        enrich_item(item, "position")
+        for item in layout_json.get("pseudo_texts", [])
+    ]
+    enriched["detail_titles"] = [
+        enrich_item(item, "position")
+        for item in layout_json.get("detail_titles", [])
+    ]
+    enriched["insert_entities"] = [
+        enrich_item(item, "position")
+        for item in layout_json.get("insert_entities", [])
     ]
     return enriched

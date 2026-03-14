@@ -621,7 +621,7 @@ def start_audit_async(
     worker_generation: Optional[int] = None,
 ) -> None:
     """启动后台审核线程（调用方需已持有 _set_running 锁）。"""
-    from services.audit_runtime.orchestrator import execute_pipeline
+    from services.review_kernel.orchestrator import execute_pipeline
 
     generation = int(worker_generation or 0) or max(1, get_project_worker_generation(project_id))
     register_project_worker_generation(project_id, generation)
@@ -643,7 +643,7 @@ def start_audit_async(
 
 
 def resolve_runtime_pipeline_mode() -> str:
-    from services.audit_runtime.orchestrator import resolve_pipeline_mode
+    from services.review_kernel.orchestrator import resolve_pipeline_mode
 
     return resolve_pipeline_mode()
 
@@ -690,6 +690,15 @@ def restart_master_agent_async(project_id: str, audit_version: int) -> Dict[str,
 
 def build_run_snapshot(run: Optional[AuditRun]) -> Dict[str, object]:
     pipeline_mode = resolve_runtime_pipeline_mode()
+    if pipeline_mode == "chief_review":
+        planner_source = "chief_agent"
+        prompt_source = "chief_agent"
+    elif pipeline_mode == "review_kernel_v1":
+        planner_source = "review_kernel"
+        prompt_source = "rule_engine"
+    else:
+        planner_source = "legacy_stage_planner"
+        prompt_source = None
     task_stage = _RUN_STEP_TO_TASK_STAGE.get(str(getattr(run, "current_step", "") or "").strip()) if run else None
     if not run:
         return {
@@ -699,9 +708,9 @@ def build_run_snapshot(run: Optional[AuditRun]) -> Dict[str, object]:
             "progress": 0,
             "total_issues": 0,
             "pipeline_mode": pipeline_mode,
-            "planner_source": "chief_agent" if pipeline_mode == "chief_review" else "legacy_stage_planner",
+            "planner_source": planner_source,
             "task_stage": task_stage,
-            "prompt_source": None,
+            "prompt_source": prompt_source if pipeline_mode == "review_kernel_v1" else None,
             "skill_id": None,
             "skill_mode": None,
             "compat_mode": None,
@@ -721,9 +730,13 @@ def build_run_snapshot(run: Optional[AuditRun]) -> Dict[str, object]:
         "progress": run.progress,
         "total_issues": run.total_issues,
         "pipeline_mode": pipeline_mode,
-        "planner_source": "chief_agent" if pipeline_mode == "chief_review" else "legacy_stage_planner",
+        "planner_source": planner_source,
         "task_stage": task_stage,
-        "prompt_source": "chief_agent" if pipeline_mode == "chief_review" and task_stage and task_stage.startswith("chief_") else None,
+        "prompt_source": (
+            "chief_agent"
+            if pipeline_mode == "chief_review" and task_stage and task_stage.startswith("chief_")
+            else prompt_source
+        ),
         "skill_id": None,
         "skill_mode": None,
         "compat_mode": None,
@@ -763,6 +776,7 @@ def build_recent_event_snapshot(
     *,
     max_age_seconds: int = 900,
 ) -> Dict[str, object]:
+    runtime_mode = resolve_runtime_pipeline_mode()
     latest_event = (
         db.query(AuditRunEvent)
         .filter(AuditRunEvent.project_id == project_id)
@@ -805,8 +819,12 @@ def build_recent_event_snapshot(
         "current_step": current_step,
         "progress": progress,
         "total_issues": 0,
-        "pipeline_mode": str(meta.get("pipeline_mode") or resolve_runtime_pipeline_mode()).strip() or "chief_review",
-        "planner_source": str(meta.get("planner_source") or "").strip() or None,
+        "pipeline_mode": runtime_mode,
+        "planner_source": (
+            "review_kernel"
+            if runtime_mode == "review_kernel_v1"
+            else str(meta.get("planner_source") or "").strip() or None
+        ),
         "task_stage": str(meta.get("task_stage") or "").strip() or None,
         "prompt_source": str(meta.get("prompt_source") or "").strip() or None,
         "skill_id": str(meta.get("skill_id") or "").strip() or None,
@@ -829,6 +847,7 @@ def enrich_snapshot_from_latest_event(
     snapshot: Dict[str, object],
     db,
 ) -> Dict[str, object]:
+    runtime_mode = resolve_runtime_pipeline_mode()
     if audit_version is None:
         return snapshot
 
@@ -853,8 +872,6 @@ def enrich_snapshot_from_latest_event(
 
     merged = dict(snapshot)
     for key in (
-        "pipeline_mode",
-        "planner_source",
         "task_stage",
         "prompt_source",
         "skill_id",
@@ -868,6 +885,13 @@ def enrich_snapshot_from_latest_event(
             value = value.strip() or None
         if value is not None:
             merged[key] = value
+    merged["pipeline_mode"] = runtime_mode
+    if runtime_mode == "review_kernel_v1":
+        merged["planner_source"] = "review_kernel"
+    elif not merged.get("planner_source"):
+        planner_value = meta.get("planner_source")
+        if isinstance(planner_value, str):
+            merged["planner_source"] = planner_value.strip() or None
     stage_title = _resolve_task_stage_title(merged.get("task_stage"), merged.get("skill_id"))
     if stage_title:
         merged["current_step"] = stage_title
@@ -897,6 +921,22 @@ def build_ui_runtime_snapshot(
                 "issue_count": int(total_issues or 0),
                 "updated_at": None,
             },
+            "final_review": {
+                "current_assignment_title": None,
+                "current_action": "终审等待主审提交候选问题",
+                "summary": "当前还没有进入终审环节。",
+                "accepted_count": 0,
+                "needs_more_evidence_count": 0,
+                "redispatch_count": 0,
+                "updated_at": None,
+            },
+            "organizer": {
+                "current_action": "结构化整理未开始",
+                "summary": "当前还没有可输出的问题。",
+                "accepted_issue_count": 0,
+                "current_section": None,
+                "updated_at": None,
+            },
             "worker_sessions": [],
             "recent_completed": [],
         }
@@ -912,15 +952,29 @@ def build_ui_runtime_snapshot(
     )
 
     chief_rows: List[AuditRunEvent] = []
+    final_review_rows: List[tuple[AuditRunEvent, Dict[str, Any]]] = []
+    organizer_rows: List[tuple[AuditRunEvent, Dict[str, Any]]] = []
     worker_sessions: Dict[str, Dict[str, object]] = {}
 
     for row in rows:
         meta = _parse_event_meta(row)
+        event_kind = _as_text(getattr(row, "event_kind", None))
+        if event_kind == "final_review_decision":
+            final_review_rows.append((row, meta))
+        task_stage = _as_text(meta.get("task_stage"))
+        if (
+            task_stage == "organizer_converted"
+            or (
+                event_kind == "phase_completed"
+                and ("organizer_markdown_length" in meta or "final_issues" in meta)
+            )
+            or event_kind == "result_summary"
+        ):
+            organizer_rows.append((row, meta))
         if _is_chief_event(row, meta):
             chief_rows.append(row)
             continue
 
-        event_kind = _as_text(getattr(row, "event_kind", None))
         if event_kind in _RAW_PROCESS_EVENT_KINDS:
             continue
 
@@ -1034,6 +1088,85 @@ def build_ui_runtime_snapshot(
 
     chief_updated_at = latest_chief.created_at.isoformat() if latest_chief and latest_chief.created_at else snapshot.get("started_at")
 
+    accepted_count = 0
+    needs_more_evidence_count = 0
+    redispatch_count = 0
+    current_assignment_title: Optional[str] = None
+    final_review_current_action = "终审等待主审提交候选问题"
+    final_review_updated_at: Optional[str] = None
+    for row, meta in final_review_rows:
+        decision = _as_text(meta.get("decision"))
+        if decision == "accepted":
+            accepted_count += 1
+        elif decision == "needs_more_evidence":
+            needs_more_evidence_count += 1
+        elif decision == "redispatch":
+            redispatch_count += 1
+        if not current_assignment_title:
+            current_assignment_title = (
+                _as_text(meta.get("task_title"))
+                or _as_text(meta.get("assignment_id"))
+                or None
+            )
+    if final_review_rows:
+        latest_final_review_row, latest_final_review_meta = final_review_rows[-1]
+        final_review_current_action = (
+            _as_text(getattr(latest_final_review_row, "message", None))
+            or "终审正在处理主审提交的问题候选"
+        )
+        if not current_assignment_title:
+            current_assignment_title = (
+                _as_text(latest_final_review_meta.get("task_title"))
+                or _as_text(latest_final_review_meta.get("assignment_id"))
+                or None
+            )
+        final_review_updated_at = (
+            latest_final_review_row.created_at.isoformat()
+            if latest_final_review_row.created_at
+            else None
+        )
+    final_review_summary_parts: List[str] = []
+    if accepted_count > 0:
+        final_review_summary_parts.append(f"已通过 {accepted_count} 条")
+    if needs_more_evidence_count > 0:
+        final_review_summary_parts.append(f"待补证据 {needs_more_evidence_count} 条")
+    if redispatch_count > 0:
+        final_review_summary_parts.append(f"已补派 {redispatch_count} 条")
+
+    organizer_current_action = "结构化整理未开始"
+    organizer_summary = "当前还没有可输出的问题。"
+    organizer_accepted_issue_count = 0
+    organizer_current_section: Optional[str] = None
+    organizer_updated_at: Optional[str] = None
+    if organizer_rows:
+        latest_organizer_row, latest_organizer_meta = organizer_rows[-1]
+        organizer_current_action = (
+            _as_text(getattr(latest_organizer_row, "message", None))
+            or "终审通过问题正在整理为最终输出"
+        )
+        organizer_updated_at = (
+            latest_organizer_row.created_at.isoformat()
+            if latest_organizer_row.created_at
+            else None
+        )
+        organizer_current_section = _as_text(latest_organizer_meta.get("current_section")) or None
+        if _as_text(getattr(latest_organizer_row, "event_kind", None)) == "result_summary":
+            counts = latest_organizer_meta.get("counts")
+            if isinstance(counts, dict):
+                try:
+                    organizer_accepted_issue_count = int(counts.get("total") or 0)
+                except (TypeError, ValueError):
+                    organizer_accepted_issue_count = 0
+        else:
+            try:
+                organizer_accepted_issue_count = int(latest_organizer_meta.get("final_issues") or 0)
+            except (TypeError, ValueError):
+                organizer_accepted_issue_count = 0
+        if organizer_accepted_issue_count > 0:
+            organizer_summary = f"已整理 {organizer_accepted_issue_count} 条最终问题。"
+        elif _as_text(latest_organizer_meta.get("task_stage")) == "organizer_converted":
+            organizer_summary = "结构化整理已完成，等待问题汇总展示。"
+
     def _serialize_worker(item: Dict[str, object]) -> Dict[str, object]:
         return {
             "session_key": item.get("session_key"),
@@ -1064,6 +1197,22 @@ def build_ui_runtime_snapshot(
             "queued_task_count": queued_count,
             "issue_count": int(total_issues or 0),
             "updated_at": chief_updated_at,
+        },
+        "final_review": {
+            "current_assignment_title": current_assignment_title,
+            "current_action": final_review_current_action,
+            "summary": "，".join(final_review_summary_parts) if final_review_summary_parts else "终审暂未产出决策。",
+            "accepted_count": accepted_count,
+            "needs_more_evidence_count": needs_more_evidence_count,
+            "redispatch_count": redispatch_count,
+            "updated_at": final_review_updated_at,
+        },
+        "organizer": {
+            "current_action": organizer_current_action,
+            "summary": organizer_summary,
+            "accepted_issue_count": organizer_accepted_issue_count,
+            "current_section": organizer_current_section,
+            "updated_at": organizer_updated_at,
         },
         "worker_sessions": [_serialize_worker(item) for item in active_items],
         "recent_completed": [_serialize_worker(item) for item in completed_items],

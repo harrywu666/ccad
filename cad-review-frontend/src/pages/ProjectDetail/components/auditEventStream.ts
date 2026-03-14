@@ -22,10 +22,39 @@ interface AuditEventStreamControllerOptions {
   pollIntervalMs?: number;
   maxReconnectAttempts?: number;
   maxEvents?: number;
+  listenEventKinds?: string[];
 }
 
 const DEFAULT_MAX_EVENTS = 160;
 const RAW_PROCESS_EVENT_KINDS = new Set(['model_stream_delta', 'provider_stream_delta']);
+const DEFAULT_LISTEN_EVENT_KINDS = [
+  'phase_event',
+  'phase_started',
+  'phase_progress',
+  'phase_completed',
+  'warning',
+  'error',
+  'heartbeat',
+  'model_stream_delta',
+  'provider_stream_delta',
+  'runner_broadcast',
+  'runner_turn_started',
+  'runner_turn_deferred',
+  'runner_turn_cancelled',
+  'runner_session_failed',
+  'output_validation_failed',
+  'output_repair_started',
+  'output_repair_succeeded',
+  'raw_output_saved',
+  'worker_assignment_completed',
+  'final_review_decision',
+  'result_upsert',
+  'result_summary',
+  'master_recovery_requested',
+  'master_recovery_succeeded',
+  'master_recovery_exhausted',
+  'master_handoff',
+];
 
 export const mergeAuditEvents = (
   current: AuditEvent[],
@@ -89,6 +118,11 @@ export function createAuditEventStreamController(options: AuditEventStreamContro
   const pollIntervalMs = options.pollIntervalMs ?? 2000;
   const maxReconnectAttempts = options.maxReconnectAttempts ?? 3;
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+  const listenEventKinds = Array.from(
+    new Set((options.listenEventKinds && options.listenEventKinds.length > 0)
+      ? options.listenEventKinds
+      : DEFAULT_LISTEN_EVENT_KINDS),
+  );
 
   const clearTimers = () => {
     if (reconnectTimer !== null) {
@@ -166,8 +200,7 @@ export function createAuditEventStreamController(options: AuditEventStreamContro
     const source = createSource(buildStreamUrl(options.projectId, options.version, lastEventId || undefined));
     currentSource = source;
 
-    const listenTypes = ['phase_event', 'phase_started', 'phase_progress', 'phase_completed', 'warning', 'error', 'heartbeat', 'model_stream_delta', 'provider_stream_delta', 'runner_broadcast'];
-    listenTypes.forEach((type) => source.addEventListener(type, handleMessage));
+    listenEventKinds.forEach((type) => source.addEventListener(type, handleMessage));
 
     source.onopen = () => {
       reconnectAttempts = 0;

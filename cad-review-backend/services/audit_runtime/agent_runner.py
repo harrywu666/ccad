@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 import threading
 import time
 from typing import Any, Dict, Optional, Tuple
@@ -174,6 +175,18 @@ class ProjectAuditAgentRunner:
                 return str(raw).strip()
         return self._provider_name()
 
+    def _run_once_timeout_seconds(self) -> float:
+        raw = None
+        if isinstance(self.shared_context, dict):
+            raw = self.shared_context.get("run_once_timeout_seconds")
+        if raw is None:
+            raw = os.getenv("AUDIT_RUNNER_ONCE_TIMEOUT_SECONDS", "120")
+        try:
+            value = float(str(raw).strip())
+        except (TypeError, ValueError):
+            return 120.0
+        return max(0.0, value)
+
     async def _acquire_llm_slot(self, request: RunnerTurnRequest, *, should_cancel=None):  # noqa: ANN001
         gate = get_project_llm_gate(
             project_id=self.project_id,
@@ -206,10 +219,17 @@ class ProjectAuditAgentRunner:
             },
         )
         subsession.current_turn_status = "running"
+        timeout_seconds = self._run_once_timeout_seconds()
         try:
             release_llm_slot = await self._acquire_llm_slot(request, should_cancel=should_cancel)
             try:
-                result = await self.provider.run_once(request, subsession)
+                if timeout_seconds > 0:
+                    result = await asyncio.wait_for(
+                        self.provider.run_once(request, subsession),
+                        timeout=timeout_seconds,
+                    )
+                else:
+                    result = await self.provider.run_once(request, subsession)
             finally:
                 release_llm_slot()
             self._persist_raw_output_artifact(request, subsession, result)
@@ -217,6 +237,35 @@ class ProjectAuditAgentRunner:
             subsession.current_turn_status = "idle"
             subsession.current_phase = "idle"
             return result
+        except asyncio.TimeoutError:
+            subsession.current_turn_status = "idle"
+            subsession.current_phase = "deferred"
+            subsession.stall_reason = "once_timeout"
+            timeout_message = f"非流式调用超时（>{timeout_seconds:.1f} 秒）"
+            self._set_runner_broadcast(request, subsession, state="deferred")
+            self._append_event(
+                request,
+                event_kind="runner_turn_deferred",
+                level="warning",
+                message=f"{request.agent_name or request.agent_key} 本轮调用超时，Runner 已暂存并继续后续步骤",
+                meta={
+                    "turn_kind": request.turn_kind,
+                    "session_key": subsession.session_key,
+                    "provider_name": self._provider_name(),
+                    "provider_mode": self._provider_mode(),
+                    "reason": "once_timeout",
+                    "timeout_seconds": timeout_seconds,
+                    "error": timeout_message,
+                },
+            )
+            return RunnerTurnResult(
+                provider_name=self._provider_name(),
+                output=None,
+                status="deferred",
+                raw_output="",
+                subsession_key=subsession.session_key,
+                error=timeout_message,
+            )
         except AuditCancellationRequested:
             subsession.current_turn_status = "cancelled"
             subsession.current_phase = "cancelled"

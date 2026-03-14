@@ -32,6 +32,9 @@ const TYPE_LABEL_MAP: Record<string, string> = {
   index: '索引',
   dimension: '尺寸',
   material: '材料',
+  dimension_conflict: '尺寸',
+  reference_broken: '索引',
+  annotation_missing: '尺寸',
 };
 
 type SelectedPreview = {
@@ -45,12 +48,46 @@ type SelectedPreview = {
 };
 
 function getTypeLabel(type: string) {
+  const normalized = normalizeIssueType(type);
+  if (normalized === 'index') return '索引';
+  if (normalized === 'dimension') return '尺寸';
+  if (normalized === 'material') return '材料';
   return TYPE_LABEL_MAP[type] || '其他问题';
 }
 
+export function normalizeIssueType(type: string | null | undefined): 'index' | 'dimension' | 'material' | 'other' {
+  const raw = String(type || '').trim().toLowerCase();
+  if (!raw) return 'other';
+  if (raw === 'index' || raw.includes('reference') || raw.includes('callout')) return 'index';
+  if (raw === 'dimension' || raw.includes('dimension') || raw.includes('annotation')) return 'dimension';
+  if (raw === 'material' || raw.includes('material') || raw.includes('finish')) return 'material';
+  return 'other';
+}
+
+export function parseLocationText(value: string | null | undefined): string | null {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  if (!text.startsWith('{')) return text;
+  try {
+    const obj = JSON.parse(text) as Record<string, unknown>;
+    const sheetNo = String(obj.sheet_no || '').trim();
+    const logicalTitle = String(obj.logical_sheet_title || '').trim();
+    if (sheetNo && logicalTitle && logicalTitle !== sheetNo) return `${sheetNo} / ${logicalTitle}`;
+    if (sheetNo) return sheetNo;
+    if (logicalTitle) return logicalTitle;
+    const center = Array.isArray(obj.center_canonical) ? obj.center_canonical : null;
+    if (center && center.length >= 2) return '图纸坐标附近';
+  } catch {
+    return text;
+  }
+  return text;
+}
+
 function getLocationDisplay(result: AuditResult) {
-  const locations = (result.locations || []).filter(Boolean);
-  if (locations.length === 0) return result.location || null;
+  const locations = (result.locations || [])
+    .map((item) => parseLocationText(item))
+    .filter(Boolean) as string[];
+  if (locations.length === 0) return parseLocationText(result.location);
   if (locations.length <= 4) return locations.join('、');
   return `${locations.slice(0, 4).join('、')} 等${locations.length}处`;
 }
@@ -373,9 +410,9 @@ export default function ProjectStepAudit({
   }, [projectId, feedbackDrawerOpen, activeFeedbackThread?.id, activeFeedbackThread?.audit_version, selectedAuditVersion, auditStatus?.audit_version]);
 
   const unresolvedCounts = useMemo(() => ({
-    index: auditResults.filter((result) => result.type === 'index' && !result.is_resolved).length,
-    dimension: auditResults.filter((result) => result.type === 'dimension' && !result.is_resolved).length,
-    material: auditResults.filter((result) => result.type === 'material' && !result.is_resolved).length,
+    index: auditResults.filter((result) => normalizeIssueType(result.type) === 'index' && !result.is_resolved).length,
+    dimension: auditResults.filter((result) => normalizeIssueType(result.type) === 'dimension' && !result.is_resolved).length,
+    material: auditResults.filter((result) => normalizeIssueType(result.type) === 'material' && !result.is_resolved).length,
   }), [auditResults]);
 
   const totalCount = auditResults.length;

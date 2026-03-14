@@ -15,24 +15,24 @@ if getattr(asyncio, "iscoroutinefunction", None) is not inspect.iscoroutinefunct
 
 warnings.filterwarnings(
     "ignore",
-    message=r"builtin type SwigPyPacked has no __module__ attribute",
+    message=r"builtin type .* has no __module__ attribute",
     category=DeprecationWarning,
 )
 warnings.filterwarnings(
     "ignore",
-    message=r"builtin type SwigPyObject has no __module__ attribute",
-    category=DeprecationWarning,
-)
-warnings.filterwarnings(
-    "ignore",
-    message=r"builtin type swigvarlink has no __module__ attribute",
     category=DeprecationWarning,
 )
 warnings.filterwarnings(
     "ignore",
     message=r".*deprecated - use .*",
     category=DeprecationWarning,
-    module=r"ezdxf\.queryparser",
+    module=r"ezdxf\..*",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*parseAll.*deprecated.*",
+    category=DeprecationWarning,
+    module=r"pyparsing\.util",
 )
 warnings.filterwarnings(
     "ignore",
