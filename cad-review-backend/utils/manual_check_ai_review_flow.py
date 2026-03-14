@@ -29,7 +29,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 
-RUN_MODES = ("review_kernel", "legacy", "chief_review", "shadow_compare", "assignment_final_review")
+RUN_MODES = ("review_kernel",)
 
 
 class ClientResponse:
@@ -267,132 +267,16 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
 
 
 def resolve_run_modes(run_mode: Optional[str]) -> List[str]:
-    normalized = str(run_mode or "review_kernel").strip().lower() or "review_kernel"
-    if normalized == "shadow_compare":
-        return ["legacy", "chief_review"]
-    if normalized in {"review_kernel", "legacy", "chief_review", "assignment_final_review"}:
-        return [normalized]
     return ["review_kernel"]
 
 
-def _finding_signature(item: Dict[str, Any]) -> str:
-    return "|".join(
-        [
-            str(item.get("rule_id") or "").strip(),
-            str(item.get("finding_type") or "").strip(),
-            str(item.get("location") or "").strip(),
-            str(item.get("sheet_no_a") or "").strip(),
-            str(item.get("sheet_no_b") or "").strip(),
-        ]
-    )
-
-
-def _extract_run_duration_seconds(runtime_audit: Dict[str, Any]) -> Optional[float]:
-    status = runtime_audit.get("status") if isinstance(runtime_audit, dict) else {}
-    if not isinstance(status, dict):
-        return None
-    started_at = _parse_datetime(status.get("started_at"))
-    finished_at = _parse_datetime(status.get("finished_at"))
-    if started_at is None or finished_at is None:
-        return None
-    return round((finished_at - started_at).total_seconds(), 3)
-
-
-def _is_successful_runtime(runtime_audit: Dict[str, Any]) -> bool:
-    status = runtime_audit.get("status") if isinstance(runtime_audit, dict) else {}
-    if not isinstance(status, dict):
-        return False
-    status_value = str(status.get("status") or "").strip().lower()
-    return status_value in {"done", "completed"}
-
-
-def build_shadow_compare_summary(reports: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    legacy = reports.get("legacy") or {}
-    chief_review = reports.get("chief_review") or {}
-    legacy_results = list((legacy.get("artifacts") or {}).get("runtime_results") or [])
-    chief_results = list((chief_review.get("artifacts") or {}).get("runtime_results") or [])
-    legacy_signatures = {_finding_signature(item) for item in legacy_results}
-    chief_signatures = {_finding_signature(item) for item in chief_results}
-
-    overlap = legacy_signatures & chief_signatures
-    legacy_only = legacy_signatures - chief_signatures
-    chief_only = chief_signatures - legacy_signatures
-
-    legacy_audit = ((legacy.get("checks") or {}).get("runtime_audit") or {})
-    chief_audit = ((chief_review.get("checks") or {}).get("runtime_audit") or {})
-    legacy_status = legacy_audit.get("status") if isinstance(legacy_audit, dict) else {}
-    chief_status = chief_audit.get("status") if isinstance(chief_audit, dict) else {}
-    legacy_pipeline_mode = str((legacy_status or {}).get("pipeline_mode") or "").strip() or None
-    chief_pipeline_mode = str((chief_status or {}).get("pipeline_mode") or "").strip() or None
-    legacy_duration_seconds = _extract_run_duration_seconds(legacy_audit)
-    chief_duration_seconds = _extract_run_duration_seconds(chief_audit)
-    overlap_ratio = round(len(overlap) / len(legacy_signatures | chief_signatures), 3) if (legacy_signatures or chief_signatures) else 1.0
-    legacy_only_ratio = round(len(legacy_only) / len(legacy_signatures), 3) if legacy_signatures else 0.0
-    chief_review_only_ratio = round(len(chief_only) / len(chief_signatures), 3) if chief_signatures else 0.0
-    duration_delta_seconds = None
-    if legacy_duration_seconds is not None and chief_duration_seconds is not None:
-        duration_delta_seconds = round(chief_duration_seconds - legacy_duration_seconds, 3)
-
-    gate_reasons: List[str] = []
-    if not _is_successful_runtime(legacy_audit):
-        gate_reasons.append("legacy_runtime_incomplete")
-    if not _is_successful_runtime(chief_audit):
-        gate_reasons.append("chief_review_runtime_incomplete")
-    if legacy_audit.get("audit_version") and chief_audit.get("audit_version") and legacy_audit.get("audit_version") == chief_audit.get("audit_version"):
-        gate_reasons.append("shadow_runs_not_isolated")
-    if legacy_pipeline_mode and chief_pipeline_mode and legacy_pipeline_mode == chief_pipeline_mode:
-        gate_reasons.append("pipeline_modes_not_diverged")
-    if overlap_ratio < 0.8:
-        gate_reasons.append("overlap_below_threshold")
-    if legacy_only_ratio > 0.2:
-        gate_reasons.append("legacy_miss_rate_too_high")
-    if chief_review_only_ratio > 0.2:
-        gate_reasons.append("chief_review_new_findings_too_high")
-    if duration_delta_seconds is not None and duration_delta_seconds > 30.0:
-        gate_reasons.append("chief_review_duration_regression")
-
-    return {
-        "legacy_audit_version": legacy_audit.get("audit_version"),
-        "chief_review_audit_version": chief_audit.get("audit_version"),
-        "legacy_result_count": len(legacy_results),
-        "chief_review_result_count": len(chief_results),
-        "legacy_pipeline_mode": legacy_pipeline_mode,
-        "chief_review_pipeline_mode": chief_pipeline_mode,
-        "overlap_count": len(overlap),
-        "legacy_only_count": len(legacy_only),
-        "chief_review_only_count": len(chief_only),
-        "overlap_ratio": overlap_ratio,
-        "legacy_only_ratio": legacy_only_ratio,
-        "chief_review_only_ratio": chief_review_only_ratio,
-        "legacy_duration_seconds": legacy_duration_seconds,
-        "chief_review_duration_seconds": chief_duration_seconds,
-        "duration_delta_seconds": duration_delta_seconds,
-        "ready_for_cutover": not gate_reasons,
-        "gate_reasons": gate_reasons,
-    }
-
-
 def _run_mode_env(run_mode: str) -> Dict[str, Optional[str]]:
-    normalized = resolve_run_modes(run_mode)[0]
-    shadow_label = None
-    chief_enabled = None
-    legacy_pipeline_allowed = None
-    forced_pipeline_mode = None
-    if normalized in {"review_kernel", "chief_review", "assignment_final_review"}:
-        shadow_label = "shadow_assignment_final_review" if normalized == "assignment_final_review" else "shadow_chief_review"
-        chief_enabled = "1"
-        legacy_pipeline_allowed = "0"
-        forced_pipeline_mode = "review_kernel_v1" if normalized == "review_kernel" else None
-    elif normalized == "legacy":
-        shadow_label = "shadow_legacy"
-        chief_enabled = "0"
-        legacy_pipeline_allowed = "1"
-        forced_pipeline_mode = "legacy"
+    del run_mode
     return {
-        "AUDIT_CHIEF_REVIEW_ENABLED": chief_enabled,
-        "AUDIT_LEGACY_PIPELINE_ALLOWED": legacy_pipeline_allowed,
-        "AUDIT_FORCE_PIPELINE_MODE": forced_pipeline_mode,
-        "AUDIT_SHADOW_RUN_MODE": shadow_label,
+        "AUDIT_CHIEF_REVIEW_ENABLED": "1",
+        "AUDIT_LEGACY_PIPELINE_ALLOWED": "0",
+        "AUDIT_FORCE_PIPELINE_MODE": "review_kernel_v1",
+        "AUDIT_SHADOW_RUN_MODE": "review_kernel",
     }
 
 
@@ -407,33 +291,6 @@ def _safe_json_loads(payload: Any) -> Dict[str, Any]:
     except Exception:
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _count_grounded_final_issues(runtime_results: List[Dict[str, Any]]) -> int:
-    grounded = 0
-    for item in runtime_results:
-        evidence = _safe_json_loads(item.get("evidence_json"))
-        finding = evidence.get("finding") if isinstance(evidence.get("finding"), dict) else {}
-        anchors = finding.get("anchors") if isinstance(finding.get("anchors"), list) else evidence.get("anchors")
-        if not isinstance(anchors, list):
-            continue
-        for anchor in anchors:
-            if not isinstance(anchor, dict):
-                continue
-            point = anchor.get("global_pct")
-            region = anchor.get("highlight_region")
-            if isinstance(point, dict) and point.get("x") is not None and point.get("y") is not None:
-                grounded += 1
-                break
-            if (
-                isinstance(region, dict)
-                and isinstance(region.get("bbox_pct"), dict)
-                and region["bbox_pct"].get("width") not in (None, 0)
-                and region["bbox_pct"].get("height") not in (None, 0)
-            ):
-                grounded += 1
-                break
-    return grounded
 
 
 def _load_local_env_file(backend_dir: Path) -> None:
@@ -493,93 +350,6 @@ def _provider_preflight(provider_mode: Optional[str]) -> Dict[str, Any]:
         "present_env": present_env,
         "missing_env": missing_env,
         "detail": detail,
-    }
-
-
-def _summarize_runtime_failures(runtime_events: List[Dict[str, Any]]) -> Dict[str, Any]:
-    failed_events = [
-        event
-        for event in runtime_events
-        if str(event.get("event_kind") or "").strip() == "runner_session_failed"
-    ]
-    last_failure = failed_events[-1] if failed_events else {}
-    message = str(last_failure.get("message") or "").strip() or None
-    blocking_reason = None
-    if message and ("KIMI_OFFICIAL_API_KEY" in message or "MOONSHOT_API_KEY" in message or "OPENROUTER_API_KEY" in message):
-        blocking_reason = "missing_provider_env"
-    return {
-        "failed_runner_event_count": len(failed_events),
-        "last_failure_message": message,
-        "last_failure_event_kind": str(last_failure.get("event_kind") or "").strip() or None,
-        "blocking_reason": blocking_reason,
-    }
-
-
-def build_assignment_final_review_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
-    status = payload.get("status") if isinstance(payload.get("status"), dict) else {}
-    ui_runtime = status.get("ui_runtime") if isinstance(status.get("ui_runtime"), dict) else {}
-    chief_runtime = ui_runtime.get("chief") if isinstance(ui_runtime.get("chief"), dict) else {}
-    worker_sessions = ui_runtime.get("worker_sessions") if isinstance(ui_runtime.get("worker_sessions"), list) else []
-    runtime_tasks = payload.get("runtime_tasks") if isinstance(payload.get("runtime_tasks"), list) else []
-    runtime_results = payload.get("runtime_results") if isinstance(payload.get("runtime_results"), list) else []
-    runtime_events = payload.get("runtime_events") if isinstance(payload.get("runtime_events"), list) else []
-    runtime_report = payload.get("runtime_report") if isinstance(payload.get("runtime_report"), dict) else {}
-    provider_preflight = payload.get("provider_preflight") if isinstance(payload.get("provider_preflight"), dict) else {}
-    organizer_markdown_available = bool(payload.get("organizer_markdown_available"))
-    assigned_task_count = chief_runtime.get("assigned_task_count")
-    assigned_task_count = int(assigned_task_count) if isinstance(assigned_task_count, (int, float, str)) and str(assigned_task_count).strip().isdigit() else 0
-    assignment_count = max(len(runtime_tasks), assigned_task_count)
-    visible_worker_keys = {
-        str(item.get("session_key") or "").strip()
-        for item in worker_sessions
-        if str(item.get("session_key") or "").strip()
-    }
-    for event in runtime_events:
-        meta = event.get("meta") if isinstance(event.get("meta"), dict) else {}
-        visible_key = str(meta.get("visible_session_key") or "").strip()
-        if visible_key:
-            visible_worker_keys.add(visible_key)
-        assignment_id = str(meta.get("assignment_id") or "").strip()
-        if assignment_id:
-            visible_worker_keys.add(f"assignment:{assignment_id}")
-    final_review_visible = isinstance(ui_runtime.get("final_review"), dict)
-    organizer_visible = isinstance(ui_runtime.get("organizer"), dict)
-    current_step = str(status.get("current_step") or "").strip()
-    if not final_review_visible:
-        final_review_visible = "终审" in current_step or any(
-            "终审" in str(event.get("message") or "")
-            for event in runtime_events
-        )
-    if not organizer_visible:
-        organizer_visible = (
-            "汇总" in current_step
-            or "收束" in current_step
-            or organizer_markdown_available
-        )
-    failure_summary = _summarize_runtime_failures(runtime_events)
-    blocking_reason = failure_summary["blocking_reason"]
-    if not blocking_reason and provider_preflight and provider_preflight.get("ok") is False:
-        blocking_reason = "missing_provider_env"
-    last_failure_message = failure_summary["last_failure_message"]
-    if not last_failure_message and provider_preflight and provider_preflight.get("ok") is False:
-        last_failure_message = str(provider_preflight.get("detail") or "").strip() or None
-
-    return {
-        "pipeline_mode": "assignment_final_review",
-        "runtime_pipeline_mode": str(status.get("pipeline_mode") or "").strip() or None,
-        "assignment_count": assignment_count,
-        "visible_worker_card_count": len(visible_worker_keys),
-        "worker_card_not_exceed_assignment_count": len(visible_worker_keys) <= assignment_count,
-        "final_review_visible": final_review_visible,
-        "organizer_visible": organizer_visible,
-        "organizer_markdown_output": organizer_markdown_available,
-        "grounded_final_issue_count": _count_grounded_final_issues(runtime_results),
-        "marked_report_generated": str(runtime_report.get("mode") or "").strip().lower() == "marked",
-        "anchors_json_path": runtime_report.get("anchors_json_path"),
-        "provider_preflight_ok": provider_preflight.get("ok") if provider_preflight else None,
-        "blocking_reason": blocking_reason,
-        "failed_runner_event_count": failure_summary["failed_runner_event_count"],
-        "last_failure_message": last_failure_message,
     }
 
 
@@ -799,7 +569,7 @@ def parse_args() -> argparse.Namespace:
         "--run-mode",
         choices=list(RUN_MODES),
         default="review_kernel",
-        help="Audit run mode: review_kernel, legacy, chief_review, shadow_compare, or assignment_final_review",
+        help="Audit run mode: review_kernel",
     )
     return parser.parse_args()
 
@@ -893,18 +663,6 @@ def _run_single_check(
                 **provider_preflight,
             }
             if provider_preflight.get("ok") is False:
-                if effective_run_mode == "assignment_final_review":
-                    report["checks"]["assignment_final_review"] = build_assignment_final_review_summary(
-                        {
-                            "status": {},
-                            "runtime_tasks": [],
-                            "runtime_results": [],
-                            "runtime_events": [],
-                            "runtime_report": {},
-                            "organizer_markdown_available": False,
-                            "provider_preflight": provider_preflight,
-                        }
-                    )
                 save_report(output_path, report)
                 print(f"[ERROR] provider preflight failed, report saved: {output_path}")
                 return 4, report, output_path
@@ -1140,22 +898,10 @@ def _run_single_check(
                             runtime_report = {"mode": "error", "error": str(exc)}
                     if runtime_report:
                         report["artifacts"]["runtime_report"] = runtime_report
-                    if effective_run_mode == "assignment_final_review":
-                        report["checks"]["assignment_final_review"] = build_assignment_final_review_summary(
-                            {
-                                "status": runtime_status,
-                                "runtime_tasks": runtime_tasks,
-                                "runtime_results": runtime_results,
-                                "runtime_events": runtime_events,
-                                "runtime_report": runtime_report,
-                                "organizer_markdown_available": organizer_markdown_available,
-                                "provider_preflight": report["checks"].get("provider_preflight"),
-                            }
-                        )
 
         save_report(output_path, report)
         print(f"[INFO] report saved: {output_path}")
-        print("[INFO] prompt settings check:", json.dumps(report["checks"]["prompt_settings"], ensure_ascii=False, indent=2))
+        print("[INFO] kernel assets check:", json.dumps(report["checks"]["kernel_assets"], ensure_ascii=False, indent=2))
         print("[INFO] plan preview check:", json.dumps(report["checks"]["plan_preview"], ensure_ascii=False, indent=2))
         if "runtime_audit" in report["checks"]:
             print("[INFO] runtime audit check:", json.dumps(report["checks"]["runtime_audit"], ensure_ascii=False, indent=2))
@@ -1170,41 +916,6 @@ def _run_single_check(
 def main() -> int:
     args = parse_args()
     effective_modes = resolve_run_modes(args.run_mode)
-    if args.run_mode == "shadow_compare":
-        reports: Dict[str, Dict[str, Any]] = {}
-        combined_exit_code = 0
-        artifact_paths: Dict[str, str] = {}
-        for mode in effective_modes:
-            exit_code, report, output_path = _run_single_check(args, effective_run_mode=mode)
-            reports[mode] = report
-            artifact_paths[mode] = str(output_path)
-            combined_exit_code = combined_exit_code or exit_code
-
-        backend_dir = Path(__file__).resolve().parents[1]
-        output_dir = backend_dir.parent / ".artifacts" / "manual-checks"
-        combined_output_path = output_dir / _build_output_name(args, "shadow_compare")
-        combined_report = {
-            "project_id": args.project_id,
-            "run_mode": "shadow_compare",
-            "checked_at": datetime.now().isoformat(),
-            "inputs": {
-                "provider_mode": args.provider_mode,
-                "base_url": args.base_url,
-                "start_audit": args.start_audit,
-            },
-            "checks": {
-                "shadow_compare": build_shadow_compare_summary(reports),
-            },
-            "artifacts": {
-                "runs": reports,
-                "run_reports": artifact_paths,
-            },
-        }
-        save_report(combined_output_path, combined_report)
-        print(f"[INFO] shadow compare report saved: {combined_output_path}")
-        print("[INFO] shadow compare summary:", json.dumps(combined_report["checks"]["shadow_compare"], ensure_ascii=False, indent=2))
-        return combined_exit_code
-
     exit_code, _report, _output_path = _run_single_check(args, effective_run_mode=effective_modes[0])
     return exit_code
 

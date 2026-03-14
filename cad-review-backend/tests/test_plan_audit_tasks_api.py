@@ -33,8 +33,6 @@ def _clear_backend_modules() -> None:
         "services.audit.relationship_discovery",
         "services.audit_runtime_service",
         "services.audit_runtime.orchestrator",
-        "services.audit_runtime.chief_review_planner",
-        "services.audit_runtime.chief_review_session",
     )
     for name in list(sys.modules):
         if name in targets or name.startswith("routers."):
@@ -54,7 +52,7 @@ def _load_test_app(monkeypatch, tmp_path):
     return main.app, database.SessionLocal, models
 
 
-def test_plan_audit_tasks_uses_chief_review_preview_by_default(monkeypatch, tmp_path):
+def test_plan_audit_tasks_returns_review_kernel_runtime_summary(monkeypatch, tmp_path):
     app, session_local, models = _load_test_app(monkeypatch, tmp_path)
 
     db = session_local()
