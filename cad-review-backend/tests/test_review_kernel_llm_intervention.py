@@ -14,14 +14,14 @@ def _build_ir() -> dict:
     cand1 = {
         "candidate_id": "cand-1",
         "sheet_no": "A4.01",
-        "score": 0.81,
+        "score": 0.79,
         "is_known_sheet": True,
         "basis": ["token_exact"],
     }
     cand2 = {
         "candidate_id": "cand-2",
         "sheet_no": "A4.02",
-        "score": 0.8,
+        "score": 0.78,
         "is_known_sheet": True,
         "basis": ["token_partial"],
     }
@@ -33,7 +33,7 @@ def _build_ir() -> dict:
                     "target_sheet_no": "A4.01",
                     "selected_candidate_id": "cand-1",
                     "target_missing": False,
-                    "confidence": 0.81,
+                    "confidence": 0.79,
                     "candidate_bindings": [cand1, cand2],
                     "needs_llm_disambiguation": True,
                     "ambiguity_flags": ["multi_candidate_close_score"],
@@ -47,7 +47,7 @@ def _build_ir() -> dict:
                     "selected_candidate_id": "cand-1",
                     "needs_llm_disambiguation": True,
                     "ambiguity_flags": ["multi_candidate_close_score"],
-                    "confidence": 0.81,
+                    "confidence": 0.79,
                 }
             ],
         }

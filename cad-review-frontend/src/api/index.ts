@@ -23,7 +23,6 @@ import type {
   FeedbackAgentPromptAssetsResponse,
   FeedbackThread,
   FeedbackThreadMessage,
-  ReviewWorkerSkillAssetsResponse,
   SkillPackItem,
   SkillPackListResponse,
   SkillTypesResponse,
@@ -70,21 +69,13 @@ export const getProjectUiPreferences = (id: string) =>
   api.get<{ project_id: string; preferences: Record<string, any> }>(`/api/projects/${id}/ui-preferences`).then(res => res.data);
 export const updateProjectUiPreferences = (id: string, preferences: Record<string, any>) =>
   api.put<{ project_id: string; preferences: Record<string, any> }>(`/api/projects/${id}/ui-preferences`, { preferences }).then(res => res.data);
-export const getAIPromptSettings = () =>
-  api.get<{ stages: any[] }>('/api/settings/ai-prompts').then(res => res.data);
-export const updateAIPromptSettings = (
-  stages: Array<{ stage_key: string; system_prompt: string; user_prompt: string }>,
-) =>
-  api.put<{ success: boolean }>('/api/settings/ai-prompts', { stages }).then(res => res.data);
-export const resetAIPromptStage = (stageKey: string) =>
-  api.post<{ success: boolean }>(`/api/settings/ai-prompts/${stageKey}/reset`).then(res => res.data);
 export const getAgentAssetGroups = () =>
   api.get<AgentAssetGroupListResponse>('/api/settings/agent-assets').then(res => res.data);
 export const getAgentAssets = (agentId: string) =>
   api.get<AgentAssetsResponse>(`/api/settings/agent-assets/${agentId}`).then(res => res.data);
 export const updateAgentAssets = (
   agentId: string,
-  items: Array<{ key: 'agent' | 'soul' | 'memory'; content: string }>,
+  items: Array<{ key: string; content: string }>,
 ) =>
   api.put<AgentAssetsResponse>(`/api/settings/agent-assets/${agentId}`, { items }).then(res => res.data);
 export const getSkillTypes = () =>
@@ -130,12 +121,6 @@ export const updateFeedbackAgentPromptAssets = (
   items: Array<{ key: 'prompt' | 'agent' | 'soul'; content: string }>,
 ) =>
   api.put<FeedbackAgentPromptAssetsResponse>('/api/settings/feedback-agent-prompts', { items }).then(res => res.data);
-export const getReviewWorkerSkillAssets = () =>
-  api.get<ReviewWorkerSkillAssetsResponse>('/api/settings/review-worker-skills').then(res => res.data);
-export const updateReviewWorkerSkillAssets = (
-  items: Array<{ key: string; content: string }>,
-) =>
-  api.put<ReviewWorkerSkillAssetsResponse>('/api/settings/review-worker-skills', { items }).then(res => res.data);
 
 // Catalog
 export const getCatalog = (projectId: string) =>

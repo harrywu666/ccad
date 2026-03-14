@@ -18,7 +18,6 @@ def _clear_backend_modules() -> None:
         "models",
         "main",
         "routers.settings",
-        "services.ai_prompt_service",
         "services.agent_asset_service",
     )
     for name in list(sys.modules):
@@ -37,7 +36,7 @@ def _load_test_app(monkeypatch, tmp_path):
     return main.app
 
 
-def test_get_agent_assets_returns_three_assets(monkeypatch, tmp_path):
+def test_get_agent_assets_returns_review_kernel_assets(monkeypatch, tmp_path):
     app = _load_test_app(monkeypatch, tmp_path)
     settings = importlib.import_module("routers.settings")
 
@@ -47,20 +46,19 @@ def test_get_agent_assets_returns_three_assets(monkeypatch, tmp_path):
         lambda agent_id: {
             "agent_id": agent_id,
             "items": [
-                {"key": "agent", "title": "chief_review AGENTS.md", "description": "desc", "file_name": "AGENTS.md", "content": "agent content"},
-                {"key": "soul", "title": "chief_review SOUL.md", "description": "desc", "file_name": "SOUL.md", "content": "soul content"},
-                {"key": "memory", "title": "chief_review MEMORY.md", "description": "desc", "file_name": "MEMORY.md", "content": "memory content"},
+                {"key": "soul_core", "title": "SOUL.md", "description": "desc", "file_name": "SOUL.md", "content": "soul content"},
+                {"key": "review_reporter_agent", "title": "AGENT_ReviewReporter.md", "description": "desc", "file_name": "AGENT_ReviewReporter.md", "content": "agent content"},
             ],
         },
     )
 
     with TestClient(app) as client:
-        response = client.get("/api/settings/agent-assets/chief_review")
+        response = client.get("/api/settings/agent-assets/review_kernel")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["agent_id"] == "chief_review"
-    assert [item["key"] for item in payload["items"]] == ["agent", "soul", "memory"]
+    assert payload["agent_id"] == "review_kernel"
+    assert [item["key"] for item in payload["items"]] == ["soul_core", "review_reporter_agent"]
 
 
 def test_update_agent_assets_round_trip(monkeypatch, tmp_path):
@@ -68,17 +66,15 @@ def test_update_agent_assets_round_trip(monkeypatch, tmp_path):
     settings = importlib.import_module("routers.settings")
 
     def _fake_update(agent_id, items):
-        assert agent_id == "chief_review"
+        assert agent_id == "review_kernel"
         assert items == [
-            {"key": "agent", "content": "new agent"},
-            {"key": "memory", "content": "new memory"},
+            {"key": "review_reporter_agent", "content": "new reporter"},
         ]
         return {
             "agent_id": agent_id,
             "items": [
-                {"key": "agent", "title": "chief_review AGENTS.md", "description": "desc", "file_name": "AGENTS.md", "content": "new agent"},
-                {"key": "soul", "title": "chief_review SOUL.md", "description": "desc", "file_name": "SOUL.md", "content": "old soul"},
-                {"key": "memory", "title": "chief_review MEMORY.md", "description": "desc", "file_name": "MEMORY.md", "content": "new memory"},
+                {"key": "review_reporter_agent", "title": "AGENT_ReviewReporter.md", "description": "desc", "file_name": "AGENT_ReviewReporter.md", "content": "new reporter"},
+                {"key": "soul_core", "title": "SOUL.md", "description": "desc", "file_name": "SOUL.md", "content": "core soul"},
             ],
         }
 
@@ -86,41 +82,37 @@ def test_update_agent_assets_round_trip(monkeypatch, tmp_path):
 
     with TestClient(app) as client:
         response = client.put(
-            "/api/settings/agent-assets/chief_review",
+            "/api/settings/agent-assets/review_kernel",
             json={
                 "items": [
-                    {"key": "agent", "content": "new agent"},
-                    {"key": "memory", "content": "new memory"},
+                    {"key": "review_reporter_agent", "content": "new reporter"},
                 ],
             },
         )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["items"][0]["content"] == "new agent"
-    assert payload["items"][2]["content"] == "new memory"
+    assert payload["items"][0]["content"] == "new reporter"
 
 
-def test_build_agent_runtime_prompt_includes_agent_soul_memory(monkeypatch, tmp_path):
+def test_load_agent_runtime_bundle_uses_review_kernel_files(monkeypatch, tmp_path):
     _clear_backend_modules()
     agent_asset_service = importlib.import_module("services.agent_asset_service")
-    ai_prompt_service = importlib.import_module("services.ai_prompt_service")
 
-    root = tmp_path / "agents"
-    agent_dir = root / "chief_review"
-    agent_dir.mkdir(parents=True)
-    (agent_dir / "AGENTS.md").write_text("# AGENT\nagent rules\n", encoding="utf-8")
-    (agent_dir / "SOUL.md").write_text("# SOUL\nsoul rules\n", encoding="utf-8")
-    (agent_dir / "MEMORY.md").write_text("# MEMORY\nmemory notes\n", encoding="utf-8")
+    root = tmp_path / "review_kernel"
+    root.mkdir(parents=True)
+    (root / "SOUL.md").write_text("# SOUL\ncore soul\n", encoding="utf-8")
+    (root / "AGENT_PageClassifier.md").write_text("# AGENT\npage\n", encoding="utf-8")
+    (root / "SOUL_DELTA_PageClassifier.md").write_text("# DELTA\npage\n", encoding="utf-8")
+    (root / "AGENT_SemanticAugmentor.md").write_text("# AGENT\nsemantic\n", encoding="utf-8")
+    (root / "SOUL_DELTA_SemanticAugmentor.md").write_text("# DELTA\nsemantic\n", encoding="utf-8")
+    (root / "AGENT_ReviewReporter.md").write_text("# AGENT\nreporter\n", encoding="utf-8")
+    (root / "SOUL_DELTA_ReviewReporter.md").write_text("# DELTA\nreporter\n", encoding="utf-8")
+    (root / "AGENT_ReviewQA.md").write_text("# AGENT\nqa\n", encoding="utf-8")
+    (root / "SOUL_DELTA_ReviewQA.md").write_text("# DELTA\nqa\n", encoding="utf-8")
 
     monkeypatch.setattr(agent_asset_service, "AGENTS_ROOT", root)
 
-    prompt = ai_prompt_service.build_agent_runtime_prompt(
-        "chief_review",
-        extra_sections=["# EXTRA\nextra context"],
-    )
-
-    assert "# AGENT" in prompt
-    assert "# SOUL" in prompt
-    assert "# MEMORY" in prompt
-    assert "# EXTRA" in prompt
+    bundle = agent_asset_service.load_agent_asset_bundle("review_kernel")
+    assert "reporter" in bundle.agent_markdown
+    assert "core soul" in bundle.soul_markdown

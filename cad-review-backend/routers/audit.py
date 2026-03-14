@@ -21,8 +21,6 @@ from models import (
     AuditRun,
     AuditRunEvent,
     AuditTask,
-    SheetContext,
-    SheetEdge,
     AuditIssueDrawing,
     DrawingAnnotation,
     FeedbackSample,
@@ -1218,117 +1216,6 @@ def get_audit_tasks(
     return tasks
 
 
-def _map_worker_kind_to_preview_task_type(worker_kind: str) -> str:
-    normalized = str(worker_kind or "").strip()
-    if normalized == "index_reference":
-        return "index"
-    if normalized == "material_semantic_consistency":
-        return "material"
-    return "dimension"
-
-
-def _plan_tasks_with_chief_review_preview(project_id: str, audit_version: int, db) -> Dict[str, Any]:  # noqa: ANN001
-    from services.context_service import build_sheet_contexts
-    from services.audit_runtime.chief_review_planner import plan_chief_review_hypotheses
-    from services.audit_runtime.chief_review_session import ChiefReviewSession
-    from services.audit_runtime.sheet_graph_builder import build_sheet_graph
-    from services.chief_review_memory_service import load_project_memory
-
-    context_summary = build_sheet_contexts(project_id, db)
-    contexts = (
-        db.query(SheetContext)
-        .filter(
-            SheetContext.project_id == project_id,
-            SheetContext.status == "ready",
-        )
-        .all()
-    )
-    edges = db.query(SheetEdge).filter(SheetEdge.project_id == project_id).all()
-
-    sheet_graph = build_sheet_graph(sheet_contexts=contexts, sheet_edges=edges)
-    memory = load_project_memory(
-        db,
-        project_id=project_id,
-        audit_version=audit_version,
-    )
-    planner_result = plan_chief_review_hypotheses(
-        project_id=project_id,
-        audit_version=audit_version,
-        memory=memory,
-        sheet_graph=sheet_graph,
-    )
-    chief_session = ChiefReviewSession(project_id=project_id, audit_version=audit_version)
-    worker_tasks = chief_session.plan_worker_tasks(
-        memory={**memory, "active_hypotheses": planner_result.items}
-    )
-
-    db.query(AuditTask).filter(
-        AuditTask.project_id == project_id,
-        AuditTask.audit_version == audit_version,
-    ).delete(synchronize_session=False)
-
-    audit_tasks: List[AuditTask] = []
-    summary = {
-        "total": 0,
-        "index_tasks": 0,
-        "dimension_tasks": 0,
-        "material_tasks": 0,
-    }
-    for item in worker_tasks:
-        task_type = _map_worker_kind_to_preview_task_type(item.worker_kind)
-        priority = item.context.get("priority")
-        try:
-            resolved_priority = max(1, min(5, int(round(float(priority)))))
-        except (TypeError, ValueError):
-            resolved_priority = 3
-        target_sheet_no = item.target_sheet_nos[0] if item.target_sheet_nos else None
-        audit_tasks.append(
-            AuditTask(
-                project_id=project_id,
-                audit_version=audit_version,
-                task_type=task_type,
-                source_sheet_no=item.source_sheet_no or None,
-                target_sheet_no=target_sheet_no,
-                priority=resolved_priority,
-                status="pending",
-                trace_json=_json.dumps(
-                    {
-                        "planner": "chief_review_preview",
-                        "worker_kind": item.worker_kind,
-                        "hypothesis_id": item.hypothesis_id,
-                        "execution_mode": item.context.get("execution_mode"),
-                        "skill_id": item.context.get("skill_id"),
-                        "session_key": item.session_key,
-                        "evidence_selection_policy": item.evidence_selection_policy,
-                        "prompt_source": planner_result.meta.get("prompt_source"),
-                    },
-                    ensure_ascii=False,
-                ),
-            )
-        )
-        summary["total"] += 1
-        if task_type == "index":
-            summary["index_tasks"] += 1
-        elif task_type == "material":
-            summary["material_tasks"] += 1
-        else:
-            summary["dimension_tasks"] += 1
-
-    if audit_tasks:
-        db.add_all(audit_tasks)
-    db.commit()
-    return {
-        "success": True,
-        "audit_version": audit_version,
-        "context_summary": context_summary,
-        "relationship_summary": {
-            "discovered": len(edges),
-            "source": "chief_review_preview",
-        },
-        "task_summary": summary,
-    }
-
-
 @router.post("/projects/{project_id}/audit/tasks/plan")
 def plan_audit_tasks(
     project_id: str,
@@ -1343,64 +1230,27 @@ def plan_audit_tasks(
         raise HTTPException(status_code=404, detail="项目不存在")
 
     from services.audit_runtime_service import get_next_audit_version
-    from services.audit_runtime_service import resolve_runtime_pipeline_mode
 
     audit_version = (
         version if version is not None else get_next_audit_version(project_id, db)
     )
-    runtime_mode = resolve_runtime_pipeline_mode()
-    if runtime_mode == "chief_review":
-        return _plan_tasks_with_chief_review_preview(project_id, audit_version, db)
-    if runtime_mode == "review_kernel_v1":
-        return {
-            "success": True,
-            "audit_version": audit_version,
-            "context_summary": {
-                "mode": "review_kernel_v1",
-                "message": "新审图内核按运行时动态切片，不再预生成 AuditTask 图",
-            },
-            "relationship_summary": {
-                "discovered": 0,
-                "source": "review_kernel_runtime",
-            },
-            "task_summary": {
-                "total": 0,
-                "index_tasks": 0,
-                "material_tasks": 0,
-                "dimension_tasks": 0,
-            },
-        }
-
-    from services.audit.relationship_discovery import (
-        discover_relationships,
-        discover_relationships_v2,
-        save_ai_edges,
-    )
-    from services.context_service import build_sheet_contexts
-    from services.task_planner_service import build_audit_tasks
-
-    context_summary = build_sheet_contexts(project_id, db)
-    use_v2 = str(os.getenv("AUDIT_ORCHESTRATOR_V2_ENABLED", "")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    ai_relationships = (
-        discover_relationships_v2(project_id, db, audit_version=audit_version)
-        if use_v2
-        else discover_relationships(project_id, db, audit_version=audit_version)
-    )
-    relationship_count = save_ai_edges(project_id, ai_relationships, db)
-    task_summary = build_audit_tasks(project_id, audit_version, db)
     return {
         "success": True,
         "audit_version": audit_version,
-        "context_summary": context_summary,
-        "relationship_summary": {
-            "discovered": relationship_count,
+        "context_summary": {
+            "mode": "review_kernel_v1",
+            "message": "新审图内核按运行时动态切片，不再预生成 AuditTask 图",
         },
-        "task_summary": task_summary,
+        "relationship_summary": {
+            "discovered": 0,
+            "source": "review_kernel_runtime",
+        },
+        "task_summary": {
+            "total": 0,
+            "index_tasks": 0,
+            "material_tasks": 0,
+            "dimension_tasks": 0,
+        },
     }
 
 
@@ -1525,7 +1375,6 @@ def stop_audit(project_id: str, db: Session = Depends(get_db)):
         return {"success": True, "message": "当前没有运行中的审核任务"}
 
     from services.audit_runtime.cancel_registry import request_cancel
-    from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
 
     audit_version = running_run.audit_version
     request_cancel(project_id)
@@ -1534,16 +1383,6 @@ def stop_audit(project_id: str, db: Session = Depends(get_db)):
     running_run.error = "用户手动停止"
     running_run.updated_at = datetime.now()
     db.commit()
-
-    runner = ProjectAuditAgentRunner.get_existing(
-        project_id,
-        audit_version=audit_version,
-    )
-    if runner is not None:
-        try:
-            runner.cancel_active_turns()
-        except Exception:
-            logger.exception("停止审核时取消活跃 Runner 调用失败: project=%s version=%s", project_id, audit_version)
 
     sync_result = _finalize_stopped_audit_version_cleanup(
         project_id,
@@ -1583,7 +1422,6 @@ def _finalize_stopped_audit_version_cleanup(
     wait_timeout_seconds: float,
 ) -> Optional[Dict[str, object]]:
     from services.audit_runtime.cancel_registry import clear_cancel_request
-    from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
     from services.audit_runtime_service import _clear_running, wait_for_project_stop
     from services.cache_service import (
         recalculate_project_status,
@@ -1600,7 +1438,6 @@ def _finalize_stopped_audit_version_cleanup(
         if project is None:
             _clear_running(project_id)
             clear_cancel_request(project_id)
-            ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
             return {
                 "success": True,
                 "message": "审核已停止，但项目已不存在",
@@ -1632,7 +1469,6 @@ def _finalize_stopped_audit_version_cleanup(
 
     _clear_running(project_id)
     clear_cancel_request(project_id)
-    ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
     return {
         "success": True,
         "message": "当前审核已终止并清理完成",
@@ -1655,7 +1491,6 @@ def _run_stopped_audit_version_cleanup(project_id: str, audit_version: int) -> N
         )
         if result is None:
             from services.audit_runtime.cancel_registry import clear_cancel_request
-            from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
             from services.audit_runtime_service import _clear_running
 
             logger.warning(
@@ -1665,7 +1500,6 @@ def _run_stopped_audit_version_cleanup(project_id: str, audit_version: int) -> N
             )
             _clear_running(project_id)
             clear_cancel_request(project_id)
-            ProjectAuditAgentRunner.drop(project_id, audit_version=audit_version)
     except Exception:
         logger.exception(
             "停止审核后台收尾失败: project=%s version=%s",

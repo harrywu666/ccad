@@ -90,28 +90,6 @@ export interface AuditEventsResponse {
   next_since_id?: number | null;
 }
 
-export interface AIPromptStage {
-  stage_key: string;
-  title: string;
-  description: string;
-  call_site: string;
-  prompt_source: 'legacy_stage_template';
-  lifecycle: string;
-  replacement?: string | null;
-  is_primary_runtime_source: boolean;
-  system_prompt: string;
-  user_prompt: string;
-  default_system_prompt: string;
-  default_user_prompt: string;
-  is_overridden: boolean;
-  placeholders: string[];
-  updated_at?: string | null;
-}
-
-export interface AIPromptStagesResponse {
-  stages: AIPromptStage[];
-}
-
 export interface AgentAssetGroupSummary {
   agent_id: string;
   title: string;
@@ -122,7 +100,7 @@ export interface AgentAssetGroupListResponse {
 }
 
 export interface AgentAssetItem {
-  key: 'agent' | 'soul' | 'memory';
+  key: string;
   title: string;
   description: string;
   file_name: string;
@@ -133,18 +111,6 @@ export interface AgentAssetsResponse {
   agent_id: string;
   title: string;
   items: AgentAssetItem[];
-}
-
-export interface ReviewWorkerSkillAsset {
-  key: string;
-  title: string;
-  description: string;
-  file_name: string;
-  content: string;
-}
-
-export interface ReviewWorkerSkillAssetsResponse {
-  items: ReviewWorkerSkillAsset[];
 }
 
 export interface SkillPackStageOption {

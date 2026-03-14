@@ -14,13 +14,23 @@ from services.review_kernel.llm_boundary import (  # noqa: E402
 
 
 def _valid_slice() -> dict:
+    candidates = [
+        {"candidate_id": "c1", "score": 0.79},
+        {"candidate_id": "c2", "score": 0.72},
+    ]
     return {
         "context_slice_id": "cs-1",
         "slice_type": "relation_disambiguation",
         "payload": {
             "logical_sheet": {"logical_sheet_id": "ls-1", "sheet_number": "A1.01"},
             "review_view": {"review_view_id": "rv-1"},
-            "candidate_relations": [{"relation_id": "ref-1", "candidate_bindings": [{"candidate_id": "c1"}]}],
+            "candidate_relations": [
+                {
+                    "relation_id": "ref-1",
+                    "candidate_bindings": candidates,
+                    "needs_llm_disambiguation": True,
+                }
+            ],
             "dimension_evidence": [
                 {
                     "display_value": 1000,

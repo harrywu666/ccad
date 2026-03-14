@@ -77,6 +77,7 @@ def _event(
             "planner_source": "review_kernel",
             **(meta or {}),
         },
+        dispatch_observer=False,
     )
 
 

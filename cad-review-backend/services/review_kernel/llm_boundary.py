@@ -50,6 +50,56 @@ def _contains_raw_dump(payload: dict[str, Any]) -> bool:
     return any(key in payload for key in raw_keys)
 
 
+def _is_close_score_gap(candidates: list[dict[str, Any]], *, threshold: float = 0.2) -> bool:
+    if len(candidates) < 2:
+        return False
+    first = float(candidates[0].get("score") or 0.0)
+    second = float(candidates[1].get("score") or 0.0)
+    return abs(first - second) < threshold
+
+
+def _has_relation_ambiguity(payload: dict[str, Any]) -> bool:
+    candidate_relations = payload.get("candidate_relations")
+    if not isinstance(candidate_relations, list):
+        return False
+    for relation in candidate_relations:
+        if not isinstance(relation, dict):
+            continue
+        candidates = relation.get("candidate_bindings")
+        if not isinstance(candidates, list) or len(candidates) < 2:
+            continue
+        if bool(relation.get("needs_llm_disambiguation")):
+            return True
+        if _is_close_score_gap(candidates):
+            return True
+    return False
+
+
+def _has_weak_assist_trigger(payload: dict[str, Any]) -> bool:
+    review_view = payload.get("review_view")
+    if isinstance(review_view, dict):
+        title_candidates = review_view.get("title_candidates")
+        if isinstance(title_candidates, list) and len(title_candidates) >= 2:
+            return True
+
+    rule_result = payload.get("rule_classification_result")
+    if isinstance(rule_result, dict):
+        confidence = rule_result.get("confidence")
+        if isinstance(confidence, (int, float)) and float(confidence) < 0.75:
+            return True
+        candidates = rule_result.get("candidates")
+        if isinstance(candidates, list) and len(candidates) >= 2:
+            return True
+
+    layout = payload.get("layout")
+    if isinstance(layout, dict):
+        title_items = layout.get("title_text_items")
+        if isinstance(title_items, list) and len(title_items) >= 2:
+            return True
+
+    return False
+
+
 def check_llm_boundary(
     *,
     stage: str,
@@ -78,12 +128,16 @@ def check_llm_boundary(
         return LlmBoundaryDecision(stage=normalized_stage, allowed=False, reason="review_view_not_ready")
 
     if normalized_stage == LLM_STAGE_WEAK_ASSIST:
+        if not _has_weak_assist_trigger(payload):
+            return LlmBoundaryDecision(stage=normalized_stage, allowed=False, reason="weak_assist_not_needed")
         return LlmBoundaryDecision(stage=normalized_stage, allowed=True, reason="ok")
 
     if normalized_stage == LLM_STAGE_DISAMBIGUATION:
         candidate_relations = payload.get("candidate_relations")
         if not isinstance(candidate_relations, list) or not candidate_relations:
             return LlmBoundaryDecision(stage=normalized_stage, allowed=False, reason="candidate_relations_missing")
+        if not _has_relation_ambiguity(payload):
+            return LlmBoundaryDecision(stage=normalized_stage, allowed=False, reason="relation_ambiguity_not_found")
         if not _has_dimension_triple(payload):
             return LlmBoundaryDecision(stage=normalized_stage, allowed=False, reason="dimension_truth_not_ready")
         return LlmBoundaryDecision(stage=normalized_stage, allowed=True, reason="ok")

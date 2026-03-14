@@ -1,7 +1,7 @@
 """
 审核运行时服务
 提供异步审核任务启动、进度查询、运行状态管理能力。
-审核流水线执行逻辑统一由 services.audit_runtime.orchestrator 提供。
+审核流水线执行逻辑统一由 services.review_kernel.orchestrator 提供。
 """
 
 from __future__ import annotations
@@ -690,15 +690,8 @@ def restart_master_agent_async(project_id: str, audit_version: int) -> Dict[str,
 
 def build_run_snapshot(run: Optional[AuditRun]) -> Dict[str, object]:
     pipeline_mode = resolve_runtime_pipeline_mode()
-    if pipeline_mode == "chief_review":
-        planner_source = "chief_agent"
-        prompt_source = "chief_agent"
-    elif pipeline_mode == "review_kernel_v1":
-        planner_source = "review_kernel"
-        prompt_source = "rule_engine"
-    else:
-        planner_source = "legacy_stage_planner"
-        prompt_source = None
+    planner_source = "review_kernel"
+    prompt_source = "rule_engine"
     task_stage = _RUN_STEP_TO_TASK_STAGE.get(str(getattr(run, "current_step", "") or "").strip()) if run else None
     if not run:
         return {
@@ -710,7 +703,7 @@ def build_run_snapshot(run: Optional[AuditRun]) -> Dict[str, object]:
             "pipeline_mode": pipeline_mode,
             "planner_source": planner_source,
             "task_stage": task_stage,
-            "prompt_source": prompt_source if pipeline_mode == "review_kernel_v1" else None,
+            "prompt_source": prompt_source,
             "skill_id": None,
             "skill_mode": None,
             "compat_mode": None,
@@ -732,11 +725,7 @@ def build_run_snapshot(run: Optional[AuditRun]) -> Dict[str, object]:
         "pipeline_mode": pipeline_mode,
         "planner_source": planner_source,
         "task_stage": task_stage,
-        "prompt_source": (
-            "chief_agent"
-            if pipeline_mode == "chief_review" and task_stage and task_stage.startswith("chief_")
-            else prompt_source
-        ),
+        "prompt_source": prompt_source,
         "skill_id": None,
         "skill_mode": None,
         "compat_mode": None,

@@ -84,42 +84,17 @@ def test_plan_audit_tasks_uses_chief_review_preview_by_default(monkeypatch, tmp_
     finally:
         db.close()
 
-    audit_router = importlib.import_module("routers.audit")
-    runtime = importlib.import_module("services.audit_runtime_service")
-
-    monkeypatch.setattr(
-        runtime,
-        "resolve_runtime_pipeline_mode",
-        lambda: "chief_review",
-    )
-    monkeypatch.setattr(
-        audit_router,
-        "_plan_tasks_with_chief_review_preview",
-        lambda project_id, audit_version, db: {
-            "success": True,
-            "audit_version": audit_version,
-            "context_summary": {"ready": 2, "pending": 0},
-            "relationship_summary": {"discovered": 1, "source": "chief_review_preview"},
-            "task_summary": {
-                "total": 3,
-                "index_tasks": 1,
-                "dimension_tasks": 1,
-                "material_tasks": 1,
-            },
-        },
-    )
-
     with TestClient(app) as client:
         response = client.post("/api/projects/proj-plan-api/audit/tasks/plan")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["relationship_summary"]["discovered"] == 1
-    assert payload["relationship_summary"]["source"] == "chief_review_preview"
-    assert payload["task_summary"]["index_tasks"] == 1
-    assert payload["task_summary"]["dimension_tasks"] == 1
-    assert payload["task_summary"]["material_tasks"] == 1
+    assert payload["relationship_summary"]["discovered"] == 0
+    assert payload["relationship_summary"]["source"] == "review_kernel_runtime"
+    assert payload["task_summary"]["index_tasks"] == 0
+    assert payload["task_summary"]["dimension_tasks"] == 0
+    assert payload["task_summary"]["material_tasks"] == 0
 
 
 def test_plan_audit_tasks_uses_v2_relationship_runner_when_flag_enabled(monkeypatch, tmp_path):
@@ -142,36 +117,11 @@ def test_plan_audit_tasks_uses_v2_relationship_runner_when_flag_enabled(monkeypa
     finally:
         db.close()
 
-    context_service = importlib.import_module("services.context_service")
-    relationship_discovery = importlib.import_module("services.audit.relationship_discovery")
-    runtime = importlib.import_module("services.audit_runtime_service")
-
-    monkeypatch.setenv("AUDIT_ORCHESTRATOR_V2_ENABLED", "1")
-    monkeypatch.setattr(
-        runtime,
-        "resolve_runtime_pipeline_mode",
-        lambda: "v2",
-    )
-    monkeypatch.setattr(
-        context_service,
-        "build_sheet_contexts",
-        lambda project_id, db: {"ready": 1, "pending": 0},
-    )
-    monkeypatch.setattr(
-        relationship_discovery,
-        "discover_relationships",
-        lambda project_id, db, audit_version=None: (_ for _ in ()).throw(
-            AssertionError("legacy runner should not be used")
-        ),
-    )
-    monkeypatch.setattr(
-        relationship_discovery,
-        "discover_relationships_v2",
-        lambda project_id, db, audit_version=None: [],
-    )
-
     with TestClient(app) as client:
         response = client.post("/api/projects/proj-plan-api-v2/audit/tasks/plan")
 
     assert response.status_code == 200
-    assert response.json()["success"] is True
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["context_summary"]["mode"] == "review_kernel_v1"
+    assert payload["relationship_summary"]["source"] == "review_kernel_runtime"

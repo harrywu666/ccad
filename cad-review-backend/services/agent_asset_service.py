@@ -1,4 +1,4 @@
-"""通用 Agent 资源读取与更新服务。"""
+"""review_kernel 资产读取与更新服务。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List
 
 
-AGENTS_ROOT = Path(__file__).resolve().parents[1] / "agents"
+AGENTS_ROOT = Path(__file__).resolve().parents[1] / "agents" / "review_kernel"
 
 
 @dataclass(frozen=True)
@@ -25,26 +25,54 @@ class AgentAssetBundle:
 
 
 AGENT_TITLES: dict[str, str] = {
-    "chief_review": "主审 Agent",
-    "runtime_guardian": "运行守护 Agent",
-    "review_worker": "副审 Worker Agent",
+    "review_kernel": "审图内核资产",
 }
 
 ASSET_DEFINITIONS: tuple[AgentAssetDefinition, ...] = (
     AgentAssetDefinition(
-        key="agent",
-        file_name="AGENTS.md",
-        description="这是 Agent 的硬边界，规定它能做什么、不能做什么、能调用哪些工具。",
-    ),
-    AgentAssetDefinition(
-        key="soul",
+        key="soul_core",
         file_name="SOUL.md",
-        description="这是 Agent 的思考气质和判断方式，决定它如何理解审图任务。",
+        description="内核共用 SOUL，统一价值观和边界。",
     ),
     AgentAssetDefinition(
-        key="memory",
-        file_name="MEMORY.md",
-        description="这是 Agent 的默认记忆模板，承载项目现场、怀疑池和经验摘要。",
+        key="page_classifier_agent",
+        file_name="AGENT_PageClassifier.md",
+        description="页面分类代理规则。",
+    ),
+    AgentAssetDefinition(
+        key="page_classifier_soul_delta",
+        file_name="SOUL_DELTA_PageClassifier.md",
+        description="页面分类代理的 SOUL 增量约束。",
+    ),
+    AgentAssetDefinition(
+        key="semantic_augmentor_agent",
+        file_name="AGENT_SemanticAugmentor.md",
+        description="语义增强代理规则。",
+    ),
+    AgentAssetDefinition(
+        key="semantic_augmentor_soul_delta",
+        file_name="SOUL_DELTA_SemanticAugmentor.md",
+        description="语义增强代理的 SOUL 增量约束。",
+    ),
+    AgentAssetDefinition(
+        key="review_reporter_agent",
+        file_name="AGENT_ReviewReporter.md",
+        description="审图结论整理代理规则。",
+    ),
+    AgentAssetDefinition(
+        key="review_reporter_soul_delta",
+        file_name="SOUL_DELTA_ReviewReporter.md",
+        description="审图结论整理代理的 SOUL 增量约束。",
+    ),
+    AgentAssetDefinition(
+        key="review_qa_agent",
+        file_name="AGENT_ReviewQA.md",
+        description="审图问答代理规则。",
+    ),
+    AgentAssetDefinition(
+        key="review_qa_soul_delta",
+        file_name="SOUL_DELTA_ReviewQA.md",
+        description="审图问答代理的 SOUL 增量约束。",
     ),
 )
 
@@ -57,14 +85,14 @@ def _agent_dir(agent_id: str) -> Path:
     normalized = str(agent_id or "").strip()
     if normalized not in AGENT_TITLES:
         raise ValueError(f"不支持的 Agent 资源: {normalized or 'empty'}")
-    return AGENTS_ROOT / normalized
+    return AGENTS_ROOT
 
 
 def _read_asset(agent_id: str, definition: AgentAssetDefinition) -> dict:
     path = _agent_dir(agent_id) / definition.file_name
     return {
         "key": definition.key,
-        "title": f"{agent_id} {definition.file_name}",
+        "title": definition.file_name,
         "description": definition.description,
         "file_name": definition.file_name,
         "content": path.read_text(encoding="utf-8"),
@@ -116,12 +144,14 @@ def update_agent_assets(agent_id: str, items: List[dict]) -> dict:
 
 
 def load_agent_asset_bundle(agent_id: str) -> AgentAssetBundle:
-    assets = get_agent_assets(agent_id)["items"]
-    mapping = {item["key"]: item["content"] for item in assets}
+    if str(agent_id or "").strip() != "review_kernel":
+        raise ValueError(f"不支持的 Agent 资源: {agent_id or 'empty'}")
+    assets = get_agent_assets("review_kernel")["items"]
+    mapping = {str(item["file_name"]).strip(): item["content"] for item in assets}
     return AgentAssetBundle(
-        agent_markdown=mapping["agent"],
-        soul_markdown=mapping["soul"],
-        memory_markdown=mapping["memory"],
+        agent_markdown=mapping.get("AGENT_ReviewReporter.md", ""),
+        soul_markdown=mapping.get("SOUL.md", ""),
+        memory_markdown="",
     )
 
 

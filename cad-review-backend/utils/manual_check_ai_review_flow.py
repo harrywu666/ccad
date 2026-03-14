@@ -29,7 +29,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 
-RUN_MODES = ("legacy", "chief_review", "shadow_compare", "assignment_final_review")
+RUN_MODES = ("review_kernel", "legacy", "chief_review", "shadow_compare", "assignment_final_review")
 
 
 class ClientResponse:
@@ -267,12 +267,12 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
 
 
 def resolve_run_modes(run_mode: Optional[str]) -> List[str]:
-    normalized = str(run_mode or "legacy").strip().lower() or "legacy"
+    normalized = str(run_mode or "review_kernel").strip().lower() or "review_kernel"
     if normalized == "shadow_compare":
         return ["legacy", "chief_review"]
-    if normalized in {"legacy", "chief_review", "assignment_final_review"}:
+    if normalized in {"review_kernel", "legacy", "chief_review", "assignment_final_review"}:
         return [normalized]
-    return ["legacy"]
+    return ["review_kernel"]
 
 
 def _finding_signature(item: Dict[str, Any]) -> str:
@@ -378,10 +378,11 @@ def _run_mode_env(run_mode: str) -> Dict[str, Optional[str]]:
     chief_enabled = None
     legacy_pipeline_allowed = None
     forced_pipeline_mode = None
-    if normalized in {"chief_review", "assignment_final_review"}:
+    if normalized in {"review_kernel", "chief_review", "assignment_final_review"}:
         shadow_label = "shadow_assignment_final_review" if normalized == "assignment_final_review" else "shadow_chief_review"
         chief_enabled = "1"
         legacy_pipeline_allowed = "0"
+        forced_pipeline_mode = "review_kernel_v1" if normalized == "review_kernel" else None
     elif normalized == "legacy":
         shadow_label = "shadow_legacy"
         chief_enabled = "0"
@@ -797,8 +798,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--run-mode",
         choices=list(RUN_MODES),
-        default="legacy",
-        help="Audit run mode: legacy, chief_review, shadow_compare, or assignment_final_review",
+        default="review_kernel",
+        help="Audit run mode: review_kernel, legacy, chief_review, shadow_compare, or assignment_final_review",
     )
     return parser.parse_args()
 
@@ -944,28 +945,30 @@ def _run_single_check(
             return 2, report, output_path
         report["checks"]["project_lookup"] = {"ok": True}
 
-        prompts_resp = client.get("/api/settings/ai-prompts")
-        if prompts_resp.status_code != 200:
-            report["checks"]["prompt_settings"] = {
+        assets_resp = client.get("/api/settings/agent-assets/review_kernel")
+        if assets_resp.status_code != 200:
+            report["checks"]["kernel_assets"] = {
                 "ok": False,
-                "status_code": prompts_resp.status_code,
-                "detail": prompts_resp.text,
+                "status_code": assets_resp.status_code,
+                "detail": assets_resp.text,
             }
             save_report(output_path, report)
-            print(f"[ERROR] failed to load prompts, report saved: {output_path}")
+            print(f"[ERROR] failed to load review kernel assets, report saved: {output_path}")
             return 3, report, output_path
 
-        stages = prompts_resp.json().get("stages", [])
-        relationship_stage = next((s for s in stages if s.get("stage_key") == "sheet_relationship_discovery"), None)
-        planner_stage = next((s for s in stages if s.get("stage_key") == "master_task_planner"), None)
-        report["checks"]["prompt_settings"] = {
-            "ok": bool(relationship_stage and planner_stage),
-            "relationship_stage_present": bool(relationship_stage),
-            "planner_stage_present": bool(planner_stage),
-            "relationship_stage_updated_at": relationship_stage.get("updated_at") if relationship_stage else None,
-            "planner_stage_updated_at": planner_stage.get("updated_at") if planner_stage else None,
-            "relationship_prompt_preview": (relationship_stage.get("user_prompt", "")[:180] if relationship_stage else ""),
-            "planner_prompt_preview": (planner_stage.get("user_prompt", "")[:180] if planner_stage else ""),
+        asset_items = assets_resp.json().get("items", [])
+        asset_keys = {str(item.get("key") or "").strip() for item in asset_items if isinstance(item, dict)}
+        required_keys = {
+            "soul_core",
+            "page_classifier_agent",
+            "semantic_augmentor_agent",
+            "review_reporter_agent",
+            "review_qa_agent",
+        }
+        report["checks"]["kernel_assets"] = {
+            "ok": required_keys.issubset(asset_keys),
+            "required_keys": sorted(required_keys),
+            "found_keys": sorted(asset_keys),
         }
 
         try:
