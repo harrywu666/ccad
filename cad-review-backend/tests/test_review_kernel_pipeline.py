@@ -83,7 +83,7 @@ def test_review_kernel_pipeline_persists_results(monkeypatch, tmp_path):
                 project_id="proj-kernel",
                 audit_version=1,
                 status="running",
-                current_step="等待主审启动",
+                current_step="等待审图内核启动",
                 progress=0,
                 total_issues=0,
                 started_at=datetime.now(),

@@ -60,8 +60,9 @@ def _progress_message(request: RunnerTurnRequest, meta: Dict[str, Any]) -> str:
 
     prefix_map = {
         "shadow_legacy": "影子旧路径：",
-        "shadow_chief_review": "影子主审路径：",
-        "chief_review": "主审路径：",
+        "shadow_chief_review": "影子审图内核路径：",
+        "chief_review": "审图内核路径：",
+        "review_kernel_v1": "审图内核路径：",
     }
     prefix = prefix_map.get(run_mode, "")
 
@@ -81,8 +82,9 @@ def _decorate_with_run_mode(message: str, meta: Dict[str, Any]) -> str:
     run_mode = str(meta.get("run_mode") or "").strip().lower()
     prefixes = {
         "shadow_legacy": "影子旧路径：",
-        "shadow_chief_review": "影子主审路径：",
-        "chief_review": "主审路径：",
+        "shadow_chief_review": "影子审图内核路径：",
+        "chief_review": "审图内核路径：",
+        "review_kernel_v1": "审图内核路径：",
     }
     prefix = prefixes.get(run_mode)
     if not prefix:

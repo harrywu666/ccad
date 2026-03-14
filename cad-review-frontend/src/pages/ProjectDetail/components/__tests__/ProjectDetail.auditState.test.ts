@@ -45,7 +45,7 @@ describe('ProjectDetail audit state helpers', () => {
       project_id: 'proj-1',
       status: 'auditing',
       audit_version: 7,
-      current_step: '主审复核冲突结果',
+      current_step: '审图内核复核冲突结果',
       progress: 92,
       total_issues: 2,
       run_status: 'running',
@@ -58,7 +58,7 @@ describe('ProjectDetail audit state helpers', () => {
     };
     const organizerStatus: AuditStatus = {
       ...finalReviewStatus,
-      current_step: '主审完成结果收束',
+      current_step: '审图内核完成结果收束',
       progress: 98,
     };
 

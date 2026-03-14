@@ -74,7 +74,10 @@ export function isChiefAuditEvent(event: AuditEvent): boolean {
   const message = readText(event.message);
   return (
     agentKey.includes('chief')
+    || agentKey.includes('kernel')
+    || agentName.includes('审图内核')
     || agentName.includes('主审')
+    || message.startsWith('审图内核 Agent')
     || message.startsWith('主审 Agent')
   );
 }
@@ -523,9 +526,9 @@ export default function AuditLogsPage() {
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 xl:grid-cols-2">
           <section className="flex min-h-[300px] min-w-0 flex-col border border-border bg-white">
             <header className="border-b border-border px-3 py-2">
-              <h2 className="text-[14px] font-semibold">主审</h2>
+              <h2 className="text-[14px] font-semibold">审图内核</h2>
               <p className="mt-1 text-[12px] text-muted-foreground">
-                {chief?.summary || '主审尚未开始本轮调度'}
+                {chief?.summary || '审图内核尚未开始本轮调度'}
               </p>
               <p className="text-[12px] text-muted-foreground">
                 {chief?.current_action || '等待中'}
@@ -533,7 +536,7 @@ export default function AuditLogsPage() {
             </header>
             <div data-testid="chief-scroll" className="min-h-0 flex-1 overflow-auto p-3 space-y-2">
               {chiefEvents.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground">暂无主审输出。</p>
+                <p className="text-[12px] text-muted-foreground">暂无审图内核输出。</p>
               ) : chiefEvents.map((event) => (
                 <LogEventCard key={event.id} event={event} />
               ))}
@@ -589,7 +592,7 @@ export default function AuditLogsPage() {
                 {finalReviewRuntime?.summary || '终审尚未开始'}
               </p>
               <p className="text-[12px] text-muted-foreground">
-                {finalReviewRuntime?.current_action || '等待主审提交候选问题'}
+                {finalReviewRuntime?.current_action || '等待审图内核提交候选问题'}
               </p>
               <p className="text-[12px] text-muted-foreground">
                 通过 {finalReviewRuntime?.accepted_count ?? 0} · 待补证据 {finalReviewRuntime?.needs_more_evidence_count ?? 0} · 补派 {finalReviewRuntime?.redispatch_count ?? 0}

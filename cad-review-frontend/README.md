@@ -14,9 +14,9 @@ npm run dev
   - `npm run lint`
 
 ## 运行态展示约定
-- 截至 2026-03-12，前端默认面向 `chief_review` 主路径，不再围绕 legacy 阶段式流水线组织文案。
+- 截至 2026-03-14，前端默认面向 `kernel_review` 主路径（兼容 `chief_review` 历史数据），不再围绕 legacy 阶段式流水线组织文案。
 - 审图进度弹窗现在固定展示 4 段：
-  - 主审派单
+  - 审图内核派单
   - 副审执行
   - 终审复核
   - 汇总整理
@@ -24,7 +24,7 @@ npm run dev
 - `assignment_final_review` 验收路径下，前端需要满足：
   - 1 张 assignment 只显示 1 张可见副审卡
   - 底层 skill / runner 事件只能作为卡内动作流，不能重新膨胀成新卡
-  - `final_review` 和 `organizer` 必须有独立状态区，不再混在“主审汇总”里
+  - `final_review` 和 `organizer` 必须有独立状态区，不再混在“审图内核汇总”里
 
 ## 验收相关测试
 - 运行态视图相关测试：

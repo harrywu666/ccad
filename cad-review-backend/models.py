@@ -203,7 +203,7 @@ class AuditRun(Base):
 
 
 class ProjectMemoryRecord(Base):
-    """主审运行记忆表"""
+    """审图内核运行记忆表"""
     __tablename__ = "project_memory_records"
     __table_args__ = (
         UniqueConstraint("project_id", "audit_version", name="uq_project_memory_project_version"),

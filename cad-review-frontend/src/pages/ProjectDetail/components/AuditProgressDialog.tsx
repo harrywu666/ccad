@@ -340,7 +340,7 @@ export function AuditProgressPill({
       className="inline-flex h-auto items-center gap-3 border border-border bg-secondary px-3 py-2 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-secondary/80"
     >
       <RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" />
-      <div className="min-w-0 truncate">主审调度中</div>
+      <div className="min-w-0 truncate">审图内核调度中</div>
       <span className="text-muted-foreground">{Math.round(progress)}%</span>
     </button>
   );
@@ -468,10 +468,10 @@ export default function AuditProgressDialog({
                         </div>
                         <div>
                           <DialogTitle className="text-[30px] font-semibold tracking-[-0.05em] text-foreground">
-                            主审 + 副审实时现场
+                            审图内核 + 副审实时现场
                           </DialogTitle>
                           <DialogDescription className="mt-1 max-w-[760px] text-[14px] leading-6 text-muted-foreground">
-                            {supportingText || "主审负责调度与收束，副审卡墙实时回放各个会话正在做的事。"}
+                            {supportingText || "审图内核负责调度与收束，副审卡墙实时回放各个会话正在做的事。"}
                           </DialogDescription>
                         </div>
                       </div>
@@ -534,7 +534,7 @@ export default function AuditProgressDialog({
                     <SummaryMetricCard
                       label="已派任务"
                       value={String(chief.assignedTaskCount)}
-                      hint="主审已经明确派出去的副审会话数量。"
+                      hint="审图内核已经明确派出去的副审会话数量。"
                     />
                     <SummaryMetricCard
                       label="活跃副审"
@@ -544,17 +544,17 @@ export default function AuditProgressDialog({
                     <SummaryMetricCard
                       label="最近完成"
                       value={String(chief.completedWorkerCount)}
-                      hint="已完成并回流主审的副审会话总数。"
+                      hint="已完成并回流审图内核的副审会话总数。"
                     />
                     <SummaryMetricCard
                       label="阻塞"
                       value={String(chief.blockedWorkerCount)}
-                      hint="需要重试或主审介入的会话数量。"
+                      hint="需要重试或审图内核介入的会话数量。"
                     />
                     <SummaryMetricCard
                       label="待启动"
                       value={String(chief.queuedTaskCount)}
-                      hint="主审已经规划但还没真正启动的任务。"
+                      hint="审图内核已经规划但还没真正启动的任务。"
                     />
                     <SummaryMetricCard
                       label="已发现问题"
@@ -571,7 +571,7 @@ export default function AuditProgressDialog({
                             <Sparkles className="size-4" />
                           </div>
                           <div>
-                            <h3 className="text-[18px] font-semibold text-foreground">主审总控卡</h3>
+                            <h3 className="text-[18px] font-semibold text-foreground">审图内核总控卡</h3>
                             <p className="mt-1 text-[13px] leading-6 text-muted-foreground">
                               {chief.summary}
                             </p>
@@ -628,7 +628,7 @@ export default function AuditProgressDialog({
                         />
                       )) : (
                         <div className="border border-dashed border-border bg-secondary/20 px-4 py-5 text-[13px] leading-6 text-muted-foreground">
-                          当前没有活跃副审，主审可能还在准备任务，或者上一批已经回流等待汇总。
+                          当前没有活跃副审，审图内核可能还在准备任务，或者上一批已经回流等待汇总。
                         </div>
                       )}
                     </div>

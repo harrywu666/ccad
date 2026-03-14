@@ -22,7 +22,7 @@ const buildStatus = (overrides: Partial<AuditStatus> = {}): AuditStatus => ({
   project_id: 'proj-1',
   status: 'auditing',
   audit_version: 7,
-  current_step: '主审派发副审任务',
+  current_step: '审图内核派发副审任务',
   progress: 35,
   total_issues: 3,
   run_status: 'running',
@@ -34,8 +34,8 @@ const buildStatus = (overrides: Partial<AuditStatus> = {}): AuditStatus => ({
   scope_summary: null,
   ui_runtime: {
     chief: {
-      title: '主审',
-      current_action: '主审 Agent 已派发 10 张副审任务卡',
+      title: '审图内核',
+      current_action: '审图内核 Agent 已派发 10 张副审任务卡',
       summary: '已派发 10 张副审任务卡，当前 2 个副审进行中，1 个已完成。',
       assigned_task_count: 10,
       active_worker_count: 2,
@@ -83,12 +83,12 @@ const buildStatus = (overrides: Partial<AuditStatus> = {}): AuditStatus => ({
         skill_id: 'node_host_binding',
         skill_label: '节点归属 Skill',
         task_title: 'A101 ↔ A401',
-        current_action: '等待重试或主审介入',
+        current_action: '等待重试或审图内核介入',
         status: 'blocked',
         updated_at: '2026-03-10T10:04:12',
         context: { source_sheet_no: 'A101', target_sheet_no: 'A401' },
         recent_actions: [
-          { at: '2026-03-10T10:04:12', label: '等待重试', text: '等待重试或主审介入' },
+          { at: '2026-03-10T10:04:12', label: '等待重试', text: '等待重试或审图内核介入' },
         ],
       },
     ],
@@ -138,7 +138,7 @@ describe('buildAuditProgressViewModel', () => {
       events: [],
     });
 
-    expect(viewModel.pill.label).toContain('主审');
+    expect(viewModel.pill.label).toContain('审图内核');
     expect(viewModel.pill.label).toContain('45%');
     expect(viewModel.pill.issueCount).toBe(3);
   });
@@ -157,9 +157,9 @@ describe('buildAuditProgressViewModel', () => {
           id: 1,
           step_key: 'task_planning',
           agent_key: 'chief_review_agent',
-          agent_name: '主审 Agent',
+          agent_name: '审图内核 Agent',
           event_kind: 'phase_completed',
-          message: '主审 Agent 已生成 12 张副审任务卡',
+          message: '审图内核 Agent 已生成 12 张副审任务卡',
         }),
         buildEvent({
           id: 2,

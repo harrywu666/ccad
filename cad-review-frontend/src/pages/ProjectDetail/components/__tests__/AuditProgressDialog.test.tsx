@@ -19,8 +19,8 @@ const buildEvent = (overrides: Partial<AuditEvent> = {}): AuditEvent => ({
 });
 
 const baseChief = {
-  title: '主审',
-  currentAction: '主审 Agent 已派出 15 张副审任务卡',
+  title: '审图内核',
+  currentAction: '审图内核 Agent 已派出 15 张副审任务卡',
   summary: '已形成 18 条怀疑卡，已派出 15 张副审任务卡，当前 2 张处理中。',
   assignedTaskCount: 15,
   activeWorkerCount: 2,
@@ -103,7 +103,7 @@ describe('AuditProgressDialog', () => {
       <AuditProgressDialog
         open
         progress={48}
-        headline="主审派工"
+        headline="审图内核派工"
         supportingText="系统正在持续审图"
         startedAt="2026-03-10T10:00:00"
         chief={baseChief}
@@ -125,8 +125,8 @@ describe('AuditProgressDialog', () => {
       <AuditProgressDialog
         open
         progress={48}
-        headline="主审派工"
-        supportingText="当前阶段：主审派发副审任务"
+        headline="审图内核派工"
+        supportingText="当前阶段：审图内核派发副审任务"
         startedAt="2026-03-10T10:00:00"
         chief={baseChief}
         workerWall={baseWorkerWall}
@@ -138,8 +138,8 @@ describe('AuditProgressDialog', () => {
       />,
     );
 
-    expect(screen.getByText('主审 + 副审实时现场')).toBeInTheDocument();
-    expect(screen.getByText('主审总控卡')).toBeInTheDocument();
+    expect(screen.getByText('审图内核 + 副审实时现场')).toBeInTheDocument();
+    expect(screen.getByText('审图内核总控卡')).toBeInTheDocument();
     expect(screen.getByText('副审实时卡墙')).toBeInTheDocument();
     expect(screen.getByText('终审复核')).toBeInTheDocument();
     expect(screen.getByText('汇总整理')).toBeInTheDocument();
@@ -155,8 +155,8 @@ describe('AuditProgressDialog', () => {
       <AuditProgressDialog
         open
         progress={48}
-        headline="主审派工"
-        supportingText="当前阶段：主审派发副审任务"
+        headline="审图内核派工"
+        supportingText="当前阶段：审图内核派发副审任务"
         startedAt="2026-03-10T10:00:00"
         chief={baseChief}
         workerWall={baseWorkerWall}
@@ -202,7 +202,7 @@ describe('AuditProgressDialog', () => {
       <AuditProgressDialog
         open
         progress={35}
-        headline="主审派工"
+        headline="审图内核派工"
         supportingText="系统正在持续审图"
         startedAt="2026-03-10T10:00:00"
         chief={baseChief}
@@ -240,7 +240,7 @@ describe('AuditProgressDialog', () => {
       />,
     );
 
-    expect(screen.getByText('主审调度中')).toBeInTheDocument();
+    expect(screen.getByText('审图内核调度中')).toBeInTheDocument();
     expect(screen.getByText('45%')).toBeInTheDocument();
   });
 
@@ -255,8 +255,8 @@ describe('AuditProgressDialog', () => {
       <AuditProgressDialog
         open
         progress={48}
-        headline="主审派工"
-        supportingText="当前阶段：主审派发副审任务"
+        headline="审图内核派工"
+        supportingText="当前阶段：审图内核派发副审任务"
         startedAt="2026-03-10T10:00:00"
         chief={baseChief}
         workerWall={baseWorkerWall}

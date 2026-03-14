@@ -1,4 +1,4 @@
-"""主审/副审共享的最小任务卡结构。"""
+"""审图内核/副审共享的最小任务卡结构。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ReviewAssignment(BaseModel):
-    """主审派给单个副审卡的正式任务契约。"""
+    """审图内核派给单个副审卡的正式任务契约。"""
 
     model_config = ConfigDict(extra="forbid")
 

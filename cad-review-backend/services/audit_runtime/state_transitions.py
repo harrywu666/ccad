@@ -21,14 +21,14 @@ from services.audit_runtime.result_view import (
 
 _STEP_AGENT_DEFAULTS: Dict[str, Dict[str, object]] = {
     "prepare": {
-        "agent_key": "chief_review_agent",
-        "agent_name": "主审 Agent",
+        "agent_key": "review_kernel_agent",
+        "agent_name": "审图内核 Agent",
         "event_kind": "phase_started",
         "progress_hint": 5,
     },
     "context": {
-        "agent_key": "chief_review_agent",
-        "agent_name": "主审 Agent",
+        "agent_key": "review_kernel_agent",
+        "agent_name": "审图内核 Agent",
         "event_kind": "phase_progress",
         "progress_hint": 10,
     },
@@ -39,8 +39,8 @@ _STEP_AGENT_DEFAULTS: Dict[str, Dict[str, object]] = {
         "progress_hint": 12,
     },
     "task_planning": {
-        "agent_key": "chief_review_agent",
-        "agent_name": "主审 Agent",
+        "agent_key": "review_kernel_agent",
+        "agent_name": "审图内核 Agent",
         "event_kind": "phase_progress",
         "progress_hint": 18,
     },
@@ -63,28 +63,20 @@ _STEP_AGENT_DEFAULTS: Dict[str, Dict[str, object]] = {
         "progress_hint": 78,
     },
     "report": {
-        "agent_key": "chief_review_agent",
-        "agent_name": "主审 Agent",
+        "agent_key": "review_kernel_agent",
+        "agent_name": "审图内核 Agent",
         "event_kind": "phase_completed",
         "progress_hint": 95,
     },
 }
 
-_OBSERVER_TRIGGER_EVENT_KINDS = {
-    "runner_turn_started",
-    "provider_stream_delta",
-    "output_validation_failed",
-    "runner_turn_retrying",
-    "runner_turn_deferred",
-    "runner_turn_needs_review",
-    "master_replan_requested",
-    "master_recovery_exhausted",
-}
+# review_kernel 直跑模式下关闭运行时观察器链路，仅保留事件落库。
+_OBSERVER_TRIGGER_EVENT_KINDS: set[str] = set()
 
 _AGENT_IDENTITY_MAP: Dict[str, Dict[str, str]] = {
     "master_planner_agent": {
-        "agent_key": "chief_review_agent",
-        "agent_name": "主审 Agent",
+        "agent_key": "review_kernel_agent",
+        "agent_name": "审图内核 Agent",
     },
     "relationship_review_agent": {
         "agent_key": "worker_skill_agent",
@@ -121,6 +113,7 @@ _TASK_STAGE_BY_STEP_KEY: Dict[str, str] = {
     "context": "chief_context",
     "chief_prompt": "chief_prompt_ready",
     "chief_planning": "worker_task_planning",
+    "kernel_review": "chief_recheck",
     "relationship_discovery": "worker_relationship_review",
     "index": "worker_skill_execution",
     "dimension": "worker_skill_execution",
@@ -143,17 +136,17 @@ _TASK_STAGE_BY_TURN_KIND: Dict[str, str] = {
 }
 
 _TASK_STAGE_TITLES: Dict[str, str] = {
-    "chief_prepare": "主审准备基础数据",
-    "chief_context": "主审整理图纸上下文",
-    "chief_prompt_ready": "主审装配审图资源",
-    "worker_task_planning": "主审派发副审任务",
+    "chief_prepare": "审图内核准备基础数据",
+    "chief_context": "审图内核整理图纸上下文",
+    "chief_prompt_ready": "审图内核装配审图资源",
+    "worker_task_planning": "审图内核分发复核任务",
     "worker_relationship_discovery": "节点归属 Skill 整理候选关系",
     "worker_relationship_review": "节点归属 Skill 复核候选关系",
     "worker_skill_execution": "副审 Skill 执行任务",
     "worker_single_sheet_semantic": "尺寸一致性 Skill 提取单图语义",
     "worker_pair_compare": "尺寸一致性 Skill 执行双图对比",
-    "chief_recheck": "主审复核副审分歧",
-    "finding_synthesized": "主审汇总审图结论",
+    "chief_recheck": "审图内核复核副审分歧",
+    "finding_synthesized": "审图内核汇总审图结论",
     "runtime_progress": "审图运行中",
 }
 
@@ -181,19 +174,13 @@ _SKILL_STAGE_TITLES: Dict[str, Dict[str, str]] = {
     },
 }
 
-
-class _PassiveObserverProvider:
-    async def observe_once(self, snapshot, memory):  # noqa: ANN001
-        return None
-
-
 def _resolve_event_defaults(step_key: Optional[str]) -> Dict[str, object]:
     key = (step_key or "").strip()
     if key and key in _STEP_AGENT_DEFAULTS:
         return dict(_STEP_AGENT_DEFAULTS[key])
     return {
-        "agent_key": "chief_review_agent",
-        "agent_name": "主审 Agent",
+        "agent_key": "review_kernel_agent",
+        "agent_name": "审图内核 Agent",
         "event_kind": "phase_progress",
         "progress_hint": 0,
     }
@@ -309,6 +296,8 @@ def _normalize_runtime_message(
         "规划中",
         "主审路径：主审 Agent 正在整理这次审图的基础信息",
         "主审 Agent 正在继续推进当前审图步骤",
+        "审图内核路径：审图内核 Agent 正在整理这次审图的基础信息",
+        "审图内核 Agent 正在继续推进当前审图步骤",
     }:
         return stage_title
 
@@ -335,15 +324,17 @@ def _enrich_runtime_meta(
     payload.setdefault("pipeline_mode", _resolve_pipeline_mode())
     payload.setdefault(
         "planner_source",
-        "chief_agent" if payload.get("pipeline_mode") == "chief_review" else "legacy_stage_planner",
+        "review_kernel"
+        if payload.get("pipeline_mode") in {"chief_review", "review_kernel_v1"}
+        else "legacy_stage_planner",
     )
     payload.setdefault(
         "prompt_source",
         "agent_skill"
         if str(payload.get("skill_id") or "").strip()
         else (
-            "chief_agent"
-            if identity["agent_key"] in {"chief_review_agent", "finding_synthesizer", "runtime_observer_agent"}
+            "review_kernel"
+            if identity["agent_key"] in {"chief_review_agent", "review_kernel_agent", "finding_synthesizer", "runtime_observer_agent"}
             else "legacy_stage_template"
         ),
     )
@@ -462,7 +453,7 @@ def append_run_event(
     progress_hint: Optional[int] = None,
     message: str,
     meta: Optional[Dict[str, object]] = None,
-    dispatch_observer: bool = True,
+    dispatch_observer: bool = False,
 ) -> None:
     db = SessionLocal()
     try:
@@ -622,10 +613,6 @@ def append_agent_status_report(
     report,  # noqa: ANN001
     dispatch_observer: bool = False,
 ) -> None:
-    from services.audit_runtime.runner_broadcasts import (
-        build_runner_broadcast_from_agent_report,
-    )
-
     meta = {
         "stream_layer": "internal_agent_report",
         "report_scope": "internal_only",
@@ -648,32 +635,6 @@ def append_agent_status_report(
         message=meta["batch_summary"] or f"{agent_name} 已提交一份内部工作汇报",
         meta=meta,
         dispatch_observer=dispatch_observer,
-    )
-    append_run_event(
-        project_id,
-        audit_version,
-        step_key=step_key,
-        agent_key="runner_observer_agent",
-        agent_name="Runner观察Agent",
-        event_kind="runner_broadcast",
-        progress_hint=progress_hint,
-        message=build_runner_broadcast_from_agent_report(agent_name, report),
-        meta={
-            "stream_layer": "user_facing",
-            "report_scope": "progress_only",
-            "source": "agent_status_report",
-            "source_agent_key": agent_key,
-        },
-        dispatch_observer=False,
-    )
-    _execute_agent_help_request(
-        project_id,
-        audit_version,
-        step_key=step_key,
-        progress_hint=progress_hint,
-        agent_key=agent_key,
-        agent_name=agent_name,
-        report=report,
     )
 
 
@@ -721,71 +682,8 @@ def _execute_agent_help_request(
     agent_name: str,
     report,  # noqa: ANN001
 ) -> Optional[Dict[str, Any]]:
-    requested_action_name = str(getattr(report, "runner_help_request", "") or "").strip()
-    blocking_issues = list(getattr(report, "blocking_issues", None) or [])
-    if not requested_action_name or not blocking_issues:
-        return None
-
-    from services.audit_runtime.runner_action_gate import RunnerActionGate
-
-    action_name, rewrite_reason = _rewrite_agent_help_request(requested_action_name)
-    append_run_event(
-        project_id,
-        audit_version,
-        step_key=step_key,
-        agent_key="runner_observer_agent",
-        agent_name="Runner观察Agent",
-        event_kind="runner_help_requested",
-        progress_hint=progress_hint,
-        message=f"Runner 已收到 {agent_name} 的求助请求，正在尝试处理",
-        meta={
-            "stream_layer": "internal_agent_help",
-            "report_scope": "internal_only",
-            "source_agent_key": agent_key,
-            "requested_action_name": requested_action_name,
-            "action_name": action_name,
-            "rewrite_reason": rewrite_reason,
-            "blocking_issues": blocking_issues,
-        },
-        dispatch_observer=False,
-    )
-
-    gate = RunnerActionGate(project_root=".")
-    result = gate.execute(
-        action_name,
-        context={
-            "broadcast_message": f"Runner 正在协助 {agent_name} 恢复稳定",
-            "restart_subsession": lambda: _restart_runner_subsession(
-                project_id,
-                audit_version,
-                agent_key=agent_key,
-            ),
-        },
-    )
-    append_run_event(
-        project_id,
-        audit_version,
-        step_key=step_key,
-        agent_key="runner_observer_agent",
-        agent_name="Runner观察Agent",
-        event_kind="runner_help_resolved",
-        progress_hint=progress_hint,
-        message=f"Runner 已处理 {agent_name} 的求助请求：{result.get('action_name') or action_name}",
-        meta={
-            "stream_layer": "internal_agent_help",
-            "report_scope": "internal_only",
-            "source_agent_key": agent_key,
-            "requested_action_name": requested_action_name,
-            "action_name": result.get("action_name") or action_name,
-            "allowed": bool(result.get("allowed")),
-            "executed": bool(result.get("executed")),
-            "result": result.get("result"),
-            "reason": result.get("reason", ""),
-            "rewrite_reason": rewrite_reason,
-        },
-        dispatch_observer=False,
-    )
-    return result
+    del project_id, audit_version, step_key, progress_hint, agent_key, agent_name, report
+    return None
 
 
 def _load_observer_runtime_status(project_id: str, audit_version: int) -> Dict[str, Any]:
@@ -905,28 +803,8 @@ def _restart_runner_subsession(
     *,
     agent_key: Optional[str],
 ) -> bool:
-    if not agent_key:
-        return False
-
-    from services.audit_runtime.agent_runner import ProjectAuditAgentRunner
-
-    runner = ProjectAuditAgentRunner.get_existing(project_id, audit_version=audit_version)
-    if runner is None or getattr(runner, "provider", None) is None:
-        return False
-
-    subsession = runner.get_existing_subsession(agent_key)
-    if subsession is None:
-        return False
-
-    restarted = bool(_run_async(runner.provider.restart_subsession(subsession)))
-    if restarted:
-        subsession.session_started = False
-        subsession.current_turn_status = "idle"
-        subsession.current_phase = "observer_restart_pending"
-        subsession.stall_reason = "observer_restart_subsession"
-        subsession.output_history.clear()
-        subsession.last_broadcast = None
-    return restarted
+    del project_id, audit_version, agent_key
+    return False
 
 
 def _restart_master_agent(
@@ -936,12 +814,8 @@ def _restart_master_agent(
     runtime_status: Dict[str, Any],
     recent_events: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    from dataclasses import asdict
-
-    from services.audit_runtime.project_recovery_memory import load_project_recovery_memory
     from services.audit_runtime_service import restart_master_agent_async
 
-    memory = load_project_recovery_memory(project_id, audit_version=audit_version)
     restart_result = restart_master_agent_async(project_id, audit_version)
     append_run_event(
         project_id,
@@ -951,10 +825,9 @@ def _restart_master_agent(
         agent_name="Runner观察Agent",
         event_kind="runner_master_recovery_requested",
         progress_hint=runtime_status.get("progress") or 0,
-        message="Runner 正在带着项目级记忆重启总控Agent",
+        message="Runner 正在重启审图内核",
         meta={
             "stream_layer": "internal_master_recovery",
-            "memory": asdict(memory),
             "recent_events_seen": len(recent_events),
             "restart_result": restart_result,
         },
@@ -968,10 +841,9 @@ def _restart_master_agent(
         agent_name="Runner观察Agent",
         event_kind="runner_master_recovery_succeeded",
         progress_hint=runtime_status.get("progress") or 0,
-        message="Runner 已把项目级记忆交回总控Agent，后续会继续盯它是否恢复推进",
+        message="Runner 已完成重启，等待内核继续推进",
         meta={
             "stream_layer": "internal_master_recovery",
-            "memory": asdict(memory),
             "recent_events_seen": len(recent_events),
             "restart_result": restart_result,
         },
@@ -979,7 +851,7 @@ def _restart_master_agent(
     )
     return {
         "restarted": bool(restart_result.get("restarted")),
-        "memory": asdict(memory),
+        "memory": {},
         "restart_result": restart_result,
     }
 
@@ -1005,64 +877,8 @@ def _execute_observer_action(
     recent_events: List[Dict[str, Any]],
     decision,
 ) -> Optional[Dict[str, Any]]:  # noqa: ANN001
-    if not bool(getattr(decision, "should_intervene", False)):
-        return None
-
-    from services.audit_runtime.runner_action_gate import RunnerActionGate
-
-    reason = str(getattr(decision, "reason", "") or "").strip()
-    gate = RunnerActionGate(project_root=".")
-    requested_action_name = str(getattr(decision, "suggested_action", "") or "").strip()
-    action_name, rewrite_reason = _rewrite_observer_action(
-        requested_action_name,
-        recent_events=recent_events,
-    )
-    result = gate.execute(
-        action_name,
-        context={
-            "broadcast_message": str(getattr(decision, "user_facing_broadcast", "") or "").strip(),
-            "restart_subsession": lambda: _restart_runner_subsession(
-                project_id,
-                audit_version,
-                agent_key=_find_target_agent_key(recent_events),
-            ),
-            "restart_master_agent": lambda: _restart_master_agent(
-                project_id,
-                audit_version,
-                runtime_status=runtime_status,
-                recent_events=recent_events,
-            ),
-        },
-    )
-    action_label = result.get("action_name") or action_name or "observe_only"
-    executed = bool(result.get("executed"))
-    action_message = (
-        f"Runner 已执行观察动作：{action_label}"
-        if executed
-        else f"Runner 暂未执行观察动作：{action_label}"
-    )
-    append_run_event(
-        project_id,
-        audit_version,
-        step_key=runtime_status.get("current_step") or None,
-        agent_key="runner_observer_agent",
-        agent_name="Runner观察Agent",
-        event_kind="runner_observer_action",
-        progress_hint=runtime_status.get("progress") or 0,
-        message=action_message,
-        meta={
-            "stream_layer": "observer_action",
-            "action_name": result.get("action_name"),
-            "requested_action_name": requested_action_name or action_name,
-            "allowed": bool(result.get("allowed")),
-            "executed": bool(result.get("executed")),
-            "result": result.get("result"),
-            "reason": result.get("reason", ""),
-            "rewrite_reason": rewrite_reason,
-        },
-        dispatch_observer=False,
-    )
-    return result
+    del project_id, audit_version, runtime_status, recent_events, decision
+    return None
 
 
 def _dispatch_runner_observer(
@@ -1071,96 +887,8 @@ def _dispatch_runner_observer(
     *,
     event_kind: Optional[str],
 ) -> None:
-    normalized_kind = str(event_kind or "").strip()
-    if normalized_kind not in _OBSERVER_TRIGGER_EVENT_KINDS:
-        return
-
-    from services.audit_runtime.runner_observer_feed import build_observer_snapshot
-    from services.audit_runtime.runner_observer_session import ProjectRunnerObserverSession
-    from services.audit_runtime.providers.factory import build_runner_provider
-
-    runtime_status = _load_observer_runtime_status(project_id, audit_version)
-    recent_events = _load_recent_observer_events(project_id, audit_version)
-    raw_provider_mode = str(runtime_status.get("provider_mode") or "").strip() or None
-    provider_mode = normalize_provider_mode(raw_provider_mode) if raw_provider_mode else None
-    use_active_provider = bool(runtime_status.get("has_persisted_run"))
-    observer = ProjectRunnerObserverSession.get_or_create(
-        project_id,
-        audit_version=audit_version,
-        provider_mode=provider_mode,
-        provider=build_runner_provider(requested_mode=provider_mode)
-        if (use_active_provider and provider_mode)
-        else _PassiveObserverProvider(),
-    )
-    if hasattr(observer, "should_observe") and not observer.should_observe():
-        return
-    try:
-        decision = _run_async(
-            observer.observe(
-                build_observer_snapshot(
-                    project_id=project_id,
-                    audit_version=audit_version,
-                    runtime_status=runtime_status,
-                    recent_events=recent_events,
-                )
-            )
-        )
-    except NotImplementedError:
-        return
-    except Exception:
-        return
-    if not decision:
-        return
-    observer_provider = getattr(observer, "provider", None)
-    observer_provider_name = getattr(observer_provider, "provider_name", "unknown")
-
-    append_run_event(
-        project_id,
-        audit_version,
-        step_key=runtime_status.get("current_step") or None,
-        agent_key="runner_observer_agent",
-        agent_name="Runner观察Agent",
-        event_kind="runner_observer_decision",
-        progress_hint=runtime_status.get("progress") or 0,
-        message=str(getattr(decision, "summary", "") or "Runner 已更新现场判断"),
-        meta={
-            "stream_layer": "observer_reasoning",
-            "provider_name": observer_provider_name,
-            "provider_mode": provider_mode or observer_provider_name,
-            "risk_level": getattr(decision, "risk_level", ""),
-            "suggested_action": getattr(decision, "suggested_action", ""),
-            "reason": getattr(decision, "reason", ""),
-            "should_intervene": bool(getattr(decision, "should_intervene", False)),
-            "confidence": getattr(decision, "confidence", 0.0),
-        },
-        dispatch_observer=False,
-    )
-    broadcast = str(getattr(decision, "user_facing_broadcast", "") or "").strip()
-    if broadcast:
-        append_run_event(
-            project_id,
-            audit_version,
-            step_key=runtime_status.get("current_step") or None,
-            agent_key="runner_observer_agent",
-            agent_name="Runner观察Agent",
-            event_kind="runner_broadcast",
-            progress_hint=runtime_status.get("progress") or 0,
-            message=broadcast,
-            meta={
-                "stream_layer": "user_facing",
-                "source": "runner_observer",
-                "provider_name": observer_provider_name,
-                "provider_mode": provider_mode or observer_provider_name,
-            },
-            dispatch_observer=False,
-        )
-    _execute_observer_action(
-        project_id,
-        audit_version,
-        runtime_status=runtime_status,
-        recent_events=recent_events,
-        decision=decision,
-    )
+    del project_id, audit_version, event_kind
+    return
 
 
 def append_task_trace(task: AuditTask, payload: Dict[str, object]) -> None:

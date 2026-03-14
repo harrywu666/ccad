@@ -30,7 +30,6 @@ def _clear_backend_modules() -> None:
         "services.context_service",
         "services.task_planner_service",
         "services.master_planner_service",
-        "services.audit.relationship_discovery",
         "services.audit_runtime_service",
         "services.audit_runtime.orchestrator",
     )

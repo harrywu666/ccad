@@ -107,11 +107,11 @@ const BLOCKED_EVENT_KINDS = new Set(['runner_turn_deferred', 'runner_session_fai
 const COMPLETED_EVENT_KINDS = new Set(['raw_output_saved', 'output_repair_succeeded']);
 
 const HEADLINE_FLOW = [
-  { match: ['校验三线匹配', '构建图纸上下文', 'AI 分析图纸关系'], title: '主审准备' },
-  { match: ['规划审核任务图', '从任务账本恢复总控现场', '主审规划副审任务', '主审派发副审任务'], title: '主审派工' },
+  { match: ['校验三线匹配', '构建图纸上下文', 'AI 分析图纸关系'], title: '审图内核准备' },
+  { match: ['规划审核任务图', '从任务账本恢复总控现场', '审图内核规划副审任务', '审图内核派发副审任务', '主审规划副审任务', '主审派发副审任务'], title: '审图内核派工' },
   { match: ['索引核对', '尺寸核对', '材料核对'], title: '副审执行' },
-  { match: ['主审复核冲突结果'], title: '终审复核' },
-  { match: ['审核完成', '主审汇总完成', '主审完成结果收束', '生成报告'], title: '汇总整理' },
+  { match: ['审图内核复核冲突结果', '主审复核冲突结果'], title: '终审复核' },
+  { match: ['审核完成', '审图内核汇总完成', '审图内核完成结果收束', '主审汇总完成', '主审完成结果收束', '生成报告'], title: '汇总整理' },
 ];
 
 const WORKER_SKILL_LABELS: Record<string, string> = {
@@ -169,7 +169,7 @@ function asText(value: unknown): string {
 }
 
 function resolveHeadline(currentStep?: string | null) {
-  if (!currentStep) return '主审调度现场';
+  if (!currentStep) return '审图内核调度现场';
   const matched = HEADLINE_FLOW.find((item) => item.match.some((text) => currentStep.includes(text)));
   return matched ? matched.title : currentStep;
 }
@@ -184,8 +184,12 @@ function isChiefEvent(event: AuditEvent) {
   const agentId = asText(meta.agent_id);
   const message = asText(event.message);
   return agentKey.includes('chief')
+    || agentKey.includes('kernel')
     || agentId === 'chief_review'
+    || agentId === 'kernel_review'
+    || agentName.includes('审图内核')
     || agentName.includes('主审')
+    || message.startsWith('审图内核 Agent')
     || message.startsWith('主审 Agent');
 }
 
@@ -302,7 +306,7 @@ function resolveCurrentAction(event: AuditEvent, taskTitle: string, skillId: str
   if (eventKind === 'output_validation_failed') return '输出格式待整理';
   if (eventKind === 'output_repair_started') return '正在整理输出格式';
   if (eventKind === 'output_repair_succeeded') return '已整理成标准结果';
-  if (eventKind === 'runner_turn_deferred') return '等待重试或主审介入';
+  if (eventKind === 'runner_turn_deferred') return '等待重试或审图内核介入';
   if (eventKind === 'runner_session_failed') return '执行失败，等待重试';
   if (eventKind === 'runner_turn_cancelled') return '已被人工中断';
   if (eventKind === 'runner_broadcast') {
@@ -464,9 +468,9 @@ function buildFallbackRuntime(currentStep: string, events: AuditEvent[], totalIs
 
   const fallbackRuntime: AuditUiRuntime = {
     chief: {
-      title: '主审',
-      current_action: latestChief?.message || (currentStep ? `主审正在推进：${currentStep}` : '主审正在准备审图任务'),
-      summary: summaryParts.join('，') || '主审正在组织本轮副审调度。',
+      title: '审图内核',
+      current_action: latestChief?.message || (currentStep ? `审图内核正在推进：${currentStep}` : '审图内核正在准备审图任务'),
+      summary: summaryParts.join('，') || '审图内核正在组织本轮副审调度。',
       assigned_task_count: assignedTaskCount,
       active_worker_count: activeWorkerCount,
       completed_worker_count: completedWorkerCount,
@@ -487,9 +491,9 @@ function buildFallbackRuntime(currentStep: string, events: AuditEvent[], totalIs
 
 function normalizeChief(uiRuntime: AuditUiRuntime, totalIssues: number): ChiefCardViewModel {
   return {
-    title: uiRuntime.chief.title || '主审',
-    currentAction: uiRuntime.chief.current_action || '主审正在组织本轮调度',
-    summary: uiRuntime.chief.summary || '主审正在组织本轮副审调度。',
+    title: uiRuntime.chief.title || '审图内核',
+    currentAction: uiRuntime.chief.current_action || '审图内核正在组织本轮调度',
+    summary: uiRuntime.chief.summary || '审图内核正在组织本轮副审调度。',
     assignedTaskCount: uiRuntime.chief.assigned_task_count || 0,
     activeWorkerCount: uiRuntime.chief.active_worker_count || 0,
     completedWorkerCount: uiRuntime.chief.completed_worker_count || 0,
@@ -524,7 +528,7 @@ function buildFallbackFinalReview(
   if (currentStep.includes('收束') || currentStep.includes('汇总') || currentStep.includes('报告')) {
     return {
       current_assignment_title: currentAssignmentTitle,
-      current_action: '待终审结果已回流，主审正在收束通过项',
+      current_action: '待终审结果已回流，审图内核正在收束通过项',
       summary: '终审已完成本轮裁决，当前正在把通过项交给汇总整理。',
       accepted_count: totalIssues,
       needs_more_evidence_count: 0,
@@ -619,7 +623,7 @@ export function buildAuditProgressViewModel({
     headline: resolveHeadline(currentStep || chief.currentAction),
     supportingText: currentStep
       ? `当前阶段：${currentStep}`
-      : '主审持续派发任务，副审实时回流状态与技能动作。',
+      : '审图内核持续派发任务，副审实时回流状态与技能动作。',
     providerLabel,
     progress,
     startedAt: auditStatus?.started_at,

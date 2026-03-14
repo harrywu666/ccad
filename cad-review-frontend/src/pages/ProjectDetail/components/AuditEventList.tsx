@@ -269,7 +269,7 @@ export default function AuditEventList({
       return (
         <div className="flex min-h-[280px] items-center justify-center px-6 text-center text-[13px] leading-7 text-muted-foreground">
           {viewMode === 'summary'
-            ? '主审或副审一有关键动作，这里就会继续往下滚动。'
+            ? '审图内核或副审一有关键动作，这里就会继续往下滚动。'
             : '这里展示原始模型流，用来查卡顿、重试和输出收束。'}
         </div>
       );

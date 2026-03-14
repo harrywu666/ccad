@@ -42,7 +42,7 @@ def _resolve_agent_role(event: AuditRunEvent, meta: Dict[str, Any]) -> str:
         return explicit
     agent_key = str(getattr(event, "agent_key", "") or "").strip().lower()
     agent_name = str(getattr(event, "agent_name", "") or "").strip()
-    if "chief" in agent_key or "主审" in agent_name:
+    if "chief" in agent_key or "kernel" in agent_key or "主审" in agent_name or "审图内核" in agent_name:
         return "chief"
     if "observer" in agent_key or "观察" in agent_name:
         return "observer"

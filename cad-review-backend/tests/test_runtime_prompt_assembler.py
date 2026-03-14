@@ -11,24 +11,21 @@ if str(BACKEND_DIR) not in sys.path:
 
 
 from services.audit_runtime.runtime_prompt_assembler import (  # noqa: E402
+    assemble_agent_runtime_prompt,
     assemble_legacy_stage_prompt,
-    assemble_worker_runtime_prompt,
 )
 
 
-def test_assemble_worker_runtime_prompt_merges_agent_and_skill_markdown():
-    bundle = assemble_worker_runtime_prompt(
-        worker_kind="index_reference",
+def test_assemble_agent_runtime_prompt_uses_runtime_scope():
+    bundle = assemble_agent_runtime_prompt(
+        agent_id="review_kernel",
         task_context={"source_sheet_no": "A1-01", "target_sheet_nos": ["A4-01"]},
     )
 
-    assert "Review Worker Agent" in bundle.system_prompt
-    assert "Index Reference Worker Skill" in bundle.system_prompt
-    assert bundle.meta["prompt_source"] == "agent_skill"
-    assert bundle.meta["skill_id"] == "index_reference"
-    assert bundle.meta["skill_version"]
+    assert bundle.meta["prompt_source"] == "agent_runtime"
+    assert bundle.meta["agent_id"] == "review_kernel"
     assert bundle.meta["compatibility_only"] is False
-    assert bundle.meta["runtime_scope"] == "chief_native_worker"
+    assert bundle.meta["runtime_scope"] == "agent_runtime"
     assert "replacement" not in bundle.meta
     assert "stage_key" not in bundle.meta
     assert json.loads(bundle.user_prompt)["source_sheet_no"] == "A1-01"

@@ -7,7 +7,6 @@ import json
 from typing import Any
 
 from services.ai_prompt_service import build_agent_runtime_prompt, resolve_stage_prompt_bundle
-from services.audit_runtime.worker_skill_loader import load_worker_skill
 
 
 @dataclass(frozen=True)
@@ -49,41 +48,6 @@ def assemble_agent_runtime_prompt(
     )
 
 
-def assemble_worker_runtime_prompt(
-    *,
-    worker_kind: str,
-    task_context: dict[str, Any] | None = None,
-    agent_id: str = "review_worker",
-    memory_override: str | None = None,
-    extra_sections: list[str] | None = None,
-    extra_meta: dict[str, Any] | None = None,
-    user_prompt_override: str | None = None,
-) -> RuntimePromptBundle:
-    skill_bundle = load_worker_skill(worker_kind)
-    bundle = assemble_agent_runtime_prompt(
-        agent_id=agent_id,
-        task_context=task_context,
-        memory_override=memory_override,
-        extra_sections=[skill_bundle.skill_markdown, *(extra_sections or [])],
-        extra_meta=extra_meta,
-        prompt_source="agent_skill",
-        user_prompt_override=user_prompt_override,
-    )
-    meta = {
-        **bundle.meta,
-        "worker_kind": skill_bundle.worker_kind,
-        "skill_id": skill_bundle.worker_kind,
-        "skill_path": str(skill_bundle.skill_path),
-        "skill_version": skill_bundle.skill_version,
-        "runtime_scope": "chief_native_worker",
-    }
-    return RuntimePromptBundle(
-        system_prompt=bundle.system_prompt,
-        user_prompt=bundle.user_prompt,
-        meta=meta,
-    )
-
-
 def assemble_legacy_stage_prompt(
     *,
     stage_key: str,
@@ -119,6 +83,5 @@ __all__ = [
     "RuntimePromptBundle",
     "assemble_agent_runtime_prompt",
     "assemble_legacy_stage_prompt",
-    "assemble_worker_runtime_prompt",
     "render_legacy_stage_user_prompt",
 ]

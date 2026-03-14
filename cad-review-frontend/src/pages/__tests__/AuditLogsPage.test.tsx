@@ -42,7 +42,7 @@ const buildProject = (): Project => ({
   created_at: '2026-03-13T09:00:00',
   status: 'auditing',
   updated_at: '2026-03-13T10:00:00',
-  current_step: '主审派发副审任务',
+  current_step: '审图内核派发副审任务',
   progress: 62,
 });
 
@@ -50,7 +50,7 @@ const buildStatus = (): AuditStatus => ({
   project_id: 'proj-1',
   status: 'auditing',
   audit_version: 3,
-  current_step: '主审复核冲突结果',
+  current_step: '审图内核复核冲突结果',
   progress: 88,
   total_issues: 1,
   run_status: 'running',
@@ -62,8 +62,8 @@ const buildStatus = (): AuditStatus => ({
   scope_summary: null,
   ui_runtime: {
     chief: {
-      title: '主审',
-      current_action: '主审正在复核冲突结果',
+      title: '审图内核',
+      current_action: '审图内核正在复核冲突结果',
       summary: '已派发 1 张副审任务卡',
       assigned_task_count: 1,
       active_worker_count: 1,
@@ -83,7 +83,7 @@ const buildStatus = (): AuditStatus => ({
       updated_at: '2026-03-13T10:02:00',
     },
     organizer: {
-      current_action: '主审 Agent 已整理完成审核报告，共汇总 1 处问题',
+      current_action: '审图内核 Agent 已整理完成审核报告，共汇总 1 处问题',
       summary: '已整理 1 条最终问题。',
       accepted_issue_count: 1,
       current_section: null,
@@ -182,7 +182,7 @@ const v3FinalReviewEvent: AuditEvent = {
   level: 'success',
   step_key: 'chief_review',
   agent_key: 'chief_review_agent',
-  agent_name: '主审 Agent',
+  agent_name: '审图内核 Agent',
   event_kind: 'final_review_decision',
   progress_hint: 90,
   message: '终审完成 asg-1：accepted（llm）',
@@ -202,10 +202,10 @@ const v2ChiefEvent: AuditEvent = {
   level: 'info',
   step_key: 'task_planning',
   agent_key: 'chief_review_agent',
-  agent_name: '主审 Agent',
+  agent_name: '审图内核 Agent',
   event_kind: 'phase_completed',
   progress_hint: 18,
-  message: 'v2 主审历史输出',
+  message: 'v2 审图内核历史输出',
   created_at: '2026-03-13T08:02:00',
   meta: { actor_role: 'chief' },
 };
@@ -314,7 +314,7 @@ describe('AuditLogsPage', () => {
   it('在一个页面渲染四分区并且每区可滚动', async () => {
     renderPage();
 
-    await screen.findByText('主审');
+    await screen.findByText('审图内核');
     expect(screen.getByText('副审')).toBeInTheDocument();
     expect(screen.getByText('终审')).toBeInTheDocument();
     expect(screen.getByText('最终问题实时预览（逐条）')).toBeInTheDocument();
@@ -341,7 +341,7 @@ describe('AuditLogsPage', () => {
     const select = screen.getByTestId('version-select');
     fireEvent.change(select, { target: { value: '2' } });
 
-    await screen.findByText('v2 主审历史输出');
+    await screen.findByText('v2 审图内核历史输出');
     await screen.findByText('v2 索引问题');
     await waitFor(() => {
       expect(screen.queryByText('v3 标高不一致')).not.toBeInTheDocument();

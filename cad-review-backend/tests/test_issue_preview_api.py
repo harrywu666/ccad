@@ -31,7 +31,6 @@ def _clear_backend_modules() -> None:
         "routers.settings",
         "routers.feedback",
         "routers.skill_pack",
-        "services.audit.index_audit",
         "services.audit.issue_preview",
         "services.registration_service",
     )
@@ -898,71 +897,6 @@ def test_issue_preview_uses_pdf_text_fallback_when_dwg_anchor_mismatches(monkeyp
     assert payload["source"]["pdf_anchor"]["origin"] == "pdf_text"
     assert payload["source"]["pdf_anchor"]["confidence"] == 0.82
     assert payload["source"]["pdf_anchor"]["global_pct"] == {"x": 79.4, "y": 54.3}
-
-
-def test_index_audit_persists_source_issue_anchor_automatically(monkeypatch, tmp_path):
-    _, session_local, models = _load_test_app(monkeypatch, tmp_path)
-    _seed_project(session_local, models)
-    _seed_source_drawing(
-        session_local,
-        models,
-        drawing_id="drawing-a600-v1",
-        data_version=1,
-        png_path=_create_dummy_png(tmp_path, "source-a600-v1.png"),
-    )
-
-    source_json = tmp_path / "source-index.json"
-    source_json.write_text(
-        json.dumps(
-            {
-                "sheet_no": "A6.00",
-                "model_range": {"min": [0, 0], "max": [100, 100]},
-                "indexes": [
-                    {
-                        "index_no": "3",
-                        "target_sheet": "A06.00a",
-                        "position": [46.2, 41.6],
-                    }
-                ],
-                "title_blocks": [],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    db = session_local()
-    try:
-        db.add(
-            models.JsonData(
-                id="json-source-a600",
-                project_id="proj-preview",
-                sheet_no="A6.00",
-                json_path=str(source_json),
-                is_latest=1,
-            )
-        )
-        db.commit()
-
-        index_audit = importlib.import_module("services.audit.index_audit")
-        issues = index_audit.audit_indexes("proj-preview", 5, db)
-        assert len(issues) == 1
-
-        match = (
-            db.query(models.AuditIssueDrawing)
-            .filter(models.AuditIssueDrawing.audit_result_id == issues[0].id)
-            .filter(models.AuditIssueDrawing.match_side == "source")
-            .first()
-        )
-    finally:
-        db.close()
-
-    assert match is not None
-    assert match.drawing_id == "drawing-a600-v1"
-    assert match.drawing_data_version == 1
-    assert match.sheet_no == "A6.00"
-    assert match.index_no == "3"
-    assert json.loads(match.anchor_json)["global_pct"] == {"x": 46.2, "y": 58.4}
 
 
 def test_issue_preview_refreshes_stale_corner_anchor_from_json(monkeypatch, tmp_path):

@@ -223,7 +223,7 @@ def test_audit_status_includes_ui_runtime_snapshot(monkeypatch, tmp_path):
                 project_id="proj-status-ui-runtime",
                 audit_version=9,
                 status="running",
-                current_step="主审派发副审任务",
+                current_step="审图内核分发复核任务",
                 progress=41,
                 total_issues=4,
                 provider_mode="sdk",
@@ -238,10 +238,10 @@ def test_audit_status_includes_ui_runtime_snapshot(monkeypatch, tmp_path):
                     level="success",
                     step_key="chief_prompt",
                     agent_key="chief_review_agent",
-                    agent_name="主审 Agent",
+                    agent_name="审图内核 Agent",
                     event_kind="phase_completed",
                     progress_hint=12,
-                    message="主审 Agent 已装配本轮审图资源，生成 18 条待核对怀疑卡",
+                    message="审图内核 Agent 已装配本轮审图资源，生成 18 条待核对怀疑卡",
                     created_at=now - timedelta(minutes=6),
                 ),
                 models.AuditRunEvent(
@@ -250,10 +250,10 @@ def test_audit_status_includes_ui_runtime_snapshot(monkeypatch, tmp_path):
                     level="success",
                     step_key="task_planning",
                     agent_key="chief_review_agent",
-                    agent_name="主审 Agent",
+                    agent_name="审图内核 Agent",
                     event_kind="phase_completed",
                     progress_hint=18,
-                    message="主审 Agent 已生成 10 张副审任务卡",
+                    message="审图内核 Agent 已生成 10 张副审任务卡",
                     created_at=now - timedelta(minutes=5, seconds=30),
                 ),
                 models.AuditRunEvent(
@@ -394,7 +394,7 @@ def test_audit_status_includes_ui_runtime_snapshot(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.json()
     ui_runtime = payload["ui_runtime"]
-    assert ui_runtime["chief"]["title"] == "主审"
+    assert ui_runtime["chief"]["title"] == "审图内核"
     assert ui_runtime["chief"]["assigned_task_count"] == 10
     assert ui_runtime["chief"]["active_worker_count"] == 1
     assert ui_runtime["chief"]["completed_worker_count"] == 1
@@ -419,7 +419,7 @@ def test_audit_status_includes_ui_runtime_snapshot(monkeypatch, tmp_path):
 
     blocked = next(item for item in worker_sessions if item["status"] == "blocked")
     assert blocked["task_title"] == "候选关系 7a2185fd"
-    assert blocked["current_action"] == "等待重试或主审介入"
+    assert blocked["current_action"] == "等待重试或审图内核介入"
 
     recent_completed = ui_runtime["recent_completed"]
     assert len(recent_completed) == 1
@@ -440,7 +440,7 @@ def test_status_api_reports_one_worker_card_per_assignment_even_when_multiple_in
                 project_id="proj-status-assignment-collapsed",
                 audit_version=11,
                 status="running",
-                current_step="主审派发副审任务",
+                current_step="审图内核分发复核任务",
                 progress=52,
                 total_issues=0,
                 provider_mode="sdk",
@@ -549,7 +549,7 @@ def test_status_api_does_not_reinflate_worker_cards_when_assignment_and_legacy_e
                 project_id="proj-status-assignment-mixed",
                 audit_version=12,
                 status="running",
-                current_step="主审派发副审任务",
+                current_step="审图内核分发复核任务",
                 progress=53,
                 total_issues=0,
                 provider_mode="sdk",
@@ -656,7 +656,7 @@ def test_status_api_moves_completed_assignment_into_recent_completed(monkeypatch
                 project_id="proj-status-assignment-completed",
                 audit_version=13,
                 status="running",
-                current_step="主审派发副审任务",
+                current_step="审图内核分发复核任务",
                 progress=53,
                 total_issues=0,
                 provider_mode="sdk",
@@ -748,7 +748,7 @@ def test_status_api_exposes_final_review_and_organizer_runtime(monkeypatch, tmp_
                 project_id="proj-status-final-review",
                 audit_version=14,
                 status="running",
-                current_step="主审复核冲突结果",
+                current_step="审图内核汇总规则结果",
                 progress=92,
                 total_issues=0,
                 provider_mode="sdk",
@@ -763,7 +763,7 @@ def test_status_api_exposes_final_review_and_organizer_runtime(monkeypatch, tmp_
                     level="success",
                     step_key="chief_review",
                     agent_key="chief_review_agent",
-                    agent_name="主审 Agent",
+                    agent_name="审图内核 Agent",
                     event_kind="final_review_decision",
                     progress_hint=90,
                     message="终审完成 asg-1：accepted（llm）",
@@ -788,7 +788,7 @@ def test_status_api_exposes_final_review_and_organizer_runtime(monkeypatch, tmp_
                     level="warning",
                     step_key="chief_review",
                     agent_key="chief_review_agent",
-                    agent_name="主审 Agent",
+                    agent_name="审图内核 Agent",
                     event_kind="final_review_decision",
                     progress_hint=90,
                     message="终审完成 asg-2：needs_more_evidence（rule_fallback）",
@@ -813,10 +813,10 @@ def test_status_api_exposes_final_review_and_organizer_runtime(monkeypatch, tmp_
                     level="success",
                     step_key="done",
                     agent_key="chief_review_agent",
-                    agent_name="主审 Agent",
+                    agent_name="审图内核 Agent",
                     event_kind="phase_completed",
                     progress_hint=100,
-                    message="主审 Agent 已整理完成审核报告，共汇总 1 处问题",
+                    message="审图内核 Agent 已整理完成审核报告，共汇总 1 处问题",
                     meta_json=json.dumps(
                         {
                             "actor_role": "chief",
@@ -845,4 +845,4 @@ def test_status_api_exposes_final_review_and_organizer_runtime(monkeypatch, tmp_
     assert final_review["needs_more_evidence_count"] == 1
     assert final_review["redispatch_count"] == 0
     assert organizer["accepted_issue_count"] == 1
-    assert organizer["current_action"].startswith("主审 Agent 已整理完成审核报告")
+    assert organizer["current_action"].startswith("审图内核 Agent 已整理完成审核报告")

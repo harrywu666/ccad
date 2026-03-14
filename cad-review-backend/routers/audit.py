@@ -1317,7 +1317,7 @@ def start_audit(
         project_id=project_id,
         audit_version=new_version,
         status="running",
-        current_step="等待主审启动",
+        current_step="等待审图内核启动",
         progress=0,
         total_issues=0,
         provider_mode=provider_mode,

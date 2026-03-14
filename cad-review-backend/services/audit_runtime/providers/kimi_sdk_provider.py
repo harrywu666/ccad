@@ -16,20 +16,11 @@ from kimi_agent_sdk import ApprovalRequest, ImageURLPart, Session, TextPart, Thi
 
 from services.audit_runtime.cancel_registry import AuditCancellationRequested
 from services.audit_runtime.providers.base import BaseRunnerProvider, StreamCallback
-from services.audit_runtime.runner_observer_prompt import (
-    build_runner_observer_system_prompt,
-    build_runner_observer_user_prompt,
-)
 from services.audit_runtime.runner_types import (
     ProviderStreamEvent,
     RunnerSubsession,
     RunnerTurnRequest,
     RunnerTurnResult,
-)
-from services.audit_runtime.runner_observer_types import (
-    RunnerObserverFeedSnapshot,
-    RunnerObserverMemory,
-    observer_decision_from_text,
 )
 
 
@@ -382,22 +373,6 @@ class KimiSdkProvider(BaseRunnerProvider):
                 cls._global_limiters[key] = limiter
             return limiter
 
-    async def observe_once(
-        self,
-        snapshot: RunnerObserverFeedSnapshot,
-        memory: RunnerObserverMemory,
-    ):
-        session = await self._get_or_create_observer_session(memory)
-        prompt_input = self._build_observer_input(snapshot, memory)
-        chunks: list[str] = []
-        stream = session.prompt(prompt_input, merge_wire_messages=True)
-        async for msg in stream:
-            if self._is_text_part(msg):
-                text = getattr(msg, "text", "")
-                if text:
-                    chunks.append(text)
-        return observer_decision_from_text("".join(chunks))
-
     async def cancel(self, subsession: RunnerSubsession) -> bool:
         key = self._session_store_key(subsession)
         with self._session_lock:
@@ -448,28 +423,6 @@ class KimiSdkProvider(BaseRunnerProvider):
             self._sessions[key] = session
         return session
 
-    async def _get_or_create_observer_session(self, memory: RunnerObserverMemory):
-        key = f"observer:{memory.project_id}:{memory.audit_version}"
-        with self._session_lock:
-            session = self._sessions.get(key)
-        if session is not None:
-            return session
-
-        session = await self._session_factory(
-            work_dir=KaosPath.unsafe_from_local_path(self.work_dir),
-            yolo=self.yolo,
-        )
-        with self._session_lock:
-            existing = self._sessions.get(key)
-            if existing is not None:
-                try:
-                    await session.close()
-                except Exception:
-                    pass
-                return existing
-            self._sessions[key] = session
-        return session
-
     def _build_user_input(self, request: RunnerTurnRequest):
         system = (request.system_prompt or "").strip()
         user = (request.user_prompt or "").strip()
@@ -486,15 +439,6 @@ class KimiSdkProvider(BaseRunnerProvider):
                 )
             )
         return parts
-
-    def _build_observer_input(
-        self,
-        snapshot: RunnerObserverFeedSnapshot,
-        memory: RunnerObserverMemory,
-    ) -> str:
-        system = build_runner_observer_system_prompt()
-        user = build_runner_observer_user_prompt(snapshot, memory)
-        return f"[系统要求]\n{system}\n\n[用户任务]\n{user}"
 
     def _to_data_url(self, image: bytes) -> str:
         mime = self._detect_mime(image)

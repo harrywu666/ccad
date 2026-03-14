@@ -326,7 +326,7 @@ export default function SettingsPrompts() {
     <>
       <section className="flex items-start justify-between gap-6">
         <p className="max-w-[780px] text-[15px] leading-7 text-muted-foreground">
-          这里已经切成新内核模式，不再展示旧主审/副审/守护三套配置。你改完保存，后面新发起的审核会直接生效。
+          这里已经切成新内核模式，不再展示旧三角色配置。你改完保存，后面新发起的审核会直接生效。
         </p>
       </section>
 
